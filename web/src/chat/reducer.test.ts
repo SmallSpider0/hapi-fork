@@ -120,4 +120,49 @@ describe('reduceChatBlocks', () => {
         expect(reduced.blocks).toHaveLength(0)
         expect(reduced.latestGoal).toBeNull()
     })
+
+    it('hides historical goal success status messages but keeps actionable goal messages', () => {
+        const messages: NormalizedMessage[] = [
+            {
+                id: 'goal-active-message',
+                localId: null,
+                createdAt: 1_700_000_000_000,
+                role: 'event',
+                content: { type: 'message', message: 'Goal active' },
+                isSidechain: false
+            },
+            {
+                id: 'goal-complete-message',
+                localId: null,
+                createdAt: 1_700_000_001_000,
+                role: 'event',
+                content: { type: 'message', message: 'Goal complete' },
+                isSidechain: false
+            },
+            {
+                id: 'goal-cleared-message',
+                localId: null,
+                createdAt: 1_700_000_002_000,
+                role: 'event',
+                content: { type: 'message', message: 'Goal cleared' },
+                isSidechain: false
+            },
+            {
+                id: 'goal-actionable-message',
+                localId: null,
+                createdAt: 1_700_000_003_000,
+                role: 'event',
+                content: { type: 'message', message: 'No goal to clear' },
+                isSidechain: false
+            }
+        ] as NormalizedMessage[]
+
+        const reduced = reduceChatBlocks(messages, null)
+
+        expect(reduced.blocks).toHaveLength(1)
+        expect(reduced.blocks[0]).toMatchObject({
+            kind: 'agent-event',
+            event: { type: 'message', message: 'No goal to clear' }
+        })
+    })
 })
