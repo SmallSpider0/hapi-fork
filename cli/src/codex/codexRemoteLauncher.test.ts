@@ -22,6 +22,7 @@ const harness = vi.hoisted(() => ({
     goalSetCalls: [] as unknown[],
     goalGetCalls: [] as unknown[],
     goalClearCalls: [] as unknown[],
+    goalSetError: null as Error | null,
     goal: null as Record<string, unknown> | null,
     suppressTurnCompletion: false,
     remainingThreadSystemErrors: 0,
@@ -119,6 +120,9 @@ vi.mock('./codexAppServerClient', () => {
 
         async setThreadGoal(params?: { threadId?: string; objective?: string; status?: string }): Promise<{ goal: Record<string, unknown> }> {
             harness.goalSetCalls.push(params ?? {});
+            if (harness.goalSetError) {
+                throw harness.goalSetError;
+            }
             const threadId = params?.threadId ?? 'thread-unknown';
             harness.goal = {
                 threadId,
@@ -865,6 +869,7 @@ describe('codexRemoteLauncher', () => {
         harness.goalSetCalls = [];
         harness.goalGetCalls = [];
         harness.goalClearCalls = [];
+        harness.goalSetError = null;
         harness.goal = null;
         harness.suppressTurnCompletion = false;
         harness.startTurnMessages = [];
@@ -1103,14 +1108,38 @@ describe('codexRemoteLauncher', () => {
         ]));
     });
 
-    it('shows unsupported message when goals feature cannot be enabled', async () => {
+    it('probes goal RPCs when runtime feature enablement rejects goals', async () => {
         harness.failSetFeatureEnablement = true;
         const { session, sessionEvents } = createSessionStub(['/goal improve benchmark coverage']);
 
         const exitReason = await codexRemoteLauncher(session as never);
 
         expect(exitReason).toBe('exit');
-        expect(harness.goalSetCalls).toHaveLength(0);
+        expect(harness.goalSetCalls).toEqual([{
+            threadId: 'thread-1',
+            objective: 'improve benchmark coverage',
+            status: 'active'
+        }]);
+        expect(harness.startTurnParams).toHaveLength(0);
+        expect(sessionEvents).toContainEqual({
+            type: 'message',
+            message: 'Goal active'
+        });
+    });
+
+    it('shows unsupported message when goal RPC reports goals are disabled', async () => {
+        harness.failSetFeatureEnablement = true;
+        harness.goalSetError = new Error('goals feature is disabled');
+        const { session, sessionEvents } = createSessionStub(['/goal improve benchmark coverage']);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalSetCalls).toEqual([{
+            threadId: 'thread-1',
+            objective: 'improve benchmark coverage',
+            status: 'active'
+        }]);
         expect(harness.startTurnParams).toHaveLength(0);
         expect(sessionEvents).toContainEqual({
             type: 'message',

@@ -2308,8 +2308,12 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
             await appServerClient.setExperimentalFeatureEnablement({ enablement: { goals: true } });
             logger.debug('[Codex] goals feature enabled');
         } catch (error) {
-            supportsGoals = false;
-            logger.debug(`[Codex] failed to enable goals feature: ${errorMessage(error)}`);
+            // Newer Codex builds expose goals through the config feature flag
+            // (`features.goals`) but do not accept runtime enablement for
+            // `goals` via the app-server. Keep probing the goal RPCs; they will
+            // report "goals feature is disabled" or "method not found" if this
+            // runtime truly cannot handle goals.
+            logger.debug(`[Codex] failed to enable goals feature; will probe goal RPCs on use: ${errorMessage(error)}`);
         }
         try {
             const response = await appServerClient.listCollaborationModes();
