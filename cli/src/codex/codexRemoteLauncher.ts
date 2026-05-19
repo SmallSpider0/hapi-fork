@@ -78,31 +78,6 @@ function isContextCompactRetryableCodexError(error: string | null): boolean {
     return CONTEXT_COMPACT_RETRYABLE_ERROR_PATTERNS.some((pattern) => normalized.includes(pattern));
 }
 
-function formatGoalStatus(status: unknown): string {
-    switch (status) {
-        case 'active':
-            return 'active';
-        case 'paused':
-            return 'paused';
-        case 'budgetLimited':
-            return 'limited by budget';
-        case 'complete':
-            return 'complete';
-        default:
-            return typeof status === 'string' ? status : 'updated';
-    }
-}
-
-function formatGoalUsage(goal: ThreadGoal): string {
-    const parts: string[] = [`Goal ${formatGoalStatus(goal.status)}`];
-    if (goal.tokenBudget !== null && goal.tokenBudget !== undefined) {
-        parts.push(`${goal.tokensUsed}/${goal.tokenBudget} tokens`);
-    } else if (goal.tokensUsed > 0) {
-        parts.push(`${goal.tokensUsed} tokens`);
-    }
-    return parts.join(' · ');
-}
-
 class CodexRemoteLauncher extends RemoteLauncherBase {
     private readonly session: CodexSession;
     private readonly appServerClient: CodexAppServerClient;
@@ -2563,7 +2538,6 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         sendGoalEvent({ type: 'thread_goal_cleared', thread_id: threadId });
                         return true;
                     }
-                    sendVisibleStatus(formatGoalUsage(goal));
                     sendGoalEvent({ type: 'thread_goal_updated', thread_id: threadId, goal });
                     return true;
                 }
@@ -2573,7 +2547,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                         signal: this.abortController.signal
                     });
                     if (response.cleared) {
-                        sendVisibleStatus('Goal cleared');
+                        sendGoalEvent({ type: 'thread_goal_cleared', thread_id: threadId });
                     } else {
                         sendVisibleStatus('No goal to clear');
                     }
@@ -2589,7 +2563,7 @@ class CodexRemoteLauncher extends RemoteLauncherBase {
                     signal: this.abortController.signal
                 });
                 const goal = normalizeGoal(response.goal);
-                sendVisibleStatus(formatGoalUsage(goal));
+                sendGoalEvent({ type: 'thread_goal_updated', thread_id: threadId, goal });
             } catch (error) {
                 const detail = error instanceof Error ? error.message : String(error);
                 if (/goals feature is disabled|unsupported remote app-server request|method not found/i.test(detail)) {

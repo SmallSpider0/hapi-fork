@@ -41,6 +41,11 @@ function getLatestThreadGoal(normalized: NormalizedMessage[]): ThreadGoal | null
     return null
 }
 
+function isSilentThreadGoalEventBlock(block: ChatBlock): boolean {
+    return block.kind === 'agent-event'
+        && (block.event.type === 'thread-goal-updated' || block.event.type === 'thread-goal-cleared')
+}
+
 export function reduceChatBlocks(
     normalized: NormalizedMessage[],
     agentState: AgentState | null | undefined
@@ -130,8 +135,10 @@ export function reduceChatBlocks(
         }
     }
 
+    const visibleBlocks = rootResult.blocks.filter(block => !isSilentThreadGoalEventBlock(block))
+
     return {
-        blocks: dedupeAgentEvents(foldApiErrorEvents(rootResult.blocks)),
+        blocks: dedupeAgentEvents(foldApiErrorEvents(visibleBlocks)),
         hasReadyEvent,
         latestUsage,
         latestGoal: getLatestThreadGoal(normalized)

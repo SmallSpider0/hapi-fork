@@ -1092,7 +1092,7 @@ describe('codexRemoteLauncher', () => {
             objective: 'improve benchmark coverage',
             status: 'active'
         }]);
-        expect(sessionEvents).toContainEqual({
+        expect(sessionEvents).not.toContainEqual({
             type: 'message',
             message: 'Goal active'
         });
@@ -1121,10 +1121,36 @@ describe('codexRemoteLauncher', () => {
             status: 'active'
         }]);
         expect(harness.startTurnParams).toHaveLength(0);
-        expect(sessionEvents).toContainEqual({
+        expect(sessionEvents).not.toContainEqual({
             type: 'message',
             message: 'Goal active'
         });
+    });
+
+    it('clears a Codex goal without showing redundant status text', async () => {
+        const { session, sessionEvents, codexMessages } = createSessionStub([
+            '/goal improve benchmark coverage',
+            '/goal clear'
+        ]);
+
+        const exitReason = await codexRemoteLauncher(session as never);
+
+        expect(exitReason).toBe('exit');
+        expect(harness.goalClearCalls).toEqual([{ threadId: 'thread-1' }]);
+        expect(sessionEvents).not.toContainEqual({
+            type: 'message',
+            message: 'Goal active'
+        });
+        expect(sessionEvents).not.toContainEqual({
+            type: 'message',
+            message: 'Goal cleared'
+        });
+        expect(codexMessages).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                type: 'thread_goal_cleared',
+                thread_id: 'thread-1'
+            })
+        ]));
     });
 
     it('shows unsupported message when goal RPC reports goals are disabled', async () => {
