@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { PluginDiagnosticSchema, PluginStatusSchema } from './types'
 import { PluginManifestLiteSchema, PluginRuntimeNameSchema } from './manifest'
 import { RunnerExtensionContributionSummarySchema } from './runnerExtensions'
+import { PluginWebContributionsSchema, PluginWebContributionViewSchema } from './webDescriptors'
 
 export const PluginAdminStatusSchema = PluginStatusSchema
 export type PluginAdminStatus = z.infer<typeof PluginAdminStatusSchema>
@@ -101,12 +102,7 @@ export const PluginDetailSchema = PluginListItemSchema.extend({
             adapters: z.array(z.unknown()).optional(),
             capabilityProviders: z.array(z.unknown()).optional()
         }).strict().optional(),
-        web: z.object({
-            settingsPanels: z.array(z.unknown()).optional(),
-            newSessionFields: z.array(z.unknown()).optional(),
-            actions: z.array(z.unknown()).optional(),
-            badges: z.array(z.unknown()).optional()
-        }).strict().optional()
+        web: PluginWebContributionsSchema.optional()
     }).strict(),
     runtimeEntryPaths: z.array(z.object({
         runtime: PluginRuntimeNameSchema,
@@ -133,7 +129,8 @@ export const RunnerPluginInventorySchema = z.object({
         environmentProviders: z.array(RunnerExtensionContributionSummarySchema).default([]),
         commandResolvers: z.array(RunnerExtensionContributionSummarySchema).default([]),
         spawnHooks: z.array(RunnerExtensionContributionSummarySchema).default([])
-    }).strict().optional()
+    }).strict().optional(),
+    webContributions: z.array(PluginWebContributionViewSchema).optional()
 }).strict()
 export type RunnerPluginInventory = z.infer<typeof RunnerPluginInventorySchema>
 

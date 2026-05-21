@@ -30,8 +30,15 @@ import {
 import { SessionTypeSelector } from './SessionTypeSelector'
 import { YoloToggle } from './YoloToggle'
 import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
-import { builtinAgentDescriptors } from '@hapi/protocol/plugins'
+import { builtinAgentDescriptors, localizeWebText } from '@hapi/protocol/plugins'
 import type { AgentCapabilityProviderSnapshot } from '@hapi/protocol/plugins'
+import {
+    buildNewSessionPluginFieldPayload,
+    collectNewSessionPluginFields,
+    newSessionPluginFieldStorageKey,
+    validateNewSessionPluginFieldValues,
+    type NewSessionPluginField
+} from './pluginFields'
 
 export function NewSession(props: {
     api: ApiClient
@@ -61,6 +68,7 @@ export function NewSession(props: {
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [worktreeName, setWorktreeName] = useState('')
+    const [pluginFieldValues, setPluginFieldValues] = useState<Record<string, unknown>>({})
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const worktreeInputRef = useRef<HTMLInputElement>(null)
@@ -119,6 +127,18 @@ export function NewSession(props: {
         [agent, selectedMachine]
     )
     const selectedAgentSupportsYolo = agentSupportsYolo(selectedAgentDescriptor)
+    const newSessionPluginFields = useMemo(
+        () => collectNewSessionPluginFields(selectedMachine?.runnerState?.pluginInventory?.webContributions, agent),
+        [agent, selectedMachine]
+    )
+    const newSessionPluginFieldErrors = useMemo(
+        () => validateNewSessionPluginFieldValues(newSessionPluginFields, pluginFieldValues),
+        [newSessionPluginFields, pluginFieldValues]
+    )
+    const newSessionPluginFieldPayload = useMemo(
+        () => buildNewSessionPluginFieldPayload(newSessionPluginFields, pluginFieldValues),
+        [newSessionPluginFields, pluginFieldValues]
+    )
     useEffect(() => {
         if (agentDescriptors.some((descriptor) => descriptor.id === agent && descriptor.available !== false)) {
             return
@@ -387,7 +407,8 @@ export function NewSession(props: {
                 modelReasoningEffort: resolvedModelReasoningEffort,
                 yolo: selectedAgentSupportsYolo ? yoloMode : false,
                 sessionType,
-                worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined
+                worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
+                pluginFields: newSessionPluginFieldPayload
             })
 
             if (result.type === 'success') {
@@ -406,7 +427,7 @@ export function NewSession(props: {
         }
     }
 
-    const canCreate = Boolean(machineId && trimmedDirectory && !isFormDisabled && !missingWorktreeDirectory)
+    const canCreate = Boolean(machineId && trimmedDirectory && !isFormDisabled && !missingWorktreeDirectory && newSessionPluginFieldErrors.length === 0)
 
     return (
         <div className="flex flex-col divide-y divide-[var(--app-divider)]">
@@ -457,6 +478,13 @@ export function NewSession(props: {
                 machineId={machineId}
                 agentId={agent}
                 snapshots={selectedAgentCapabilities}
+            />
+            <NewSessionPluginFields
+                fields={newSessionPluginFields}
+                values={pluginFieldValues}
+                errors={newSessionPluginFieldErrors}
+                isDisabled={isFormDisabled}
+                onChange={(key, value) => setPluginFieldValues((current) => ({ ...current, [key]: value }))}
             />
             {agent === 'opencode' ? (
                 <OpencodeModelSelector
@@ -515,6 +543,69 @@ export function NewSession(props: {
                 onCancel={props.onCancel}
                 onCreate={handleCreate}
             />
+        </div>
+    )
+}
+
+function NewSessionPluginFields(props: {
+    fields: NewSessionPluginField[]
+    values: Record<string, unknown>
+    errors: Array<{ key: string; message: string }>
+    isDisabled: boolean
+    onChange: (key: string, value: unknown) => void
+}) {
+    if (props.fields.length === 0) {
+        return null
+    }
+    const errorByKey = new Map(props.errors.map((error) => [error.key, error.message]))
+    return (
+        <div className="space-y-3 px-3 py-3">
+            <div>
+                <div className="text-xs font-medium text-[var(--app-hint)]">Plugin fields</div>
+                <div className="mt-1 text-xs text-[var(--app-hint)]">Descriptor-provided fields are validated before the session is created.</div>
+            </div>
+            {props.fields.map((field) => {
+                const key = newSessionPluginFieldStorageKey(field)
+                const value = props.values[key] ?? field.defaultValue ?? (field.type === 'boolean' ? false : '')
+                const label = localizeWebText(field.label)
+                const description = field.description ? localizeWebText(field.description) : ''
+                const error = errorByKey.get(key)
+                return (
+                    <label key={`${field.pluginId}-${field.id}`} className="block space-y-1 text-sm">
+                        <span className="font-medium">{label}{field.required ? ' *' : ''}</span>
+                        <span className="ml-1 text-xs text-[var(--app-hint)]">{field.pluginName ?? field.pluginId}</span>
+                        {description ? <span className="block text-xs text-[var(--app-hint)]">{description}</span> : null}
+                        {field.type === 'boolean' ? (
+                            <input
+                                type="checkbox"
+                                checked={value === true}
+                                disabled={props.isDisabled}
+                                onChange={(event) => props.onChange(key, event.target.checked)}
+                                className="accent-[var(--app-link)]"
+                            />
+                        ) : field.type === 'select' ? (
+                            <select
+                                value={typeof value === 'string' ? value : ''}
+                                disabled={props.isDisabled}
+                                onChange={(event) => props.onChange(key, event.target.value)}
+                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                            >
+                                <option value="">Select…</option>
+                                {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{option.label ? localizeWebText(option.label) : option.value}</option>)}
+                            </select>
+                        ) : (
+                            <input
+                                type={field.type === 'number' ? 'number' : 'text'}
+                                value={typeof value === 'string' || typeof value === 'number' ? value : ''}
+                                disabled={props.isDisabled}
+                                onChange={(event) => props.onChange(key, event.target.value)}
+                                className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                            />
+                        )}
+                        {error ? <span className="block text-xs text-red-600">{error}</span> : null}
+                    </label>
+                )
+            })}
         </div>
     )
 }

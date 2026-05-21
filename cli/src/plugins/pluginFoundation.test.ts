@@ -294,10 +294,14 @@ describe('plugin multi-runtime schemas', () => {
                     capabilityProviders: [{ id: 'caps' }]
                 },
                 web: {
-                    settingsPanels: [{ id: 'settings' }],
-                    newSessionFields: [{ id: 'field' }],
-                    actions: [{ id: 'action' }],
-                    badges: [{ id: 'badge' }]
+                    settingsPanels: [{
+                        id: 'settings',
+                        title: 'Settings',
+                        components: [{ kind: 'text', text: 'Hello' }]
+                    }],
+                    newSessionFields: [{ id: 'field', key: 'profile', label: 'Profile' }],
+                    actions: [{ id: 'action', label: 'Reload', actionId: 'plugin.reload' }],
+                    badges: [{ id: 'badge', label: 'Ready' }]
                 }
             }
         }))

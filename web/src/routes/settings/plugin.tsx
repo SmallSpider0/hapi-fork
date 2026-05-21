@@ -10,6 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
+import { PluginDescriptorPanels, type DescriptorActionHandler } from '@/components/plugins/DescriptorRenderer'
 import { PluginTargetScopeSchema, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
@@ -314,20 +315,43 @@ export default function PluginPage() {
         navigate({ to: '/settings/plugins', replace: true })
     }
 
+    const saveConfigObject = async (config: Record<string, unknown>): Promise<void> => {
+        if (!plugin) return
+        setConfigError(null)
+        const saved = await runAction(t('settings.plugins.action.configSaved'), async () => await actions.saveConfig(plugin.id, config, target))
+        if (!saved) {
+            throw new Error(t('settings.plugins.error.title'))
+        }
+        const formatted = formatConfig(config)
+        setConfigText(formatted)
+        setInitialConfigText(formatted)
+    }
+
     const saveConfig = async () => {
         if (!plugin) return
         try {
-            const parsed = parseConfig(configText, t)
-            setConfigError(null)
-            const saved = await runAction(t('settings.plugins.action.configSaved'), async () => await actions.saveConfig(plugin.id, parsed, target))
-            if (!saved) {
-                return
-            }
-            const formatted = formatConfig(parsed)
-            setConfigText(formatted)
-            setInitialConfigText(formatted)
+            await saveConfigObject(parseConfig(configText, t))
         } catch (err) {
             setConfigError(err instanceof Error ? err.message : t('settings.plugins.config.invalidJson'))
+        }
+    }
+
+    const runDescriptorAction: DescriptorActionHandler = async (actionId) => {
+        if (!plugin) return
+        if (actionId === 'plugin.enable') {
+            setEnableDialogOpen(true)
+            return
+        }
+        if (actionId === 'plugin.disable') {
+            await disable()
+            return
+        }
+        if (actionId === 'plugin.reload') {
+            await reload()
+            return
+        }
+        if (actionId === 'plugin.delete') {
+            setDeleteDialogOpen(true)
         }
     }
 
@@ -427,6 +451,19 @@ export default function PluginPage() {
                             <SectionCard title={t('settings.plugins.detail.contributions')}>
                                 <ContributionsList plugin={plugin} t={t} />
                             </SectionCard>
+
+
+                            {plugin.contributions.web?.settingsPanels?.length ? (
+                                <SectionCard title="Plugin-provided UI" description="Rendered from declarative descriptors only; browser plugin JavaScript is not executed.">
+                                    <PluginDescriptorPanels
+                                        contributions={plugin.contributions.web}
+                                        config={plugin.config ?? {}}
+                                        disabled={actions.isPending}
+                                        onAction={runDescriptorAction}
+                                        onSaveConfig={saveConfigObject}
+                                    />
+                                </SectionCard>
+                            ) : null}
 
                             <SectionCard title={t('settings.plugins.detail.permissions')} description={t('settings.plugins.detail.permissionsDescription')}>
                                 <div className="space-y-3">

@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { PluginWebContributionsSchema } from './webDescriptors'
 
 export const HAPI_PLUGIN_MANIFEST_FILE = 'hapi.plugin.json'
 export const HAPI_PLUGIN_API_VERSION = '0.1'
@@ -48,12 +49,7 @@ const AgentContributionSchema = z.object({
     capabilityProviders: z.array(GenericContributionDescriptorSchema).optional()
 }).strict()
 
-const WebContributionSchema = z.object({
-    settingsPanels: z.array(GenericContributionDescriptorSchema).optional(),
-    newSessionFields: z.array(GenericContributionDescriptorSchema).optional(),
-    actions: z.array(GenericContributionDescriptorSchema).optional(),
-    badges: z.array(GenericContributionDescriptorSchema).optional()
-}).strict()
+const WebContributionSchema = PluginWebContributionsSchema
 
 const PluginManifestLiteBaseSchema = z.object({
     id: PluginIdSchema,
