@@ -8,6 +8,7 @@ import {
     SessionSchema
 } from './schemas'
 import { AgentIdSchema } from './plugins/agentDescriptors'
+import { AgentHistoryImportResultSchema } from './plugins/agentCapabilities'
 import type {
     DecryptedMessage,
     Machine,
@@ -186,6 +187,17 @@ export const SpawnSessionRequestSchema = z.object({
 })
 
 export type SpawnSessionRequest = z.infer<typeof SpawnSessionRequestSchema>
+
+export const AgentHistoryImportRequestSchema = z.object({
+    agentId: AgentIdSchema,
+    nativeSessionId: z.string().min(1).max(256),
+    providerId: z.string().min(1).max(128).optional()
+}).strict()
+
+export type AgentHistoryImportRequest = z.infer<typeof AgentHistoryImportRequestSchema>
+
+export const AgentHistoryImportResponseSchema = AgentHistoryImportResultSchema
+export type AgentHistoryImportResponse = z.infer<typeof AgentHistoryImportResponseSchema>
 
 export const MachineListDirectoryRequestSchema = z.object({
     path: z.string().min(1)

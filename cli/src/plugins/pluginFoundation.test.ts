@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+    AgentCapabilityProviderResultSchema,
+    AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
     PluginManifestLiteSchema,
     PluginTargetScopeSchema,
@@ -344,6 +346,30 @@ describe('plugin multi-runtime schemas', () => {
         expect(SpawnSessionRequestSchema.safeParse({
             directory: '/repo',
             agent: 'bad/agent'
+        }).success).toBe(false)
+    })
+
+    it('validates agent capability provider and history importer schemas', () => {
+        expect(AgentCapabilityProviderResultSchema.safeParse({
+            models: [{ id: 'example-large', displayName: 'Example Large', contextWindow: 200000 }],
+            permissionModes: [{ mode: 'yolo', risk: 'danger' }],
+            profiles: [{ id: 'fast', displayName: 'Fast' }],
+            sessions: [{ id: 'native-1', title: 'Native Session', importable: true }],
+            usage: [{ totalTokens: 123, costUsd: 0.02 }],
+            skills: [{ name: 'review' }],
+            slashCommands: [{ name: 'audit' }]
+        }).success).toBe(true)
+        expect(AgentCapabilityProviderResultSchema.safeParse({
+            models: [{ id: '' }]
+        }).success).toBe(false)
+        expect(AgentCapabilityProviderResultSchema.safeParse({
+            permissionModes: [{ mode: 'root' }]
+        }).success).toBe(false)
+        expect(AgentHistoryImportResultSchema.safeParse({
+            messages: [{ role: 'user', content: 'hello', createdAt: 1 }]
+        }).success).toBe(true)
+        expect(AgentHistoryImportResultSchema.safeParse({
+            messages: [{ role: 'assistant', content: 'hello' }]
         }).success).toBe(false)
     })
 

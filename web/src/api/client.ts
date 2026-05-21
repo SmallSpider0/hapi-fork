@@ -25,6 +25,7 @@ import type {
     MachineListDirectoryResponse,
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
+    AgentHistoryImportResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
@@ -574,6 +575,21 @@ export class ApiClient {
     async getMachineOpencodeModelsForCwd(machineId: string, cwd: string): Promise<OpencodeModelsResponse> {
         return await this.request<OpencodeModelsResponse>(
             `/api/machines/${encodeURIComponent(machineId)}/opencode-models?cwd=${encodeURIComponent(cwd)}`
+        )
+    }
+
+    async importAgentHistory(
+        machineId: string,
+        agentId: string,
+        nativeSessionId: string,
+        providerId?: string
+    ): Promise<AgentHistoryImportResponse> {
+        return await this.request<AgentHistoryImportResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/agents/${encodeURIComponent(agentId)}/history/import`,
+            {
+                method: 'POST',
+                body: JSON.stringify({ nativeSessionId, providerId })
+            }
         )
     }
 

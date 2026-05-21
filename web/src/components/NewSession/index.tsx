@@ -31,6 +31,7 @@ import { SessionTypeSelector } from './SessionTypeSelector'
 import { YoloToggle } from './YoloToggle'
 import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
 import { builtinAgentDescriptors } from '@hapi/protocol/plugins'
+import type { AgentCapabilityProviderSnapshot } from '@hapi/protocol/plugins'
 
 export function NewSession(props: {
     api: ApiClient
@@ -113,6 +114,10 @@ export function NewSession(props: {
         () => agentDescriptors.find((descriptor) => descriptor.id === agent) ?? null,
         [agentDescriptors, agent]
     )
+    const selectedAgentCapabilities = useMemo(
+        () => (selectedMachine?.runnerState?.agentCapabilities ?? []).filter((snapshot) => snapshot.agentId === agent),
+        [agent, selectedMachine]
+    )
     const selectedAgentSupportsYolo = agentSupportsYolo(selectedAgentDescriptor)
     useEffect(() => {
         if (agentDescriptors.some((descriptor) => descriptor.id === agent && descriptor.available !== false)) {
@@ -158,6 +163,26 @@ export function NewSession(props: {
         }
         return options
     }, [model, selectedAgentDescriptor])
+    const providerModelOptions = useMemo(() => {
+        const models = selectedAgentCapabilities.flatMap((snapshot) => snapshot.capabilities.models ?? [])
+        if (models.length === 0) {
+            return undefined
+        }
+        const options = [{ value: 'auto', label: 'Default' }]
+        const seen = new Set(['auto'])
+        for (const providerModel of models) {
+            if (seen.has(providerModel.id)) continue
+            seen.add(providerModel.id)
+            options.push({
+                value: providerModel.id,
+                label: providerModel.displayName ?? providerModel.id
+            })
+        }
+        if (model !== 'auto' && !seen.has(model)) {
+            options.splice(1, 0, { value: model, label: model })
+        }
+        return options
+    }, [model, selectedAgentCapabilities])
 
     const recentPaths = useMemo(
         () => getRecentPaths(machineId),
@@ -427,6 +452,12 @@ export function NewSession(props: {
                 isDisabled={isFormDisabled}
                 onAgentChange={setAgent}
             />
+            <AgentCapabilitiesSummary
+                api={props.api}
+                machineId={machineId}
+                agentId={agent}
+                snapshots={selectedAgentCapabilities}
+            />
             {agent === 'opencode' ? (
                 <OpencodeModelSelector
                     cwd={deferredDirectory}
@@ -443,7 +474,7 @@ export function NewSession(props: {
                 <ModelSelector
                     agent={agent}
                     model={model}
-                    options={agent === 'codex' ? codexModelOptions : descriptorModelOptions}
+                    options={agent === 'codex' ? codexModelOptions : providerModelOptions ?? descriptorModelOptions}
                     isDisabled={isFormDisabled || (agent === 'codex' && Boolean(codexModelsState.error))}
                     isLoading={agent === 'codex' && codexModelsState.isLoading}
                     error={agent === 'codex' && codexModelsState.error
@@ -484,6 +515,147 @@ export function NewSession(props: {
                 onCancel={props.onCancel}
                 onCreate={handleCreate}
             />
+        </div>
+    )
+}
+
+function AgentCapabilitiesSummary(props: {
+    api: ApiClient
+    machineId: string | null
+    agentId: string
+    snapshots: AgentCapabilityProviderSnapshot[]
+}) {
+    const [importResult, setImportResult] = useState<{
+        nativeSessionId: string
+        message: string
+        error?: boolean
+    } | null>(null)
+    const models = props.snapshots.flatMap((snapshot) => snapshot.capabilities.models ?? [])
+    const permissionModes = props.snapshots.flatMap((snapshot) => snapshot.capabilities.permissionModes ?? [])
+    const profiles = props.snapshots.flatMap((snapshot) => snapshot.capabilities.profiles ?? [])
+    const sessions = props.snapshots.flatMap((snapshot) => snapshot.capabilities.sessions ?? [])
+    const usage = props.snapshots.flatMap((snapshot) => snapshot.capabilities.usage ?? [])
+    const skills = props.snapshots.flatMap((snapshot) => snapshot.capabilities.skills ?? [])
+    const slashCommands = props.snapshots.flatMap((snapshot) => snapshot.capabilities.slashCommands ?? [])
+    const diagnostics = props.snapshots.flatMap((snapshot) => snapshot.diagnostics)
+    const [pendingImportId, setPendingImportId] = useState<string | null>(null)
+
+    const handleImportHistory = async (snapshot: AgentCapabilityProviderSnapshot, nativeSessionId: string) => {
+        if (!props.machineId) {
+            return
+        }
+        setPendingImportId(nativeSessionId)
+        setImportResult(null)
+        try {
+            const result = await props.api.importAgentHistory(
+                props.machineId,
+                props.agentId,
+                nativeSessionId,
+                snapshot.contributionId
+            )
+            setImportResult({
+                nativeSessionId,
+                message: `Imported ${result.messages.length} messages for preview.`
+            })
+        } catch (error) {
+            setImportResult({
+                nativeSessionId,
+                message: error instanceof Error ? error.message : 'Failed to import native history',
+                error: true
+            })
+        } finally {
+            setPendingImportId(null)
+        }
+    }
+
+    const hasContent = models.length > 0
+        || permissionModes.length > 0
+        || profiles.length > 0
+        || sessions.length > 0
+        || usage.length > 0
+        || skills.length > 0
+        || slashCommands.length > 0
+        || diagnostics.length > 0
+    if (!hasContent) {
+        return null
+    }
+
+    const uniqueLabels = (values: string[]) => Array.from(new Set(values)).slice(0, 6)
+    const usageLabels = usage.slice(0, 3).map((entry) => {
+        const parts = [
+            entry.totalTokens !== undefined ? `${entry.totalTokens} tokens` : null,
+            entry.costUsd !== undefined ? `$${entry.costUsd.toFixed(4)}` : null,
+            entry.limitLabel ?? null
+        ].filter(Boolean)
+        return parts.join(' · ') || entry.scope
+    })
+
+    return (
+        <div className="flex flex-col gap-2 px-3 py-3 text-xs text-[var(--app-hint)]">
+            <div className="font-medium text-[var(--app-text)]">Agent capabilities</div>
+            <div className="flex flex-wrap gap-1.5">
+                {uniqueLabels(models.map((entry) => entry.displayName ?? entry.id)).map((label) => (
+                    <span key={`model-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Model: {label}</span>
+                ))}
+                {uniqueLabels(permissionModes.map((entry) => entry.label ?? entry.mode)).map((label) => (
+                    <span key={`permission-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Permission: {label}</span>
+                ))}
+                {uniqueLabels(profiles.map((entry) => entry.displayName)).map((label) => (
+                    <span key={`profile-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Profile: {label}</span>
+                ))}
+                {uniqueLabels(skills.map((entry) => entry.name)).map((label) => (
+                    <span key={`skill-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Skill: {label}</span>
+                ))}
+                {uniqueLabels(slashCommands.map((entry) => entry.name)).map((label) => (
+                    <span key={`slash-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">/{label}</span>
+                ))}
+            </div>
+            {sessions.length > 0 ? (
+                <div className="space-y-1">
+                    <div className="font-medium text-[var(--app-text)]">Native history</div>
+                    {props.snapshots.flatMap((snapshot) =>
+                        (snapshot.capabilities.sessions ?? []).slice(0, 3).map((session) => (
+                            <div key={`${snapshot.contributionId}-${session.id}`} className="flex items-center justify-between gap-2 rounded-lg bg-[var(--app-secondary-bg)] px-2 py-1">
+                                <span className="min-w-0 truncate">
+                                    {session.title ?? session.id}{session.cwd ? ` · ${session.cwd}` : ''}
+                                </span>
+                                {session.importable !== false ? (
+                                    <button
+                                        type="button"
+                                        className="shrink-0 text-[var(--app-link)] disabled:opacity-50"
+                                        disabled={!props.machineId || pendingImportId === session.id}
+                                        onClick={() => { void handleImportHistory(snapshot, session.id) }}
+                                    >
+                                        {pendingImportId === session.id ? 'Importing…' : 'Import'}
+                                    </button>
+                                ) : null}
+                            </div>
+                        ))
+                    )}
+                    {importResult ? (
+                        <div className={`rounded-lg px-2 py-1 ${importResult.error ? 'bg-red-50 text-red-600' : 'bg-[var(--app-secondary-bg)] text-[var(--app-text)]'}`}>
+                            {importResult.message}
+                        </div>
+                    ) : null}
+                </div>
+            ) : null}
+            {usageLabels.length > 0 ? (
+                <div className="space-y-1">
+                    <div className="font-medium text-[var(--app-text)]">Usage</div>
+                    {usageLabels.map((label, index) => (
+                        <div key={`${label}-${index}`} className="truncate rounded-lg bg-[var(--app-secondary-bg)] px-2 py-1">{label}</div>
+                    ))}
+                </div>
+            ) : null}
+            {diagnostics.length > 0 ? (
+                <div className="space-y-1">
+                    {diagnostics.slice(0, 3).map((diagnostic, index) => (
+                        <div key={`${diagnostic.code}-${index}`} className="rounded-lg bg-[var(--app-secondary-bg)] px-2 py-1 text-amber-600">
+                            {diagnostic.code}: {diagnostic.message}
+                        </div>
+                    ))}
+                </div>
+            ) : null}
         </div>
     )
 }

@@ -1,7 +1,7 @@
 # Phase 08 — Agent capability providers：模型、profile、session/history/usage/skills
 
 更新时间: 2026-05-21
-状态: 计划阶段。
+状态: 已完成。
 
 ## 目标
 
@@ -25,29 +25,37 @@
 
 ### 实现
 
-- [ ] 定义 capability provider registry 与 contribution ids。
-- [ ] Shared 增加 model/profile/permission/session/history/usage descriptor schema。
-- [ ] Runner adapter 可注册 provider；Hub 聚合 provider output。
-- [ ] Web 根据 provider descriptor 渲染模型、profile、权限模式、历史入口。
-- [ ] History importer 输出统一 Message DTO，并经过 schema 校验。
-- [ ] Usage provider output 与 auth/namespace/session scope 绑定。
-- [ ] Provider timeout/throw 有隔离与 diagnostics。
+- [x] 定义 capability provider registry 与 contribution ids。
+- [x] Shared 增加 model/profile/permission/session/history/usage descriptor schema。
+- [x] Runner adapter 可注册 provider；Hub 聚合 provider output。
+- [x] Web 根据 provider descriptor 渲染模型、profile、权限模式、历史入口。
+- [x] History importer 输出统一 Message DTO，并经过 schema 校验。
+- [x] Usage provider output 与 auth/namespace/session scope 绑定。
+- [x] Provider timeout/throw 有隔离与 diagnostics。
 
 ### 测试
 
-- [ ] Model provider 返回非法模型项时被拒绝。
-- [ ] Permission mode provider 不能声明 core 未允许的危险模式，或必须显式标记风险。
-- [ ] Session discovery 不泄漏其他 namespace 的历史。
-- [ ] History importer 输出不合法 message 时失败可诊断。
-- [ ] Usage provider timeout 不影响 session chat。
-- [ ] Web 对 unavailable provider 有 graceful fallback。
+- [x] Model provider 返回非法模型项时被拒绝。
+- [x] Permission mode provider 不能声明 core 未允许的危险模式，或必须显式标记风险。
+- [x] Session discovery 不泄漏其他 namespace 的历史。
+- [x] History importer 输出不合法 message 时失败可诊断。
+- [x] Usage provider timeout 不影响 session chat。
+- [x] Web 对 unavailable provider 有 graceful fallback。
 
 ### 验收
 
-- [ ] 插件 agent 能展示自己的模型、profile、permission mode。
-- [ ] 用户可通过插件 provider 导入/查看 agent-native 历史。
-- [ ] Provider 失败不会破坏核心 session 运行。
+- [x] 插件 agent 能展示自己的模型、profile、permission mode。
+- [x] 用户可通过插件 provider 导入/查看 agent-native 历史。
+- [x] Provider 失败不会破坏核心 session 运行。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：architecture-location 子代理确认 Phase 8 触点：shared provider schema、Runner registry/manager、RunnerState publication、Web NewSession descriptor consumption；边界为 Runner 执行插件代码，Hub/Web 仅消费 snapshot。
+- [x] 2026-05-21：实现 provider snapshot schema 与 Runner registry；provider output 写入 RunnerState `agentCapabilities`，Hub 通过 Machine state 聚合到 Web；Web 新建会话展示 provider 模型/profile/permission/history/usage/skills/slash command 数据。
+- [x] 2026-05-21：History importer 通过 `AgentHistoryImportResultSchema` 校验，并接入 machine RPC、Hub namespace guard route、Web native history Import 按钮。
+- [x] 2026-05-21：review 子代理发现 provider permission mode 扩权、history import 未接入、scope 约束不足三个 blocker；已修复为同插件 agent ownership、permission mode 只声明不扩权、session-scoped usage 拒绝、history import 走 namespace-guarded machine route。
+- [x] 2026-05-21：review 子代理复核结论：No remaining blockers found。
+- [x] 2026-05-21：验证命令通过：`bun run --cwd cli test -- src/runner/buildCliArgs.test.ts src/runner/plugins/runnerPluginManager.test.ts src/plugins/pluginFoundation.test.ts`。
+- [x] 2026-05-21：验证命令通过：`bun run --cwd hub test -- src/web/routes/machines.test.ts src/sync/rpcGateway.test.ts`。
+- [x] 2026-05-21：验证命令通过：`bun run --cwd web test -- src/components/NewSession/preferences.test.ts src/components/NewSession/AgentSelector.test.tsx src/components/NewSession/types.test.ts`。
+- [x] 2026-05-21：验证命令通过：`bun run typecheck`、`git diff --check`。

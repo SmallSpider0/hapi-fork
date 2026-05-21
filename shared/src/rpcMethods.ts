@@ -36,7 +36,8 @@ export const RPC_METHODS = {
     RunnerPluginsReload: 'runner.plugins.reload',
     RunnerPluginsInstallPrepare: 'runner.plugins.install.prepare',
     RunnerPluginsInstallCommit: 'runner.plugins.install.commit',
-    RunnerPluginsDelete: 'runner.plugins.delete'
+    RunnerPluginsDelete: 'runner.plugins.delete',
+    RunnerAgentHistoryImport: 'runner.agent.history.import'
 } as const
 
 export type RpcMethod = typeof RPC_METHODS[keyof typeof RPC_METHODS]
