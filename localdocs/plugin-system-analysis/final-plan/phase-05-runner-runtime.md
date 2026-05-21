@@ -1,7 +1,7 @@
 # Phase 05 — Runner plugin runtime：Runner 本机发现、加载、热重载
 
 更新时间: 2026-05-21
-状态: 计划阶段。
+状态: 已完成。
 
 ## 目标
 
@@ -43,33 +43,34 @@ type RunnerPluginContext = {
 
 ### 实现
 
-- [ ] `cli/src/runner` 或 runner daemon 内新增 RunnerPluginManager。
-- [ ] Runner discovery/state 复用 Phase 01 helper，但数据目录按 Runner 本机解析。
-- [ ] Runner 只 import enabled + valid + compatible `runtimes.runner.entry`。
-- [ ] Runner activate 支持 async 与 Disposable lifecycle。
-- [ ] Runner reload 串行化，失败保留旧实例。
-- [ ] Runner plugin diagnostics 上报 Hub inventory cache。
-- [ ] Runner disable/delete 时 dispose active resources。
-- [ ] Runner shutdown 调用 disposables，dispose throw 不阻塞 shutdown。
-- [ ] Runner plugin logs 进入 Runner 日志并带 plugin id/machine id。
+- [x] `cli/src/runner` 或 runner daemon 内新增 RunnerPluginManager。
+- [x] Runner discovery/state 复用 Phase 01 helper，但数据目录按 Runner 本机解析。
+- [x] Runner 只 import enabled + valid + compatible `runtimes.runner.entry`。
+- [x] Runner activate 支持 async 与 Disposable lifecycle。
+- [x] Runner reload 串行化，失败保留旧实例。
+- [x] Runner plugin diagnostics 上报 Hub inventory cache。
+- [x] Runner disable/delete 时 dispose active resources。
+- [x] Runner shutdown 调用 disposables，dispose throw 不阻塞 shutdown。
+- [x] Runner plugin logs 进入 Runner 日志并带 plugin id/machine id。
 
 ### 测试
 
-- [ ] Disabled/invalid Runner plugin never imported。
-- [ ] Hub runtime-only plugin 不在 Runner import。
-- [ ] Runner runtime-only plugin 不在 Hub import。
-- [ ] Activate throw 不 crash Runner。
-- [ ] Reload failure keeps previous active Runner plugin。
-- [ ] Disable disposes Runner plugin resources。
-- [ ] Hub 聚合能看到 Runner plugin failed/active/disabled 状态。
-- [ ] Runner offline 后 Hub 状态标记 stale/offline。
+- [x] Disabled/invalid Runner plugin never imported。
+- [x] Hub runtime-only plugin 不在 Runner import。
+- [x] Runner runtime-only plugin 不在 Hub import。
+- [x] Activate throw 不 crash Runner。
+- [x] Reload failure keeps previous active Runner plugin。
+- [x] Disable disposes Runner plugin resources。
+- [x] Hub 聚合能看到 Runner plugin failed/active/disabled 状态。
+- [x] Runner offline 后 Hub 状态标记 stale/offline。
 
 ### 验收
 
-- [ ] 用户能在某台 Runner 上启用 Runner plugin，并在 Hub/Web 看到该 Runner 的 active 状态。
-- [ ] Hub 与 Runner 分机部署时，Runner plugin 文件只需要存在于 Runner 机器。
-- [ ] Runner reload 不需要重启 Hub。
+- [x] 用户能在某台 Runner 上启用 Runner plugin，并在 Hub/Web 看到该 Runner 的 active 状态。
+- [x] Hub 与 Runner 分机部署时，Runner plugin 文件只需要存在于 Runner 机器。
+- [x] Runner reload 不需要重启 Hub。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：architecture-location 子代理给出 Runner runtime 接入边界；review 子代理检查 enabled-only import、Hub-only 不导入、reload 保留旧实例、shutdown dispose race、inventory diagnostics；初审 blockers 已修复，复核结论为可以提交。
+- [x] 验证命令：`bun run --cwd cli test -- src/commands/plugins.test.ts src/plugins/pluginFoundation.test.ts src/api/apiMachine.test.ts src/runner/plugins/runnerPluginManager.test.ts`（41 passed）；`bun run --cwd hub test src/web/routes/plugins.test.ts src/plugins/pluginManager.test.ts src/sync/rpcGateway.test.ts`（25 passed）；`bun run --cwd web test -- src/hooks/mutations/usePluginActions.test.tsx src/routes/settings/index.test.tsx`（16 passed）；`bun run typecheck`；`git diff --check`。
