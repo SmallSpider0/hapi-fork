@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { PluginDiagnosticSchema, PluginStatusSchema } from './types'
 import { PluginManifestLiteSchema, PluginRuntimeNameSchema } from './manifest'
+import { RunnerExtensionContributionSummarySchema } from './runnerExtensions'
 
 export const PluginAdminStatusSchema = PluginStatusSchema
 export type PluginAdminStatus = z.infer<typeof PluginAdminStatusSchema>
@@ -127,7 +128,12 @@ export const RunnerPluginInventorySchema = z.object({
     machineId: PluginTargetMachineIdSchema,
     updatedAt: z.number(),
     plugins: z.array(PluginListItemSchema),
-    diagnostics: z.array(PluginDiagnosticViewSchema).default([])
+    diagnostics: z.array(PluginDiagnosticViewSchema).default([]),
+    extensions: z.object({
+        environmentProviders: z.array(RunnerExtensionContributionSummarySchema).default([]),
+        commandResolvers: z.array(RunnerExtensionContributionSummarySchema).default([]),
+        spawnHooks: z.array(RunnerExtensionContributionSummarySchema).default([])
+    }).strict().optional()
 }).strict()
 export type RunnerPluginInventory = z.infer<typeof RunnerPluginInventorySchema>
 

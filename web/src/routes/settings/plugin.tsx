@@ -186,6 +186,66 @@ function DiagnosticsList(props: { plugin: PluginDetail; t: (key: string, params?
     )
 }
 
+function ContributionsList(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string }) {
+    const { plugin, t } = props
+    const chips: Array<{ key: string; label: string; variant?: BadgeVariant }> = [
+        ...plugin.contributions.notificationChannels.map((channel) => ({
+            key: `hub-notification-${channel.id}`,
+            label: `Hub notification · ${channel.displayName} · ${channel.id}`,
+            variant: 'success' as BadgeVariant
+        })),
+        ...(plugin.contributions.runner?.environmentProviders ?? []).map((entry) => ({
+            key: `runner-env-${String((entry as { id?: unknown }).id)}`,
+            label: `Runner env · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`,
+            variant: 'success' as BadgeVariant
+        })),
+        ...(plugin.contributions.runner?.commandResolvers ?? []).map((entry) => ({
+            key: `runner-command-${String((entry as { id?: unknown }).id)}`,
+            label: `Runner command · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`,
+            variant: 'success' as BadgeVariant
+        })),
+        ...(plugin.contributions.runner?.spawnHooks ?? []).map((entry) => ({
+            key: `runner-spawn-${String((entry as { id?: unknown }).id)}`,
+            label: `Runner spawn · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`,
+            variant: 'success' as BadgeVariant
+        })),
+        ...(plugin.contributions.agent?.adapters ?? []).map((entry) => ({
+            key: `agent-adapter-${String((entry as { id?: unknown }).id)}`,
+            label: `Agent adapter · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        })),
+        ...(plugin.contributions.agent?.capabilityProviders ?? []).map((entry) => ({
+            key: `agent-capability-${String((entry as { id?: unknown }).id)}`,
+            label: `Agent capability · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        })),
+        ...(plugin.contributions.web?.settingsPanels ?? []).map((entry) => ({
+            key: `web-settings-${String((entry as { id?: unknown }).id)}`,
+            label: `Web settings · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        })),
+        ...(plugin.contributions.web?.newSessionFields ?? []).map((entry) => ({
+            key: `web-new-session-${String((entry as { id?: unknown }).id)}`,
+            label: `Web new session · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        })),
+        ...(plugin.contributions.web?.actions ?? []).map((entry) => ({
+            key: `web-action-${String((entry as { id?: unknown }).id)}`,
+            label: `Web action · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        })),
+        ...(plugin.contributions.web?.badges ?? []).map((entry) => ({
+            key: `web-badge-${String((entry as { id?: unknown }).id)}`,
+            label: `Web badge · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        }))
+    ]
+
+    if (chips.length === 0) {
+        return <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.detail.noContributions')}</div>
+    }
+
+    return (
+        <div className="flex flex-wrap gap-2">
+            {chips.map((chip) => <Chip key={chip.key} icon={<ActivityIcon />} label={chip.label} variant={chip.variant} />)}
+        </div>
+    )
+}
+
 export default function PluginPage() {
     const { pluginId } = useParams({ from: '/settings/plugins/$pluginId' })
     const search = useSearch({ from: '/settings/plugins/$pluginId' })
@@ -365,11 +425,7 @@ export default function PluginPage() {
                             </SectionCard>
 
                             <SectionCard title={t('settings.plugins.detail.contributions')}>
-                                {plugin.contributions.notificationChannels.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.detail.noContributions')}</div> : (
-                                    <div className="flex flex-wrap gap-2">
-                                        {plugin.contributions.notificationChannels.map((channel) => <Chip key={channel.id} icon={<ActivityIcon />} label={`${channel.displayName} · ${channel.id}`} variant="success" />)}
-                                    </div>
-                                )}
+                                <ContributionsList plugin={plugin} t={t} />
                             </SectionCard>
 
                             <SectionCard title={t('settings.plugins.detail.permissions')} description={t('settings.plugins.detail.permissionsDescription')}>

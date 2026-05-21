@@ -35,30 +35,30 @@ Hook 不得接收 raw socket/RPC gateway；不得直接修改 core session state
 
 ### 实现
 
-- [ ] 定义 `RunnerEnvironmentProvider` schema/type。
-- [ ] 定义 `RunnerCommandResolver` proposal schema/type。
-- [ ] 定义 `RunnerSpawnHook` schema/type。
-- [ ] Core command builder 聚合插件 proposal，但最终 spawn 参数由 Core 生成。
-- [ ] 冲突策略：多插件修改同一 env/command 时有 deterministic priority 与 diagnostics。
-- [ ] Hook 超时、throw、reject 不 crash Runner。
-- [ ] 审计日志显示哪个插件影响了 env/command/spawn。
-- [ ] Web/CLI detail 展示 Runner extension contributions 与 diagnostics。
+- [x] 定义 `RunnerEnvironmentProvider` schema/type。
+- [x] 定义 `RunnerCommandResolver` proposal schema/type。
+- [x] 定义 `RunnerSpawnHook` schema/type。
+- [x] Core command builder 聚合插件 proposal，但最终 spawn 参数由 Core 生成。
+- [x] 冲突策略：多插件修改同一 env/command 时有 deterministic priority 与 diagnostics。
+- [x] Hook 超时、throw、reject 不 crash Runner。
+- [x] 审计日志显示哪个插件影响了 env/command/spawn。
+- [x] Web/CLI detail 展示 Runner extension contributions 与 diagnostics。
 
 ### 测试
 
-- [ ] Environment provider 可以添加 env，secret values 不进入 diagnostics。
-- [ ] Command resolver proposal 被 Core 校验后应用。
-- [ ] 非法 command proposal 被拒绝并记录 diagnostic。
-- [ ] beforeSpawn throw 不阻止 core fallback 行为，除非策略显式 block。
-- [ ] 多插件优先级稳定。
-- [ ] Windows/Linux/macOS path 合并逻辑有纯函数测试。
+- [x] Environment provider 可以添加 env，secret values 不进入 diagnostics。
+- [x] Command resolver proposal 被 Core 校验后应用。
+- [x] 非法 command proposal 被拒绝并记录 diagnostic。
+- [x] beforeSpawn throw 不阻止 core fallback 行为，除非策略显式 block。
+- [x] 多插件优先级稳定。
+- [x] Windows/Linux/macOS path 合并逻辑有纯函数测试。
 
 ### 验收
 
-- [ ] 插件可以帮助 Runner 找到本机 agent binary 或注入必要 env。
-- [ ] Core 仍能解释最终 command 来源与安全决策。
-- [ ] Runner 插件失败不会导致所有 session spawn 全局不可用。
+- [x] 插件可以帮助 Runner 找到本机 agent binary 或注入必要 env。
+- [x] Core 仍能解释最终 command 来源与安全决策。
+- [x] Runner 插件失败不会导致所有 session spawn 全局不可用。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：architecture/review 子代理核对 Runner extension points。结论：任意 command override 与 diagnostics 归属问题已按 blocker 修复；插件 proposal 不能覆盖最终 executable，proposal diagnostics/audit 带 pluginId 并进入插件详情。验证命令：`bun run --cwd cli test -- src/runner/plugins/runnerExtensionPipeline.test.ts src/runner/plugins/runnerPluginManager.test.ts src/plugins/pluginFoundation.test.ts src/runner/buildCliArgs.test.ts`（46 tests）、`bun run typecheck`、`git diff --check`。
