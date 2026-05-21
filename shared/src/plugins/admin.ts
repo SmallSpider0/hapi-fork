@@ -1,6 +1,7 @@
 import { z } from 'zod'
 import { PluginDiagnosticSchema, PluginStatusSchema } from './types'
 import { PluginManifestLiteSchema, PluginRuntimeNameSchema } from './manifest'
+import { PluginInstallMetadataSchema } from './state'
 import { RunnerExtensionContributionSummarySchema } from './runnerExtensions'
 import { PluginWebContributionsSchema, PluginWebContributionViewSchema } from './webDescriptors'
 
@@ -77,7 +78,8 @@ export const PluginListItemSchema = z.object({
     runtimes: PluginRuntimeSummarySchema,
     diagnostics: z.array(PluginDiagnosticViewSchema),
     target: PluginTargetSummarySchema.optional(),
-    updatedAt: z.number().optional()
+    updatedAt: z.number().optional(),
+    install: PluginInstallMetadataSchema.optional()
 }).strict()
 export type PluginListItem = z.infer<typeof PluginListItemSchema>
 
@@ -199,13 +201,58 @@ export const PluginInstallLocalRequestSchema = z.object({
 }).strict()
 export type PluginInstallLocalRequest = z.infer<typeof PluginInstallLocalRequestSchema>
 
+export const PluginPackageFormatSchema = z.enum(['tgz', 'zip'])
+export type PluginPackageFormat = z.infer<typeof PluginPackageFormatSchema>
+
+export const PluginPackageFileSchema = z.object({
+    path: z.string().min(1),
+    size: z.number().int().nonnegative().optional(),
+    sha256: z.string().min(1).optional()
+}).strict()
+export type PluginPackageFile = z.infer<typeof PluginPackageFileSchema>
+
+export const PluginPackageManifestSchema = z.object({
+    formatVersion: z.literal('hapi-plugin-package/v1'),
+    manifest: PluginManifestLiteSchema,
+    files: z.array(PluginPackageFileSchema).default([]),
+    checksum: z.string().min(1),
+    signature: z.object({
+        algorithm: z.string().min(1),
+        value: z.string().min(1)
+    }).strict().optional()
+}).strict()
+export type PluginPackageManifest = z.infer<typeof PluginPackageManifestSchema>
+
+export const PluginInstallPackageRequestSchema = z.object({
+    filename: z.string().min(1),
+    contentBase64: z.string().min(1),
+    checksum: z.string().min(1),
+    format: PluginPackageFormatSchema.optional(),
+    manifest: PluginPackageManifestSchema.optional(),
+    enable: z.boolean().optional(),
+    reload: z.boolean().optional(),
+    overwrite: z.boolean().optional()
+}).strict()
+export type PluginInstallPackageRequest = z.infer<typeof PluginInstallPackageRequestSchema>
+
 export const PluginInstallResultSchema = z.object({
     ok: z.boolean(),
     action: PluginInstallActionSchema,
     plugin: PluginListItemSchema.optional(),
     pluginId: z.string().min(1).optional(),
     sourcePath: z.string().min(1).optional(),
-    targetPath: z.string().min(1),
+    targetPath: z.string().min(1).optional(),
+    target: PluginTargetSummarySchema.optional(),
+    targetResults: z.array(z.object({
+        target: PluginTargetSummarySchema,
+        ok: z.boolean(),
+        error: z.string().optional(),
+        action: PluginInstallActionSchema.optional(),
+        pluginId: z.string().min(1).optional(),
+        targetPath: z.string().min(1).optional(),
+        diagnostics: z.array(PluginDiagnosticViewSchema).default([]),
+        plugins: z.array(PluginListItemSchema).optional()
+    }).strict()).optional(),
     diagnostics: z.array(PluginDiagnosticViewSchema).default([]),
     reload: PluginReloadResultSchema.optional(),
     plugins: z.array(PluginListItemSchema)
@@ -215,9 +262,18 @@ export type PluginInstallResult = z.infer<typeof PluginInstallResultSchema>
 export const PluginDeleteResultSchema = z.object({
     ok: z.boolean(),
     pluginId: z.string().min(1),
-    rootPath: z.string().min(1),
+    rootPath: z.string().min(1).optional(),
     deleted: z.boolean(),
     target: PluginTargetSummarySchema.optional(),
+    targetResults: z.array(z.object({
+        target: PluginTargetSummarySchema,
+        ok: z.boolean(),
+        error: z.string().optional(),
+        pluginId: z.string().min(1).optional(),
+        rootPath: z.string().min(1).optional(),
+        deleted: z.boolean().optional(),
+        plugins: z.array(PluginListItemSchema).optional()
+    }).strict()).optional(),
     reload: PluginReloadResultSchema.optional(),
     plugins: z.array(PluginListItemSchema)
 }).strict()
@@ -305,6 +361,15 @@ export const RunnerPluginsInstallCommitRequestSchema = z.object({
     token: z.string().min(1).optional()
 }).strict()
 export type RunnerPluginsInstallCommitRequest = z.infer<typeof RunnerPluginsInstallCommitRequestSchema>
+
+export const RunnerPluginsLocalDirectoryListRequestSchema = PluginLocalDirectoryListRequestSchema
+export type RunnerPluginsLocalDirectoryListRequest = z.infer<typeof RunnerPluginsLocalDirectoryListRequestSchema>
+
+export const RunnerPluginsInstallLocalRequestSchema = PluginInstallLocalRequestSchema
+export type RunnerPluginsInstallLocalRequest = z.infer<typeof RunnerPluginsInstallLocalRequestSchema>
+
+export const RunnerPluginsInstallPackageRequestSchema = PluginInstallPackageRequestSchema
+export type RunnerPluginsInstallPackageRequest = z.infer<typeof RunnerPluginsInstallPackageRequestSchema>
 
 export const RunnerPluginUnsupportedInstallResultSchema = z.object({
     ok: z.literal(false),

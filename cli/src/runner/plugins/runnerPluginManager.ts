@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, relative } from 'node:path'
+import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
     PluginDeleteResult,
     PluginDetail,
     PluginDiagnosticView,
+    PluginInstallLocalRequest,
+    PluginInstallPackageRequest,
+    PluginInstallResult,
+    PluginLocalDirectoryEntry,
+    PluginLocalDirectoryListResponse,
     PluginListItem,
     PluginReloadItem,
     PluginReloadResult,
@@ -19,6 +24,7 @@ import {
     AgentCapabilityProviderSnapshotSchema,
     AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
+    HAPI_PLUGIN_MANIFEST_FILE,
     assertPluginConfigSafeForPersistence,
     builtinAgentDescriptors,
     sanitizePluginConfigForView
@@ -26,13 +32,16 @@ import {
 import {
     applyPluginState,
     discoverPlugins,
+    expandHomePath,
     getPluginStateFile,
     getUserPluginsDir,
+    installPluginFromDirectory,
+    installPluginFromPackage,
     readPluginState,
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import type { PluginStateFile } from '@hapi/protocol/plugins'
+import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
 import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerAgentAdapterContribution, type RunnerAgentCapabilityProviderContribution, type RunnerPluginModule } from './runnerPluginRegistry'
 import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
 import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
@@ -159,6 +168,23 @@ async function safeMtime(path: string): Promise<number> {
     } catch {
         return 0
     }
+}
+
+async function safePathExists(path: string): Promise<boolean> {
+    try {
+        await stat(path)
+        return true
+    } catch {
+        return false
+    }
+}
+
+function sortLocalDirectoryEntries<T extends { name: string; type: string }>(entries: T[]): T[] {
+    return entries.sort((left, right) => {
+        if (left.type === 'directory' && right.type !== 'directory') return -1
+        if (left.type !== 'directory' && right.type === 'directory') return 1
+        return left.name.localeCompare(right.name)
+    })
 }
 
 function pluginDisplayId(record: DiscoveredPluginRecord): string {
@@ -412,7 +438,8 @@ export class RunnerPluginManager {
         const previous = state.enabled[record.manifest.id]
         state.enabled[record.manifest.id] = {
             enabled: true,
-            ...(config ?? previous?.config ? { config: config ?? previous?.config } : {})
+            ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
+            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
@@ -425,7 +452,8 @@ export class RunnerPluginManager {
         const previous = state.enabled[pluginId]
         state.enabled[pluginId] = {
             enabled: false,
-            ...(previous?.config ? { config: previous.config } : {})
+            ...(previous?.config ? { config: previous.config } : {}),
+            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
@@ -440,17 +468,110 @@ export class RunnerPluginManager {
         const previous = state.enabled[record.manifest.id]
         state.enabled[record.manifest.id] = {
             enabled: previous?.enabled === true,
-            config
+            config,
+            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
+    }
+
+    async installLocalPlugin(options: PluginInstallLocalRequest): Promise<PluginInstallResult> {
+        const install = await installPluginFromDirectory({
+            hapiHome: this.options.hapiHome,
+            sourcePath: options.sourcePath,
+            overwrite: options.overwrite === true
+        })
+        const pluginId = install.record.manifest!.id
+        await this.recordInstallState(pluginId, {
+            sourceType: 'runner-local-path',
+            sourcePath: install.sourcePath,
+            version: install.record.manifest!.version
+        }, options.enable === true)
+
+        return await this.buildInstallResult({
+            action: install.action,
+            pluginId,
+            sourcePath: install.sourcePath,
+            targetPath: install.targetPath,
+            diagnostics: install.record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+            reload: options.reload !== false,
+            reloadReason: options.enable === true ? 'state-change' : 'manual'
+        })
+    }
+
+    async installPluginPackage(options: PluginInstallPackageRequest): Promise<PluginInstallResult> {
+        const install = await installPluginFromPackage({
+            hapiHome: this.options.hapiHome,
+            filename: options.filename,
+            contentBase64: options.contentBase64,
+            checksum: options.checksum,
+            format: options.format,
+            manifest: options.manifest,
+            overwrite: options.overwrite === true
+        })
+        const pluginId = install.record.manifest!.id
+        await this.recordInstallState(pluginId, {
+            sourceType: 'uploaded-package',
+            checksum: install.checksum,
+            packageFormat: install.packageFormat,
+            version: install.record.manifest!.version
+        }, options.enable === true)
+
+        return await this.buildInstallResult({
+            action: install.action,
+            pluginId,
+            sourcePath: options.filename,
+            targetPath: install.targetPath,
+            diagnostics: install.record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+            reload: options.reload !== false,
+            reloadReason: options.enable === true ? 'state-change' : 'manual'
+        })
+    }
+
+    async listLocalDirectory(path?: string): Promise<PluginLocalDirectoryListResponse> {
+        const requestedPath = path?.trim() ? path.trim() : this.options.hapiHome
+        const resolvedPath = resolve(expandHomePath(requestedPath))
+        try {
+            const stats = await lstat(resolvedPath)
+            if (!stats.isDirectory()) {
+                return { success: false, path: resolvedPath, error: `Path is not a directory: ${resolvedPath}` }
+            }
+            const [entries, hasPluginManifest] = await Promise.all([
+                readdir(resolvedPath, { withFileTypes: true }),
+                safePathExists(join(resolvedPath, HAPI_PLUGIN_MANIFEST_FILE))
+            ])
+            const mapped = await Promise.all(entries.map(async (entry): Promise<PluginLocalDirectoryEntry> => {
+                const entryPath = join(resolvedPath, entry.name)
+                const entryStats = await lstat(entryPath).catch(() => null)
+                const type: PluginLocalDirectoryEntry['type'] = entry.isDirectory()
+                    ? 'directory'
+                    : entry.isFile()
+                        ? 'file'
+                        : 'other'
+                return {
+                    name: entry.name,
+                    type,
+                    ...(entryStats ? { size: entryStats.size, modified: entryStats.mtimeMs } : {}),
+                    ...(type === 'directory' ? { hasPluginManifest: await safePathExists(join(entryPath, HAPI_PLUGIN_MANIFEST_FILE)) } : {})
+                }
+            }))
+            return {
+                success: true,
+                path: resolvedPath,
+                parentPath: dirname(resolvedPath),
+                hasPluginManifest,
+                entries: sortLocalDirectoryEntries(mapped)
+            }
+        } catch (error) {
+            return { success: false, path: resolvedPath, error: error instanceof Error ? error.message : String(error) }
+        }
     }
 
     installPrepareUnsupported(): RunnerPluginUnsupportedInstallResult {
         return {
             ok: false,
             code: 'unsupported-runtime',
-            message: 'Runner plugin install distribution is not supported in this phase. Install the plugin on the Runner machine and reload that target.'
+            message: 'Legacy prepare/commit install RPC is not supported. Use runner.plugins.install-local or runner.plugins.install-package for target-scoped installs.'
         }
     }
 
@@ -760,6 +881,50 @@ export class RunnerPluginManager {
         return stateResult.state
     }
 
+    private async recordInstallState(pluginId: string, metadata: Omit<PluginInstallMetadata, 'installedAt' | 'updatedAt'>, enable: boolean): Promise<void> {
+        const state = await this.readWritableState()
+        const previous = state.enabled[pluginId]
+        const now = Date.now()
+        state.enabled[pluginId] = {
+            enabled: enable ? true : previous?.enabled === true,
+            ...(previous?.config ? { config: previous.config } : {}),
+            install: {
+                ...metadata,
+                installedAt: previous?.install?.installedAt ?? now,
+                updatedAt: now
+            }
+        }
+        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
+    }
+
+    private async buildInstallResult(options: {
+        action: 'installed' | 'overwritten'
+        pluginId: string
+        sourcePath?: string
+        targetPath: string
+        diagnostics?: PluginDiagnosticView[]
+        reload: boolean
+        reloadReason: ReloadReason
+    }): Promise<PluginInstallResult> {
+        let reloadResult: PluginReloadResult | undefined
+        if (options.reload) {
+            reloadResult = await this.reload(options.pluginId, options.reloadReason)
+        }
+        const plugin = this.listPlugins().find((entry) => entry.id === options.pluginId)
+        return {
+            ok: reloadResult?.ok ?? true,
+            action: options.action,
+            ...(plugin ? { plugin } : {}),
+            pluginId: options.pluginId,
+            ...(options.sourcePath ? { sourcePath: options.sourcePath } : {}),
+            targetPath: options.targetPath,
+            target: this.targetSummary(),
+            diagnostics: options.diagnostics ?? plugin?.diagnostics ?? [],
+            ...(reloadResult ? { reload: reloadResult } : {}),
+            plugins: this.listPlugins()
+        }
+    }
+
     private currentNoopResult(targetId: string): PluginReloadResult {
         return {
             ok: true,
@@ -1067,6 +1232,7 @@ export class RunnerPluginManager {
                 ...this.managerDiagnostics.filter((entry) => entry.pluginId === id)
             ],
             target: this.targetSummary(),
+            install: record.install ?? { sourceType: record.source, version: record.manifest?.version },
             ...(activeInstance ? { updatedAt: activeInstance.loadedAt } : {})
         }
     }

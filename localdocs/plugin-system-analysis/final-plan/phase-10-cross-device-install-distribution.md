@@ -1,7 +1,7 @@
 # Phase 10 — Cross-device install/distribution：Hub/Runner 目标选择与分发
 
 更新时间: 2026-05-21
-状态: 计划阶段。
+状态: 已完成。
 
 ## 目标
 
@@ -30,30 +30,36 @@
 
 ### 实现
 
-- [ ] Web/CLI 安装流程要求选择 target scope。
-- [ ] Runner local path browse 通过 Runner RPC 实现。
-- [ ] Uploaded package 支持 Hub 校验与目标分发。
-- [ ] Package format 定义 manifest、files、checksum、optional signature metadata。
-- [ ] Per-target inventory 记录 source/checksum/version/installedAt。
-- [ ] Multi-runner install 返回 per-target result。
-- [ ] Delete/update/reload 都按 target scope 执行。
-- [ ] 离线 Runner install queue 策略明确：拒绝或排队，不能静默成功。
+- [x] Web/CLI 安装流程要求选择 target scope。
+- [x] Runner local path browse 通过 Runner RPC 实现。
+- [x] Uploaded package 支持 Hub 校验与目标分发。
+- [x] Package format 定义 manifest、files、checksum、optional signature metadata。
+- [x] Per-target inventory 记录 source/checksum/version/installedAt。
+- [x] Multi-runner install 返回 per-target result。
+- [x] Delete/update/reload 都按 target scope 执行。
+- [x] 离线 Runner install queue 策略明确：拒绝或排队，不能静默成功。
 
 ### 测试
 
-- [ ] Hub local path install 不允许用于 Runner target。
-- [ ] Runner local path browse 在 Runner 离线时返回明确错误。
-- [ ] Uploaded package checksum mismatch 被拒绝。
-- [ ] Partial multi-runner failure 不回滚已成功目标，或按明确策略执行。
-- [ ] Delete Hub plugin 不影响 Runner plugin inventory。
-- [ ] Delete Runner plugin 不影响 Hub plugin inventory。
+- [x] Hub local path install 不允许用于 Runner target。
+- [x] Runner local path browse 在 Runner 离线时返回明确错误。
+- [x] Uploaded package checksum mismatch 被拒绝。
+- [x] Partial multi-runner failure 不回滚已成功目标，或按明确策略执行。
+- [x] Delete Hub plugin 不影响 Runner plugin inventory。
+- [x] Delete Runner plugin 不影响 Hub plugin inventory。
 
 ### 验收
 
-- [ ] 用户能安装插件到指定 Runner，即使 Hub 与 Runner 不在同一台机器。
-- [ ] 用户能在 UI 中看清每个 target 的安装来源和版本。
-- [ ] 安装失败不会留下不可解释的半状态。
+- [x] 用户能安装插件到指定 Runner，即使 Hub 与 Runner 不在同一台机器。
+- [x] 用户能在 UI 中看清每个 target 的安装来源和版本。
+- [x] 安装失败不会留下不可解释的半状态。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：architecture/review 子代理核对跨设备安装语义、Runner local path RPC、package checksum/metadata、partial failure、per-target metadata、offline Runner reject；最终 review 结论为无阻塞，同意勾选并提交。
+- [x] 2026-05-21：验证命令通过：
+  - `bun run --cwd cli test -- src/plugins/pluginFoundation.test.ts src/runner/plugins/runnerPluginManager.test.ts src/commands/plugins.test.ts`
+  - `bun run --cwd hub test -- src/web/routes/plugins.test.ts src/web/routes/machines.test.ts`
+  - `bun run --cwd web test -- src/hooks/mutations/usePluginActions.test.tsx src/components/NewSession/preferences.test.ts src/components/NewSession/pluginFields.test.ts src/components/plugins/DescriptorRenderer.test.tsx`
+  - `bun run typecheck`
+  - `git diff --check`

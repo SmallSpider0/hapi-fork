@@ -1,6 +1,10 @@
 import { existsSync } from 'node:fs'
-import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, delimiter as platformDelimiter } from 'node:path'
+import { createHash } from 'node:crypto'
+import { execFile as execFileCallback } from 'node:child_process'
+import { tmpdir } from 'node:os'
+import { promisify } from 'node:util'
+import { cp, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, join, relative, resolve, delimiter as platformDelimiter } from 'node:path'
 import { homedir } from 'node:os'
 import { z } from 'zod'
 import {
@@ -11,7 +15,7 @@ import {
     type PluginManifestLite,
     type PluginRuntimeName
 } from './manifest'
-import { PluginStateFileSchema, type PluginStateFile } from './state'
+import { PluginStateFileSchema, type PluginInstallMetadata, type PluginStateFile } from './state'
 import type { PluginDiagnostic, PluginDiagnosticSeverity, PluginStatus } from './types'
 
 export type PluginSource = 'env' | 'user-home'
@@ -40,6 +44,7 @@ export interface DiscoveredPluginRecord {
     runtimeEntryPaths: PluginRuntimeEntryPath[]
     enabled?: boolean
     config?: Record<string, unknown>
+    install?: PluginInstallMetadata
 }
 
 export interface DiscoverPluginsOptions {
@@ -55,6 +60,7 @@ export interface PluginStateReadResult {
 }
 
 export type PluginDirectoryInstallAction = 'installed' | 'overwritten'
+export type PluginPackageFormat = 'tgz' | 'zip'
 
 export interface PluginDirectoryInstallResult {
     action: PluginDirectoryInstallAction
@@ -62,6 +68,48 @@ export interface PluginDirectoryInstallResult {
     targetPath: string
     record: DiscoveredPluginRecord
 }
+
+export interface PluginPackageInstallResult extends PluginDirectoryInstallResult {
+    checksum: string
+    packageFormat: PluginPackageFormat
+}
+
+export interface PluginPackageManifestMetadata {
+    formatVersion: 'hapi-plugin-package/v1'
+    manifest: PluginManifestLite
+    checksum: string
+    files?: Array<{
+        path: string
+        sha256?: string
+    }>
+    signature?: {
+        algorithm: string
+        value: string
+    }
+}
+
+export interface PluginPackageValidationResult {
+    bytes: Buffer
+    checksum: string
+    packageFormat: PluginPackageFormat
+}
+
+export const HAPI_PLUGIN_PACKAGE_MANIFEST_FILE = 'hapi.plugin.package.json'
+
+const PluginPackageManifestMetadataSchema = z.object({
+    formatVersion: z.literal('hapi-plugin-package/v1'),
+    manifest: PluginManifestLiteSchema,
+    files: z.array(z.object({
+        path: z.string().min(1),
+        size: z.number().int().nonnegative().optional(),
+        sha256: z.string().min(1).optional()
+    }).strict()).default([]),
+    checksum: z.string().min(1),
+    signature: z.object({
+        algorithm: z.string().min(1),
+        value: z.string().min(1)
+    }).strict().optional()
+}).strict()
 
 export class PluginInstallError extends Error {
     constructor(
@@ -79,6 +127,8 @@ export class PluginStateLockError extends Error {
         this.name = 'PluginStateLockError'
     }
 }
+
+const execFile = promisify(execFileCallback)
 
 function diagnostic(
     code: string,
@@ -403,7 +453,8 @@ export function applyPluginState(
             ...record,
             status: enabled ? 'enabled' : 'disabled',
             enabled,
-            ...(stateEntry?.config ? { config: stateEntry.config } : {})
+            ...(stateEntry?.config ? { config: stateEntry.config } : {}),
+            ...(stateEntry?.install ? { install: stateEntry.install } : {})
         }
     })
 }
@@ -498,6 +549,266 @@ export async function installPluginFromDirectory(options: {
         sourcePath: sourceRealPath,
         targetPath,
         record: copiedRecord
+    }
+}
+
+function normalizePackageChecksum(checksum: string): string {
+    const trimmed = checksum.trim().toLowerCase()
+    return trimmed.startsWith('sha256:') ? trimmed : `sha256:${trimmed}`
+}
+
+function sha256Hex(buffer: Buffer): string {
+    return createHash('sha256').update(buffer).digest('hex')
+}
+
+function detectPackageFormat(filename: string, format?: PluginPackageFormat): PluginPackageFormat {
+    if (format) return format
+    const lowered = filename.toLowerCase()
+    if (lowered.endsWith('.zip')) return 'zip'
+    if (lowered.endsWith('.tgz') || lowered.endsWith('.tar.gz')) return 'tgz'
+    throw new PluginInstallError('plugin-install-invalid-source', 'Plugin package filename must end with .tgz, .tar.gz, or .zip.')
+}
+
+function assertArchiveEntrySafe(entry: string): void {
+    const normalized = entry.replace(/\\/g, '/')
+    if (!normalized || normalized.startsWith('/') || normalized.includes('\0')) {
+        throw new PluginInstallError('plugin-install-unsafe-path', `Plugin package contains an unsafe path: ${entry}`)
+    }
+    if (normalized.split('/').some((part) => part === '..')) {
+        throw new PluginInstallError('plugin-install-unsafe-path', `Plugin package contains a path traversal entry: ${entry}`)
+    }
+}
+
+async function listArchiveEntries(packagePath: string, format: PluginPackageFormat): Promise<string[]> {
+    const command = format === 'tgz' ? 'tar' : 'unzip'
+    const args = format === 'tgz' ? ['-tzf', packagePath] : ['-Z1', packagePath]
+    try {
+        const { stdout } = await execFile(command, args, { maxBuffer: 1024 * 1024 * 10 })
+        return stdout.split('\n').map((entry) => entry.trim()).filter(Boolean)
+    } catch (error) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package could not be listed: ${error instanceof Error ? error.message : String(error)}`)
+    }
+}
+
+function normalizeArchiveEntry(entry: string): string {
+    return entry.replace(/\\/g, '/').replace(/\/+$/, '')
+}
+
+function normalizePackageManifestFilePath(path: string): string {
+    let normalized = normalizeArchiveEntry(path)
+    while (normalized.startsWith('./')) {
+        normalized = normalized.slice(2)
+    }
+    return normalized
+}
+
+function packageStableStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map((entry) => packageStableStringify(entry)).join(',')}]`
+    }
+    if (value && typeof value === 'object') {
+        return `{${Object.entries(value as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, entry]) => `${JSON.stringify(key)}:${packageStableStringify(entry)}`)
+            .join(',')}}`
+    }
+    return JSON.stringify(value)
+}
+
+async function readJsonFile(path: string): Promise<unknown> {
+    return JSON.parse(await readFile(path, 'utf8')) as unknown
+}
+
+async function readInternalPackageManifest(pluginRoot: string): Promise<PluginPackageManifestMetadata | null> {
+    const packageManifestPath = join(pluginRoot, HAPI_PLUGIN_PACKAGE_MANIFEST_FILE)
+    if (!existsSync(packageManifestPath)) {
+        return null
+    }
+    let raw: unknown
+    try {
+        raw = await readJsonFile(packageManifestPath)
+    } catch (error) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package manifest JSON is invalid: ${error instanceof Error ? error.message : String(error)}`)
+    }
+    const parsed = PluginPackageManifestMetadataSchema.safeParse(raw)
+    if (!parsed.success) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package manifest is invalid: ${describeZodError(parsed.error)}`)
+    }
+    return parsed.data
+}
+
+async function validatePackageManifestMetadata(options: {
+    metadata: PluginPackageManifestMetadata
+    pluginRoot: string
+    extractDir: string
+    archiveEntries: string[]
+    packageChecksum: string
+    strictPackageChecksum: boolean
+}): Promise<void> {
+    const rawPluginManifest = await readJsonFile(join(options.pluginRoot, HAPI_PLUGIN_MANIFEST_FILE))
+    const pluginManifest = PluginManifestLiteSchema.parse(rawPluginManifest)
+    if (packageStableStringify(options.metadata.manifest) !== packageStableStringify(pluginManifest)) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package manifest metadata does not match ${HAPI_PLUGIN_MANIFEST_FILE}.`)
+    }
+
+    if (options.strictPackageChecksum) {
+        const manifestChecksum = normalizePackageChecksum(options.metadata.checksum)
+        if (manifestChecksum !== options.packageChecksum) {
+            throw new PluginInstallError('plugin-install-invalid-source', `Plugin package manifest checksum mismatch: expected ${manifestChecksum}, got ${options.packageChecksum}.`)
+        }
+    }
+
+    const archiveEntrySet = new Set(options.archiveEntries.map((entry) => normalizePackageManifestFilePath(entry)).filter(Boolean))
+    const pluginPrefix = normalizePackageManifestFilePath(relative(options.extractDir, options.pluginRoot))
+    for (const file of options.metadata.files ?? []) {
+        assertArchiveEntrySafe(file.path)
+        const normalized = normalizePackageManifestFilePath(file.path)
+        const archivePath = pluginPrefix ? `${pluginPrefix}/${normalized}` : normalized
+        if (!archiveEntrySet.has(archivePath)) {
+            throw new PluginInstallError('plugin-install-invalid-source', `Plugin package manifest lists missing file: ${file.path}`)
+        }
+        if (file.sha256) {
+            const actualFileChecksum = `sha256:${sha256Hex(await readFile(join(options.pluginRoot, normalized)))}`
+            const expectedFileChecksum = normalizePackageChecksum(file.sha256)
+            if (actualFileChecksum !== expectedFileChecksum) {
+                throw new PluginInstallError('plugin-install-invalid-source', `Plugin package file checksum mismatch for ${file.path}: expected ${expectedFileChecksum}, got ${actualFileChecksum}.`)
+            }
+        }
+    }
+}
+
+export async function validatePluginPackagePayload(options: {
+    filename: string
+    contentBase64: string
+    checksum: string
+    format?: PluginPackageFormat
+    manifest?: PluginPackageManifestMetadata
+    inspectArchive?: boolean
+}): Promise<PluginPackageValidationResult> {
+    const format = detectPackageFormat(options.filename, options.format)
+    const bytes = Buffer.from(options.contentBase64, 'base64')
+    if (bytes.length === 0) {
+        throw new PluginInstallError('plugin-install-invalid-source', 'Plugin package content is empty.')
+    }
+
+    const actualChecksum = `sha256:${sha256Hex(bytes)}`
+    if (normalizePackageChecksum(options.checksum) !== actualChecksum) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package checksum mismatch: expected ${normalizePackageChecksum(options.checksum)}, got ${actualChecksum}.`)
+    }
+
+    if (options.inspectArchive === true) {
+        const tempRoot = await mkdtemp(join(tmpdir(), 'hapi-plugin-package-validate-'))
+        try {
+            const packagePath = join(tempRoot, format === 'zip' ? 'plugin.zip' : 'plugin.tgz')
+            const extractDir = join(tempRoot, 'extract')
+            await writeFile(packagePath, bytes, { mode: 0o600 })
+            await mkdir(extractDir, { recursive: true, mode: 0o700 })
+            const entries = await listArchiveEntries(packagePath, format)
+            if (entries.length === 0) {
+                throw new PluginInstallError('plugin-install-invalid-source', 'Plugin package is empty.')
+            }
+            for (const entry of entries) {
+                assertArchiveEntrySafe(entry)
+            }
+            await extractArchive(packagePath, format, extractDir)
+            await rejectSymlinks(extractDir)
+            const pluginRoot = await findExtractedPluginRoot(extractDir)
+            const packageManifest = options.manifest
+                ? PluginPackageManifestMetadataSchema.parse(options.manifest)
+                : await readInternalPackageManifest(pluginRoot)
+            if (!packageManifest) {
+                throw new PluginInstallError('plugin-install-invalid-source', `Plugin package must include ${HAPI_PLUGIN_PACKAGE_MANIFEST_FILE} or provide package manifest metadata.`)
+            }
+            await validatePackageManifestMetadata({
+                metadata: packageManifest,
+                pluginRoot,
+                extractDir,
+                archiveEntries: entries,
+                packageChecksum: actualChecksum,
+                strictPackageChecksum: Boolean(options.manifest)
+            })
+        } finally {
+            await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined)
+        }
+    }
+
+    return {
+        bytes,
+        checksum: actualChecksum,
+        packageFormat: format
+    }
+}
+
+async function extractArchive(packagePath: string, format: PluginPackageFormat, targetDir: string): Promise<void> {
+    const entries = await listArchiveEntries(packagePath, format)
+    if (entries.length === 0) {
+        throw new PluginInstallError('plugin-install-invalid-source', 'Plugin package is empty.')
+    }
+    for (const entry of entries) {
+        assertArchiveEntrySafe(entry)
+    }
+
+    const command = format === 'tgz' ? 'tar' : 'unzip'
+    const args = format === 'tgz'
+        ? ['-xzf', packagePath, '-C', targetDir]
+        : ['-q', packagePath, '-d', targetDir]
+    try {
+        await execFile(command, args, { maxBuffer: 1024 * 1024 * 10 })
+    } catch (error) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package could not be extracted: ${error instanceof Error ? error.message : String(error)}`)
+    }
+}
+
+async function findExtractedPluginRoot(extractDir: string): Promise<string> {
+    if (existsSync(join(extractDir, HAPI_PLUGIN_MANIFEST_FILE))) {
+        return extractDir
+    }
+    const entries = await readdir(extractDir, { withFileTypes: true })
+    const candidates = entries
+        .filter((entry) => entry.isDirectory())
+        .map((entry) => join(extractDir, entry.name))
+        .filter((entryPath) => existsSync(join(entryPath, HAPI_PLUGIN_MANIFEST_FILE)))
+    if (candidates.length === 1) {
+        return candidates[0]
+    }
+    if (candidates.length > 1) {
+        throw new PluginInstallError('plugin-install-invalid-source', `Plugin package contains multiple plugin roots: ${candidates.map((entry) => basename(entry)).join(', ')}`)
+    }
+    throw new PluginInstallError('plugin-install-invalid-source', `Plugin package does not contain ${HAPI_PLUGIN_MANIFEST_FILE} at its root or first child directory.`)
+}
+
+export async function installPluginFromPackage(options: {
+    hapiHome: string
+    filename: string
+    contentBase64: string
+    checksum: string
+    format?: PluginPackageFormat
+    manifest?: PluginPackageManifestMetadata
+    overwrite?: boolean
+}): Promise<PluginPackageInstallResult> {
+    const validation = await validatePluginPackagePayload({ ...options, inspectArchive: true })
+
+    const tempRoot = await mkdtemp(join(tmpdir(), 'hapi-plugin-package-'))
+    try {
+        const packagePath = join(tempRoot, validation.packageFormat === 'zip' ? 'plugin.zip' : 'plugin.tgz')
+        const extractDir = join(tempRoot, 'extract')
+        await mkdir(extractDir, { recursive: true, mode: 0o700 })
+        await writeFile(packagePath, validation.bytes, { mode: 0o600 })
+        await extractArchive(packagePath, validation.packageFormat, extractDir)
+        await rejectSymlinks(extractDir)
+        const pluginRoot = await findExtractedPluginRoot(extractDir)
+        const install = await installPluginFromDirectory({
+            hapiHome: options.hapiHome,
+            sourcePath: pluginRoot,
+            overwrite: options.overwrite
+        })
+        return {
+            ...install,
+            checksum: validation.checksum,
+            packageFormat: validation.packageFormat
+        }
+    } finally {
+        await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined)
     }
 }
 

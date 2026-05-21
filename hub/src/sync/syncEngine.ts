@@ -9,7 +9,7 @@
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { AgentHistoryImportResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
-import type { PluginDeleteResult, PluginDetailResponse, PluginReloadResult, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
+import type { PluginDeleteResult, PluginDetailResponse, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallResult, PluginLocalDirectoryListResponse, PluginReloadResult, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -946,6 +946,18 @@ export class SyncEngine {
 
     async commitRunnerPluginInstall(machineId: string, payload: unknown = {}): Promise<RunnerPluginUnsupportedInstallResult> {
         return await this.rpcGateway.commitRunnerPluginInstall(machineId, payload)
+    }
+
+    async listRunnerPluginDirectory(machineId: string, path?: string): Promise<PluginLocalDirectoryListResponse> {
+        return await this.rpcGateway.listRunnerPluginDirectory(machineId, path)
+    }
+
+    async installRunnerPluginLocal(machineId: string, payload: PluginInstallLocalRequest): Promise<PluginInstallResult> {
+        return await this.rpcGateway.installRunnerPluginLocal(machineId, payload)
+    }
+
+    async installRunnerPluginPackage(machineId: string, payload: PluginInstallPackageRequest): Promise<PluginInstallResult> {
+        return await this.rpcGateway.installRunnerPluginPackage(machineId, payload)
     }
 
     async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {

@@ -21,11 +21,17 @@ import type { Server } from 'socket.io'
 import {
     PluginDeleteResultSchema,
     PluginDetailResponseSchema,
+    PluginInstallResultSchema,
+    PluginLocalDirectoryListResponseSchema,
     PluginReloadResultSchema,
     RunnerPluginInventorySchema,
     RunnerPluginUnsupportedInstallResultSchema,
     type PluginDeleteResult,
     type PluginDetailResponse,
+    type PluginInstallLocalRequest,
+    type PluginInstallPackageRequest,
+    type PluginInstallResult,
+    type PluginLocalDirectoryListResponse,
     type PluginReloadResult,
     type RunnerPluginInventory,
     type RunnerPluginUnsupportedInstallResult
@@ -292,6 +298,21 @@ export class RpcGateway {
     async commitRunnerPluginInstall(machineId: string, payload: unknown = {}): Promise<RunnerPluginUnsupportedInstallResult> {
         const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsInstallCommit, payload)
         return RunnerPluginUnsupportedInstallResultSchema.parse(result)
+    }
+
+    async listRunnerPluginDirectory(machineId: string, path?: string): Promise<PluginLocalDirectoryListResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsLocalDirectory, { ...(path ? { path } : {}) })
+        return PluginLocalDirectoryListResponseSchema.parse(result)
+    }
+
+    async installRunnerPluginLocal(machineId: string, payload: PluginInstallLocalRequest): Promise<PluginInstallResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsInstallLocal, payload, MODEL_LIST_RPC_TIMEOUT_MS)
+        return PluginInstallResultSchema.parse(result)
+    }
+
+    async installRunnerPluginPackage(machineId: string, payload: PluginInstallPackageRequest): Promise<PluginInstallResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsInstallPackage, payload, MODEL_LIST_RPC_TIMEOUT_MS)
+        return PluginInstallResultSchema.parse(result)
     }
 
     async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {

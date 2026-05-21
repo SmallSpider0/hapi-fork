@@ -35,6 +35,7 @@ import type {
     PluginDetailResponse,
     PluginEnableRequest,
     PluginInstallLocalRequest,
+    PluginInstallPackageRequest,
     PluginInstallResult,
     PluginLocalDirectoryListResponse,
     PluginListResponse,
@@ -221,15 +222,23 @@ export class ApiClient {
         return await this.request<PluginReloadResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/reload`, target), { method: 'POST' })
     }
 
-    async installLocalPlugin(body: PluginInstallLocalRequest): Promise<PluginInstallResult> {
-        return await this.request<PluginInstallResult>('/api/plugins/install-local', {
+    async installLocalPlugin(body: PluginInstallLocalRequest, target?: PluginTargetScope): Promise<PluginInstallResult> {
+        return await this.request<PluginInstallResult>(withPluginTarget('/api/plugins/install-local', target), {
             method: 'POST',
             body: JSON.stringify(body)
         })
     }
 
-    async listHubPluginDirectory(path?: string): Promise<PluginLocalDirectoryListResponse> {
-        return await this.request<PluginLocalDirectoryListResponse>('/api/plugins/local-directory', {
+
+    async installPackagePlugin(body: PluginInstallPackageRequest, target?: PluginTargetScope): Promise<PluginInstallResult> {
+        return await this.request<PluginInstallResult>(withPluginTarget('/api/plugins/install-package', target), {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
+    }
+
+    async listPluginDirectory(path?: string, target?: PluginTargetScope): Promise<PluginLocalDirectoryListResponse> {
+        return await this.request<PluginLocalDirectoryListResponse>(withPluginTarget('/api/plugins/local-directory', target), {
             method: 'POST',
             body: JSON.stringify(path ? { path } : {})
         })

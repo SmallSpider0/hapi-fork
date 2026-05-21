@@ -8,6 +8,7 @@ import {
     PluginDetailResponseSchema,
     PluginDiagnosticsResponseSchema,
     PluginInstallLocalRequestSchema,
+    PluginInstallPackageRequestSchema,
     PluginInstallResultSchema,
     PluginLocalDirectoryListRequestSchema,
     PluginLocalDirectoryListResponseSchema,
@@ -16,6 +17,7 @@ import {
     PluginTargetScopeSchema,
     type PluginDeleteResult,
     type PluginDetail,
+    type PluginInstallResult,
     type PluginListItem,
     type PluginReloadResult,
     type PluginTargetActionResult,
@@ -24,7 +26,7 @@ import {
     type PluginTargetSummary,
     type RunnerPluginInventory
 } from '@hapi/protocol/plugins/admin'
-import { PluginInstallError, PluginStateLockError } from '@hapi/protocol/plugins/foundation'
+import { PluginInstallError, PluginStateLockError, validatePluginPackagePayload } from '@hapi/protocol/plugins/foundation'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -282,6 +284,132 @@ async function runRunnerReloadAction(options: {
     })
 }
 
+
+async function runRunnerInstallAction(options: {
+    engine: SyncEngine
+    namespace: string
+    target: PluginTargetScope
+    action: (machineId: string) => Promise<PluginInstallResult>
+}): Promise<PluginInstallResult | Response> {
+    const { engine, namespace, target, action } = options
+    const runnerMachineId = parseRunnerPluginTargetScope(target)
+    if (runnerMachineId) {
+        const machine = engine.getMachineByNamespace(runnerMachineId, namespace)
+        if (!machine) return new Response(JSON.stringify({ error: 'Runner target not found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+        if (!machine.active) return new Response(JSON.stringify({ error: 'Runner target is offline' }), { status: 503, headers: { 'content-type': 'application/json' } })
+        const result = await action(machine.id)
+        return PluginInstallResultSchema.parse({ ...result, target: result.target ?? runnerTargetSummary(machine, machine.runnerState?.pluginInventory) })
+    }
+
+    if (target !== 'all-runners') {
+        throw new Error('Runner target expected')
+    }
+
+    const machines = engine.getMachinesByNamespace(namespace)
+    const targetResults: NonNullable<PluginInstallResult['targetResults']> = []
+    const plugins: PluginListItem[] = []
+
+    for (const machine of machines) {
+        const cached = cachedRunnerInventory(machine)
+        if (!machine.active) {
+            targetResults.push({ target: cached.target, ok: false, error: 'Runner target is offline', diagnostics: [], plugins: cached.plugins })
+            plugins.push(...cached.plugins)
+            continue
+        }
+        try {
+            const result = await action(machine.id)
+            const targetSummary = result.target ?? runnerTargetSummary(machine, machine.runnerState?.pluginInventory)
+            targetResults.push({
+                target: targetSummary,
+                ok: result.ok,
+                action: result.action,
+                pluginId: result.pluginId,
+                targetPath: result.targetPath,
+                diagnostics: result.diagnostics,
+                plugins: result.plugins
+            })
+            plugins.push(...result.plugins.map((plugin) => withTarget(plugin, targetSummary)))
+        } catch (error) {
+            targetResults.push({ target: cached.target, ok: false, error: errorMessage(error), diagnostics: [], plugins: cached.plugins })
+            plugins.push(...cached.plugins)
+        }
+    }
+
+    return PluginInstallResultSchema.parse({
+        ok: targetResults.every((entry) => entry.ok),
+        action: targetResults.find((entry) => entry.action)?.action ?? 'unchanged',
+        targetResults,
+        diagnostics: [],
+        plugins
+    })
+}
+
+async function runRunnerDeleteAction(options: {
+    engine: SyncEngine
+    namespace: string
+    target: PluginTargetScope
+    pluginId: string
+    action: (machineId: string) => Promise<PluginDeleteResult>
+}): Promise<PluginDeleteResult | Response> {
+    const { engine, namespace, target, pluginId, action } = options
+    const runnerMachineId = parseRunnerPluginTargetScope(target)
+    if (runnerMachineId) {
+        const machine = engine.getMachineByNamespace(runnerMachineId, namespace)
+        if (!machine) return new Response(JSON.stringify({ error: 'Runner target not found' }), { status: 404, headers: { 'content-type': 'application/json' } })
+        if (!machine.active) return new Response(JSON.stringify({ error: 'Runner target is offline' }), { status: 503, headers: { 'content-type': 'application/json' } })
+        const result = await action(machine.id)
+        return PluginDeleteResultSchema.parse({ ...result, target: result.target ?? runnerTargetSummary(machine, machine.runnerState?.pluginInventory) })
+    }
+
+    if (target !== 'all-runners') {
+        throw new Error('Runner target expected')
+    }
+
+    const machines = engine.getMachinesByNamespace(namespace)
+    const targetResults: NonNullable<PluginDeleteResult['targetResults']> = []
+    const plugins: PluginListItem[] = []
+
+    for (const machine of machines) {
+        const cached = cachedRunnerInventory(machine)
+        if (!machine.active) {
+            targetResults.push({ target: cached.target, ok: false, error: 'Runner target is offline', pluginId, plugins: cached.plugins })
+            plugins.push(...cached.plugins)
+            continue
+        }
+        try {
+            const result = await action(machine.id)
+            const targetSummary = result.target ?? runnerTargetSummary(machine, machine.runnerState?.pluginInventory)
+            targetResults.push({
+                target: targetSummary,
+                ok: result.ok,
+                pluginId: result.pluginId,
+                rootPath: result.rootPath,
+                deleted: result.deleted,
+                plugins: result.plugins
+            })
+            plugins.push(...result.plugins.map((plugin) => withTarget(plugin, targetSummary)))
+        } catch (error) {
+            targetResults.push({ target: cached.target, ok: false, error: errorMessage(error), pluginId, plugins: cached.plugins })
+            plugins.push(...cached.plugins)
+        }
+    }
+
+    return PluginDeleteResultSchema.parse({
+        ok: targetResults.every((entry) => entry.ok),
+        pluginId,
+        deleted: targetResults.length > 0 && targetResults.every((entry) => entry.ok && entry.deleted !== false),
+        targetResults,
+        plugins
+    })
+}
+
+function requireExplicitInstallTarget(c: Context<WebAppEnv>, target: PluginTargetScope | null): PluginTargetScope | Response {
+    if (!target) {
+        return c.json({ error: 'Plugin install requires target=hub, target=runner:<machineId>, or target=all-runners.' }, 400)
+    }
+    return target
+}
+
 export function createPluginsRoutes(
     getPluginManager: () => HubPluginManager | null,
     getSyncEngine: () => SyncEngine | null = () => null
@@ -351,45 +479,104 @@ export function createPluginsRoutes(
     })
 
     app.post('/plugins/install-local', async (c) => {
-        const target = parseTarget(c)
+        const parsedTarget = parseTarget(c)
+        if (parsedTarget instanceof Response) return parsedTarget
+        const target = requireExplicitInstallTarget(c, parsedTarget)
         if (target instanceof Response) return target
-        if (target && target !== 'hub') {
-            return c.json({ error: 'Local directory install is only available on the Hub target in this phase.' }, 400)
-        }
-        const manager = requirePluginManager(c, getPluginManager)
-        if (manager instanceof Response) {
-            return manager
-        }
         const json = await c.req.json().catch(() => null)
         const parsed = PluginInstallLocalRequestSchema.safeParse(json)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
         }
+        if (target === 'hub') {
+            const manager = requirePluginManager(c, getPluginManager)
+            if (manager instanceof Response) return manager
+            try {
+                return c.json(PluginInstallResultSchema.parse({
+                    ...(await manager.installLocalPlugin(parsed.data.sourcePath, parsed.data)),
+                    target: hubTargetSummary()
+                }))
+            } catch (error) {
+                return c.json({ error: errorMessage(error) }, errorStatus(error))
+            }
+        }
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const result = await runRunnerInstallAction({
+            engine,
+            namespace: c.get('namespace'),
+            target,
+            action: async (machineId) => await engine.installRunnerPluginLocal(machineId, parsed.data)
+        })
+        return result instanceof Response ? result : c.json(PluginInstallResultSchema.parse(result))
+    })
+
+    app.post('/plugins/install-package', async (c) => {
+        const parsedTarget = parseTarget(c)
+        if (parsedTarget instanceof Response) return parsedTarget
+        const target = requireExplicitInstallTarget(c, parsedTarget)
+        if (target instanceof Response) return target
+        const json = await c.req.json().catch(() => null)
+        const parsed = PluginInstallPackageRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
+        }
         try {
-            const result = await manager.installLocalPlugin(parsed.data.sourcePath, parsed.data)
-            return c.json(PluginInstallResultSchema.parse(result))
+            await validatePluginPackagePayload({ ...parsed.data, inspectArchive: true })
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
         }
+        if (target === 'hub') {
+            const manager = requirePluginManager(c, getPluginManager)
+            if (manager instanceof Response) return manager
+            try {
+                return c.json(PluginInstallResultSchema.parse({
+                    ...(await manager.installPluginPackage(parsed.data)),
+                    target: hubTargetSummary()
+                }))
+            } catch (error) {
+                return c.json({ error: errorMessage(error) }, errorStatus(error))
+            }
+        }
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const result = await runRunnerInstallAction({
+            engine,
+            namespace: c.get('namespace'),
+            target,
+            action: async (machineId) => await engine.installRunnerPluginPackage(machineId, parsed.data)
+        })
+        return result instanceof Response ? result : c.json(PluginInstallResultSchema.parse(result))
     })
 
     app.post('/plugins/local-directory', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
-        if (target && target !== 'hub') {
-            return c.json({ error: 'Hub local directory browsing cannot browse a Runner filesystem; use a Runner-scoped install flow when distribution is implemented.' }, 400)
-        }
-        const manager = requirePluginManager(c, getPluginManager)
-        if (manager instanceof Response) {
-            return manager
-        }
         const json = await c.req.json().catch(() => ({}))
         const parsed = PluginLocalDirectoryListRequestSchema.safeParse(json ?? {})
         if (!parsed.success) {
             return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
         }
-        const result = await manager.listLocalDirectory(parsed.data.path)
-        return c.json(PluginLocalDirectoryListResponseSchema.parse(result))
+        if (!target || target === 'hub') {
+            const manager = requirePluginManager(c, getPluginManager)
+            if (manager instanceof Response) return manager
+            const result = await manager.listLocalDirectory(parsed.data.path)
+            return c.json(PluginLocalDirectoryListResponseSchema.parse(result))
+        }
+        if (target === 'all-runners') {
+            return c.json({ error: 'Directory browsing requires a single target; choose target=runner:<machineId>.' }, 400)
+        }
+        const engine = requireSyncEngine(c, getSyncEngine)
+        if (engine instanceof Response) return engine
+        const machineId = parseRunnerPluginTargetScope(target)
+        const machine = machineId ? engine.getMachineByNamespace(machineId, c.get('namespace')) : undefined
+        if (!machine) return c.json({ error: 'Runner target not found' }, 404)
+        if (!machine.active) return c.json({ error: 'Runner target is offline' }, 503)
+        try {
+            return c.json(PluginLocalDirectoryListResponseSchema.parse(await engine.listRunnerPluginDirectory(machine.id, parsed.data.path)))
+        } catch (error) {
+            return c.json({ error: errorMessage(error) }, 500)
+        }
     })
 
     app.get('/plugins/:id', async (c) => {
@@ -509,19 +696,19 @@ export function createPluginsRoutes(
     app.delete('/plugins/:id', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
-        if (target === 'all-runners') {
-            return c.json({ error: 'Deleting across all runners is not supported in this phase.' }, 400)
-        }
         if (target && target !== 'hub') {
             const engine = requireSyncEngine(c, getSyncEngine)
             if (engine instanceof Response) return engine
-            const machineId = parseRunnerPluginTargetScope(target)
-            const machine = machineId ? engine.getMachineByNamespace(machineId, c.get('namespace')) : undefined
-            if (!machine) return c.json({ error: 'Runner target not found' }, 404)
-            if (!machine.active) return c.json({ error: 'Runner target is offline' }, 503)
+            const pluginId = c.req.param('id')
             try {
-                const result = await engine.deleteRunnerPlugin(machine.id, c.req.param('id'))
-                return c.json(PluginDeleteResultSchema.parse(result))
+                const result = await runRunnerDeleteAction({
+                    engine,
+                    namespace: c.get('namespace'),
+                    target,
+                    pluginId,
+                    action: async (machineId) => await engine.deleteRunnerPlugin(machineId, pluginId)
+                })
+                return result instanceof Response ? result : c.json(PluginDeleteResultSchema.parse(result))
             } catch (error) {
                 return c.json({ error: errorMessage(error) }, errorStatus(error))
             }

@@ -12,7 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { DirectorySection } from '@/components/NewSession/DirectorySection'
 import { LoadingState } from '@/components/LoadingState'
-import type { PluginInstallResult, PluginListItem, PluginLocalDirectoryEntry, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginInstallResult, PluginListItem, PluginLocalDirectoryEntry, PluginReloadResult, PluginTargetInventory, PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
@@ -102,7 +102,7 @@ function formatInstallResult(t: (key: string, params?: Record<string, string | n
         tone: result.ok ? 'success' : 'warning',
         lines: [
             t('settings.plugins.install.resultAction', { action: t(`settings.plugins.install.action.${result.action}`), id: result.pluginId ?? t('settings.plugins.unknown') }),
-            t('settings.plugins.install.resultTarget', { path: result.targetPath }),
+            t('settings.plugins.install.resultTarget', { path: result.targetPath ?? (result.targetResults ? `${result.targetResults.length} targets` : t('settings.plugins.unknown')) }),
             ...formatReloadLines(t, result.reload)
         ]
     }
@@ -244,6 +244,7 @@ function buildBreadcrumbs(currentPath: string): { label: string; path: string }[
 
 function HubLocalDirectoryBrowser(props: {
     api: ApiClient
+    target: PluginTargetScope
     initialPath: string
     onSelect: (path: string) => void
     t: (key: string, params?: Record<string, string | number>) => string
@@ -260,7 +261,7 @@ function HubLocalDirectoryBrowser(props: {
         setIsLoading(true)
         setError(null)
         try {
-            const response = await api.listHubPluginDirectory(path?.trim() ? path.trim() : undefined)
+            const response = await api.listPluginDirectory(path?.trim() ? path.trim() : undefined, props.target)
             if (!response.success || !response.path) {
                 setError(response.error ?? t('settings.plugins.install.browseFailed'))
                 return
@@ -274,7 +275,7 @@ function HubLocalDirectoryBrowser(props: {
         } finally {
             setIsLoading(false)
         }
-    }, [api, t])
+    }, [api, props.target, t])
 
     useEffect(() => {
         void loadDirectory(initialPath.trim() || undefined)
@@ -390,19 +391,66 @@ function HubLocalDirectoryBrowser(props: {
     )
 }
 
+
+async function fileToBase64(file: File): Promise<string> {
+    const buffer = await file.arrayBuffer()
+    let binary = ''
+    const bytes = new Uint8Array(buffer)
+    const chunkSize = 0x8000
+    for (let index = 0; index < bytes.length; index += chunkSize) {
+        binary += String.fromCharCode(...bytes.subarray(index, index + chunkSize))
+    }
+    return btoa(binary)
+}
+
+async function fileSha256(file: File): Promise<string> {
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer())
+    return `sha256:${Array.from(new Uint8Array(digest)).map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+function packageFormat(filename: string): 'tgz' | 'zip' | undefined {
+    const lowered = filename.toLowerCase()
+    if (lowered.endsWith('.zip')) return 'zip'
+    if (lowered.endsWith('.tgz') || lowered.endsWith('.tar.gz')) return 'tgz'
+    return undefined
+}
+
+function targetOptions(targets: PluginTargetInventory[]): Array<{ value: PluginTargetScope; label: string }> {
+    const options = new Map<PluginTargetScope, string>()
+    options.set('hub', 'Hub')
+    for (const target of targets) {
+        options.set(target.target.scope, target.target.runtime === 'runner'
+            ? `Runner · ${target.target.displayName ?? target.target.machineId ?? target.target.scope}`
+            : 'Hub')
+    }
+    if ([...options.keys()].some((scope) => scope.startsWith('runner:'))) {
+        options.set('all-runners', 'All runners')
+    }
+    return Array.from(options.entries()).map(([value, label]) => ({ value, label }))
+}
+
 export default function PluginsPage() {
     const { api } = useAppContext()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const { t } = useTranslation()
-    const { plugins, isLoading, error, refetch } = usePlugins(api)
+    const { plugins, targets, isLoading, error, refetch } = usePlugins(api)
     const actions = usePluginActions(api)
     const [filter, setFilter] = useState<PluginFilter>('all')
     const [result, setResult] = useState<ResultState>(null)
     const [installPath, setInstallPath] = useState('')
     const [enableAfterInstall, setEnableAfterInstall] = useState(false)
     const [overwriteLocal, setOverwriteLocal] = useState(false)
+    const [installTarget, setInstallTarget] = useState<PluginTargetScope>('hub')
+    const [packageFile, setPackageFile] = useState<File | null>(null)
     const [browserOpen, setBrowserOpen] = useState(false)
+
+    const installTargetOptions = useMemo(() => targetOptions(targets), [targets])
+    useEffect(() => {
+        if (!installTargetOptions.some((option) => option.value === installTarget)) {
+            setInstallTarget('hub')
+        }
+    }, [installTarget, installTargetOptions])
 
     const counts = useMemo(() => ({
         all: plugins.length,
@@ -441,7 +489,28 @@ export default function PluginsPage() {
             enable: enableAfterInstall,
             overwrite: overwriteLocal,
             reload: true
-        })))
+        }, installTarget)))
+    }
+
+    const installPackage = async () => {
+        if (!packageFile) {
+            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: ['Choose a .tgz, .tar.gz, or .zip plugin package first.'] })
+            return
+        }
+        const format = packageFormat(packageFile.name)
+        if (!format) {
+            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: ['Plugin package must be .tgz, .tar.gz, or .zip.'] })
+            return
+        }
+        await runWithResult(async () => formatInstallResult(t, await actions.installPackagePlugin({
+            filename: packageFile.name,
+            contentBase64: await fileToBase64(packageFile),
+            checksum: await fileSha256(packageFile),
+            format,
+            enable: enableAfterInstall,
+            overwrite: overwriteLocal,
+            reload: true
+        }, installTarget)))
     }
 
     const reloadAll = async () => {
@@ -476,6 +545,17 @@ export default function PluginsPage() {
                             <CardDescription>{t('settings.plugins.install.description')}</CardDescription>
                         </CardHeader>
                         <CardContent className="space-y-3">
+                            <div className="space-y-1">
+                                <label className="text-sm font-medium">Install target</label>
+                                <select
+                                    value={installTarget}
+                                    onChange={(event) => setInstallTarget(event.target.value as PluginTargetScope)}
+                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                                >
+                                    {installTargetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                                </select>
+                                <div className="text-xs text-[var(--app-hint)]">Hub paths are read on the Hub machine; Runner paths are browsed and installed through Runner RPC.</div>
+                            </div>
                             <div className="rounded-xl border border-[var(--app-border)] p-3">
                                 <DirectorySection
                                     directory={installPath}
@@ -501,6 +581,20 @@ export default function PluginsPage() {
                                 <div className="mt-3 flex flex-wrap items-center gap-2">
                                     <Button type="button" disabled={actions.isPending} onClick={() => void installLocal()}>{t('settings.plugins.install.installLocal')}</Button>
                                     <span className="text-xs text-[var(--app-hint)]">{t('settings.plugins.install.localDescription')}</span>
+                                </div>
+                            </div>
+                            <div className="rounded-xl border border-[var(--app-border)] p-3">
+                                <div className="mb-2 text-sm font-medium">Upload package</div>
+                                <input
+                                    type="file"
+                                    accept=".tgz,.gz,.zip"
+                                    disabled={actions.isPending}
+                                    onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)}
+                                    className="w-full text-sm"
+                                />
+                                <div className="mt-3 flex flex-wrap items-center gap-2">
+                                    <Button type="button" disabled={actions.isPending || !packageFile} onClick={() => void installPackage()}>Install package</Button>
+                                    <span className="text-xs text-[var(--app-hint)]">Package archives must include hapi.plugin.package.json. Hub verifies checksum and package metadata before target distribution.</span>
                                 </div>
                             </div>
                         </CardContent>
@@ -539,6 +633,7 @@ export default function PluginsPage() {
                     </DialogHeader>
                     <HubLocalDirectoryBrowser
                         api={api}
+                        target={installTarget}
                         initialPath={installPath}
                         t={t}
                         onSelect={(path) => {

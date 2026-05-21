@@ -1,4 +1,9 @@
 import { describe, expect, it } from 'bun:test'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import type { PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
@@ -97,6 +102,19 @@ function installResult(action: PluginInstallResult['action'] = 'installed'): Plu
     }
 }
 
+function runnerInstallResult(machineId: string): PluginInstallResult {
+    return {
+        ok: true,
+        action: 'installed',
+        plugin: runnerPlugin,
+        pluginId: runnerPlugin.id,
+        targetPath: `/runner/${machineId}/plugins/${runnerPlugin.id}`,
+        target: { scope: `runner:${machineId}`, runtime: 'runner', machineId, active: true, stale: false },
+        diagnostics: [],
+        plugins: [runnerPlugin]
+    }
+}
+
 function deleteResult(): PluginDeleteResult {
     return {
         ok: true,
@@ -105,6 +123,45 @@ function deleteResult(): PluginDeleteResult {
         deleted: true,
         plugins: [],
         reload: reloadResult('deactivated')
+    }
+}
+
+function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = pluginId): { body: { filename: string; contentBase64: string; checksum: string; format: 'tgz' }; cleanup: () => void } {
+    const testDir = mkdtempSync(join(tmpdir(), 'hapi-plugin-package-route-'))
+    const pluginRoot = join(testDir, 'plugin')
+    mkdirSync(pluginRoot, { recursive: true })
+    const hubEntry = 'export function activate() {}'
+    const pluginManifest = {
+        id: pluginId,
+        name: 'Package Plugin',
+        version: '0.1.0',
+        pluginApiVersion: '0.1',
+        runtimes: { hub: { entry: 'hub.js' } }
+    }
+    const manifestText = JSON.stringify(pluginManifest, null, 2)
+    writeFileSync(join(pluginRoot, 'hub.js'), hubEntry)
+    writeFileSync(join(pluginRoot, 'hapi.plugin.json'), manifestText)
+    writeFileSync(join(pluginRoot, 'hapi.plugin.package.json'), JSON.stringify({
+        formatVersion: 'hapi-plugin-package/v1',
+        manifest: { ...pluginManifest, id: metadataPluginId },
+        checksum: 'provided-by-upload-request',
+        files: [
+            { path: './hapi.plugin.json', sha256: `sha256:${createHash('sha256').update(manifestText).digest('hex')}` },
+            { path: './hub.js', sha256: `sha256:${createHash('sha256').update(hubEntry).digest('hex')}` }
+        ],
+        signature: { algorithm: 'test-none', value: 'unsigned-test' }
+    }, null, 2))
+    const packagePath = join(testDir, 'plugin.tgz')
+    execFileSync('tar', ['-czf', packagePath, '-C', pluginRoot, '.'])
+    const bytes = readFileSync(packagePath)
+    return {
+        body: {
+            filename: 'plugin.tgz',
+            contentBase64: bytes.toString('base64'),
+            checksum: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
+            format: 'tgz'
+        },
+        cleanup: () => rmSync(testDir, { recursive: true, force: true })
     }
 }
 
@@ -226,6 +283,229 @@ describe('plugin admin routes', () => {
         expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
     })
 
+    it('requires explicit target scope for install-local', async () => {
+        const app = createApp({ installLocalPlugin: async () => installResult('installed') } as never)
+        const response = await app.request('/api/plugins/install-local', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ sourcePath: '/tmp/plugin' })
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Plugin install requires target=hub, target=runner:<machineId>, or target=all-runners.' })
+    })
+
+    it('routes Runner local directory browsing through Runner RPC and rejects offline targets', async () => {
+        const online = makeMachine('runner-online', true)
+        const offline = makeMachine('runner-offline', false)
+        const calls: string[] = []
+        const app = createApp({ listLocalDirectory: async () => { throw new Error('Hub manager must not browse Runner paths') } } as never, {
+            getMachineByNamespace: (machineId: string) => machineId === 'runner-online' ? online : offline,
+            listRunnerPluginDirectory: async (machineId: string, path?: string) => {
+                calls.push(`${machineId}:${path}`)
+                return { success: true, path: path ?? '/runner', entries: [] }
+            }
+        } as never)
+        const headers = { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' }
+
+        const ok = await app.request('/api/plugins/local-directory?target=runner:runner-online', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ path: '/runner/plugins' })
+        })
+        const offlineResponse = await app.request('/api/plugins/local-directory?target=runner:runner-offline', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ path: '/runner/plugins' })
+        })
+
+        expect(ok.status).toBe(200)
+        expect(calls).toEqual(['runner-online:/runner/plugins'])
+        expect(offlineResponse.status).toBe(503)
+        expect(await offlineResponse.json()).toEqual({ error: 'Runner target is offline' })
+    })
+
+    it('forwards runner install-local to Runner RPC without reading Hub local paths', async () => {
+        const online = makeMachine('runner-1', true)
+        const managerCalls: string[] = []
+        const runnerCalls: string[] = []
+        const app = createApp({
+            installLocalPlugin: async (sourcePath: string) => {
+                managerCalls.push(sourcePath)
+                return installResult('installed')
+            }
+        } as never, {
+            getMachineByNamespace: () => online,
+            installRunnerPluginLocal: async (machineId: string, body: { sourcePath: string }) => {
+                runnerCalls.push(`${machineId}:${body.sourcePath}`)
+                return runnerInstallResult(machineId)
+            }
+        } as never)
+
+        const response = await app.request('/api/plugins/install-local?target=runner:runner-1', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ sourcePath: '/runner/local/plugin', enable: true })
+        })
+
+        expect(response.status).toBe(200)
+        expect(managerCalls).toEqual([])
+        expect(runnerCalls).toEqual(['runner-1:/runner/local/plugin'])
+    })
+
+    it('returns per-target install results for partial all-runners failures', async () => {
+        const online = makeMachine('runner-online', true)
+        const offline = makeMachine('runner-offline', false)
+        const app = createApp({ listPlugins: () => [] } as never, {
+            getMachinesByNamespace: () => [online, offline],
+            installRunnerPluginLocal: async (machineId: string) => runnerInstallResult(machineId)
+        } as never)
+
+        const response = await app.request('/api/plugins/install-local?target=all-runners', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+            body: JSON.stringify({ sourcePath: '/runner/local/plugin' })
+        })
+
+        expect(response.status).toBe(200)
+        const payload = await response.json() as PluginInstallResult
+        expect(payload.ok).toBe(false)
+        expect(payload.targetResults).toHaveLength(2)
+        expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.ok).toBe(true)
+        expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
+    })
+
+    it('prevalidates uploaded package checksums before Runner distribution', async () => {
+        const online = makeMachine('runner-1', true)
+        const calls: string[] = []
+        const app = createApp({ listPlugins: () => [] } as never, {
+            getMachineByNamespace: () => online,
+            installRunnerPluginPackage: async (machineId: string) => {
+                calls.push(machineId)
+                return runnerInstallResult(machineId)
+            }
+        } as never)
+
+        const response = await app.request('/api/plugins/install-package?target=runner:runner-1', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+            body: JSON.stringify({
+                filename: 'plugin.tgz',
+                contentBase64: Buffer.from('not-a-package').toString('base64'),
+                checksum: 'sha256:deadbeef'
+            })
+        })
+
+        expect(response.status).toBe(400)
+        expect((await response.json() as { error: string }).error).toContain('checksum mismatch')
+        expect(calls).toEqual([])
+    })
+
+    it('prevalidates uploaded package manifest metadata before Runner distribution', async () => {
+        const online = makeMachine('runner-1', true)
+        const calls: string[] = []
+        const packageFixture = makeTgzPackage('com.example.package', 'com.example.mismatch')
+        try {
+            const app = createApp({ listPlugins: () => [] } as never, {
+                getMachineByNamespace: () => online,
+                installRunnerPluginPackage: async (machineId: string) => {
+                    calls.push(machineId)
+                    return runnerInstallResult(machineId)
+                }
+            } as never)
+
+            const response = await app.request('/api/plugins/install-package?target=runner:runner-1', {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+                body: JSON.stringify(packageFixture.body)
+            })
+
+            expect(response.status).toBe(400)
+            expect((await response.json() as { error: string }).error).toContain('metadata does not match')
+            expect(calls).toEqual([])
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
+    it('returns per-target results for uploaded package all-runners distribution', async () => {
+        const online = makeMachine('runner-online', true)
+        const offline = makeMachine('runner-offline', false)
+        const packageFixture = makeTgzPackage()
+        try {
+            const app = createApp({ listPlugins: () => [] } as never, {
+                getMachinesByNamespace: () => [online, offline],
+                installRunnerPluginPackage: async (machineId: string) => runnerInstallResult(machineId)
+            } as never)
+
+            const response = await app.request('/api/plugins/install-package?target=all-runners', {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+                body: JSON.stringify(packageFixture.body)
+            })
+
+            expect(response.status).toBe(200)
+            const payload = await response.json() as PluginInstallResult
+            expect(payload.ok).toBe(false)
+            expect(payload.targetResults).toHaveLength(2)
+            expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.ok).toBe(true)
+            expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
+    it('keeps Hub and Runner delete actions isolated by target', async () => {
+        const online = makeMachine('runner-1', true)
+        const calls: string[] = []
+        const app = createApp({
+            deletePlugin: async (id: string) => {
+                calls.push(`hub:${id}`)
+                return deleteResult()
+            }
+        } as never, {
+            getMachineByNamespace: () => online,
+            deleteRunnerPlugin: async (machineId: string, id: string) => {
+                calls.push(`runner:${machineId}:${id}`)
+                return { ...deleteResult(), target: { scope: `runner:${machineId}`, runtime: 'runner', machineId, active: true, stale: false } }
+            }
+        } as never)
+        const headers = { authorization: `Bearer ${await token()}` }
+
+        const hubDelete = await app.request('/api/plugins/com.example.plugin?target=hub', { method: 'DELETE', headers })
+        const runnerDelete = await app.request('/api/plugins/com.example.plugin?target=runner:runner-1', { method: 'DELETE', headers })
+
+        expect(hubDelete.status).toBe(200)
+        expect(runnerDelete.status).toBe(200)
+        expect(calls).toEqual(['hub:com.example.plugin', 'runner:runner-1:com.example.plugin'])
+    })
+
+    it('returns per-target delete results for all-runners', async () => {
+        const online = makeMachine('runner-online', true)
+        const offline = makeMachine('runner-offline', false)
+        const app = createApp({ listPlugins: () => [] } as never, {
+            getMachinesByNamespace: () => [online, offline],
+            deleteRunnerPlugin: async (machineId: string, id: string) => ({
+                ...deleteResult(),
+                pluginId: id,
+                rootPath: `/runner/${machineId}/plugins/${id}`,
+                target: { scope: `runner:${machineId}`, runtime: 'runner', machineId, active: true, stale: false }
+            })
+        } as never)
+
+        const response = await app.request('/api/plugins/com.example.plugin?target=all-runners', {
+            method: 'DELETE',
+            headers: { authorization: `Bearer ${await token()}` }
+        })
+
+        expect(response.status).toBe(200)
+        const payload = await response.json() as PluginDeleteResult
+        expect(payload.ok).toBe(false)
+        expect(payload.targetResults).toHaveLength(2)
+        expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.deleted).toBe(true)
+        expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
+    })
+
     it('validates config bodies and calls manager actions', async () => {
         const calls: string[] = []
         const app = createApp({
@@ -257,11 +537,11 @@ describe('plugin admin routes', () => {
         expect((await app.request('/api/plugins/com.example.plugin/disable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin/reload', { method: 'POST', headers })).status).toBe(200)
         expect((await app.request('/api/plugins/reload', { method: 'POST', headers })).status).toBe(200)
-        expect((await app.request('/api/plugins/install-local', { method: 'POST', headers, body: JSON.stringify({ sourcePath: '/tmp/plugin' }) })).status).toBe(200)
+        expect((await app.request('/api/plugins/install-local?target=hub', { method: 'POST', headers, body: JSON.stringify({ sourcePath: '/tmp/plugin' }) })).status).toBe(200)
         expect((await app.request('/api/plugins/local-directory', { method: 'POST', headers, body: JSON.stringify({ path: '/tmp' }) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin', { method: 'DELETE', headers })).status).toBe(200)
         expect((await app.request('/api/plugins/install-example', { method: 'POST', headers, body: JSON.stringify({ enable: true }) })).status).toBe(404)
-        const invalidInstall = await app.request('/api/plugins/install-local', {
+        const invalidInstall = await app.request('/api/plugins/install-local?target=hub', {
             method: 'POST',
             headers,
             body: JSON.stringify({ sourcePath: '' })
