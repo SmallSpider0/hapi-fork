@@ -12,6 +12,7 @@ import { opencodeCommand } from './opencode'
 import { hookForwarderCommand } from './hookForwarder'
 import { mcpCommand } from './mcp'
 import { notifyCommand } from './notify'
+import { pluginsCommand } from './plugins'
 import { hubCommand } from './hub'
 import type { CommandContext, CommandDefinition } from './types'
 
@@ -30,7 +31,8 @@ const COMMANDS: CommandDefinition[] = [
     doctorCommand,
     resumeCommand,
     runnerCommand,
-    notifyCommand
+    notifyCommand,
+    pluginsCommand
 ]
 
 const commandMap = new Map<string, CommandDefinition>()

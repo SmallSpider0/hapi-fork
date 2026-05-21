@@ -15,6 +15,7 @@ import { VisibilityTracker } from './visibility/visibilityTracker'
 import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
+import { HubPluginManager } from './plugins/pluginManager'
 import QRCode from 'qrcode'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
@@ -105,6 +106,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     let sseManager: SSEManager | null = null
     let visibilityTracker: VisibilityTracker | null = null
     let notificationHub: NotificationHub | null = null
+    let pluginManager: HubPluginManager | null = null
     let tunnelManager: TunnelManager | null = null
 
     // Load configuration (async - loads from env/file with persistence)
@@ -216,6 +218,24 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         }
     }
 
+    pluginManager = new HubPluginManager({
+        hapiHome: config.dataDir,
+        publicUrl: config.publicUrl,
+        env: process.env
+    })
+    await pluginManager.start()
+    for (const diagnostic of pluginManager.getDiagnostics()) {
+        const message = `[Hub Plugin] ${diagnostic.code}: ${diagnostic.message}`
+        if (diagnostic.severity === 'error') {
+            console.error(message)
+        } else if (diagnostic.severity === 'warning') {
+            console.warn(message)
+        } else {
+            console.log(message)
+        }
+    }
+    notificationChannels.push(pluginManager.getNotificationChannel())
+
     notificationHub = new NotificationHub(syncEngine, notificationChannels)
 
     // Start HTTP service first (before tunnel, so tunnel has something to forward to)
@@ -223,6 +243,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         getSyncEngine: () => syncEngine,
         getSseManager: () => sseManager,
         getVisibilityTracker: () => visibilityTracker,
+        getPluginManager: () => pluginManager,
         jwtSecret,
         store,
         vapidPublicKey: vapidKeys.publicKey,
@@ -309,6 +330,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             await tunnelManager?.stop()
             await happyBot?.stop()
             notificationHub?.stop()
+            await pluginManager?.dispose()
             syncEngine?.stop()
             sseManager?.stop()
             webServer?.stop()

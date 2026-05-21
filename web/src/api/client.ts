@@ -29,6 +29,16 @@ import type {
 } from '@hapi/protocol/apiTypes'
 import type { AgentFlavor } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
+import type {
+    PluginConfigUpdateRequest,
+    PluginDetailResponse,
+    PluginEnableRequest,
+    PluginInstallExampleRequest,
+    PluginInstallLocalRequest,
+    PluginInstallResult,
+    PluginListResponse,
+    PluginReloadResult
+} from '@hapi/protocol/plugins/admin'
 
 type ApiClientOptions = {
     baseUrl?: string
@@ -161,6 +171,60 @@ export class ApiClient {
         }
 
         return await res.json() as AuthResponse
+    }
+
+
+    async getPlugins(): Promise<PluginListResponse> {
+        return await this.request<PluginListResponse>('/api/plugins')
+    }
+
+    async getPlugin(pluginId: string): Promise<PluginDetailResponse> {
+        return await this.request<PluginDetailResponse>(`/api/plugins/${encodeURIComponent(pluginId)}`)
+    }
+
+    async enablePlugin(pluginId: string, config?: Record<string, unknown>): Promise<PluginReloadResult> {
+        const body: PluginEnableRequest = { ...(config ? { config } : {}) }
+        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/enable`, {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
+    }
+
+    async disablePlugin(pluginId: string): Promise<PluginReloadResult> {
+        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/disable`, {
+            method: 'POST',
+            body: JSON.stringify({})
+        })
+    }
+
+    async updatePluginConfig(pluginId: string, config: Record<string, unknown>): Promise<PluginReloadResult> {
+        const body: PluginConfigUpdateRequest = { config }
+        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/config`, {
+            method: 'PATCH',
+            body: JSON.stringify(body)
+        })
+    }
+
+    async reloadPlugins(): Promise<PluginReloadResult> {
+        return await this.request<PluginReloadResult>('/api/plugins/reload', { method: 'POST' })
+    }
+
+    async reloadPlugin(pluginId: string): Promise<PluginReloadResult> {
+        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/reload`, { method: 'POST' })
+    }
+
+    async installExamplePlugin(options: PluginInstallExampleRequest = {}): Promise<PluginInstallResult> {
+        return await this.request<PluginInstallResult>('/api/plugins/install-example', {
+            method: 'POST',
+            body: JSON.stringify(options)
+        })
+    }
+
+    async installLocalPlugin(body: PluginInstallLocalRequest): Promise<PluginInstallResult> {
+        return await this.request<PluginInstallResult>('/api/plugins/install-local', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
     }
 
     async getSessions(): Promise<SessionsResponse> {

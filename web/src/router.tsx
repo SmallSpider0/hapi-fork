@@ -39,6 +39,8 @@ import FilesPage from '@/routes/sessions/files'
 import FilePage from '@/routes/sessions/file'
 import TerminalPage from '@/routes/sessions/terminal'
 import SettingsPage from '@/routes/settings'
+import PluginsPage from '@/routes/settings/plugins'
+import PluginPage from '@/routes/settings/plugin'
 
 function BackIcon(props: { className?: string }) {
     return (
@@ -690,6 +692,18 @@ const settingsRoute = createRoute({
     component: SettingsPage,
 })
 
+const settingsPluginsRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/settings/plugins',
+    component: PluginsPage,
+})
+
+const settingsPluginRoute = createRoute({
+    getParentRoute: () => rootRoute,
+    path: '/settings/plugins/$pluginId',
+    component: PluginPage,
+})
+
 export const routeTree = rootRoute.addChildren([
     indexRoute,
     sessionsRoute.addChildren([
@@ -703,6 +717,8 @@ export const routeTree = rootRoute.addChildren([
     ]),
     browseRoute,
     settingsRoute,
+    settingsPluginsRoute,
+    settingsPluginRoute,
 ])
 
 type RouterHistory = Parameters<typeof createRouter>[0]['history']

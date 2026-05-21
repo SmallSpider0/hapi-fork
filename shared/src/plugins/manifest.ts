@@ -1,0 +1,62 @@
+import { z } from 'zod'
+
+export const HAPI_PLUGIN_MANIFEST_FILE = 'hapi.plugin.json'
+export const HAPI_PLUGIN_API_VERSION = '0.1'
+
+const PluginIdSchema = z.string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must start with an alphanumeric character and contain only alphanumeric characters, dots, underscores, or dashes')
+
+const SemverSchema = z.string()
+    .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/, 'must be a semantic version')
+
+const ContributionIdSchema = z.string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must start with an alphanumeric character and contain only alphanumeric characters, dots, underscores, or dashes')
+
+const HubRuntimeSchema = z.object({
+    entry: z.string().min(1)
+}).strict()
+
+const HubNotificationChannelContributionSchema = z.object({
+    id: ContributionIdSchema,
+    displayName: z.string().min(1)
+}).strict()
+
+const PluginManifestLiteBaseSchema = z.object({
+    id: PluginIdSchema,
+    name: z.string().min(1),
+    version: SemverSchema,
+    pluginApiVersion: z.string().min(1),
+    description: z.string().optional(),
+    runtimes: z.object({
+        hub: HubRuntimeSchema.optional()
+    }).strict().optional(),
+    contributions: z.object({
+        hub: z.object({
+            notificationChannels: z.array(HubNotificationChannelContributionSchema).optional()
+        }).strict().optional()
+    }).strict().optional(),
+    config: z.object({
+        schema: z.string().min(1).optional()
+    }).strict().optional(),
+    permissions: z.object({
+        network: z.array(z.string().min(1)).optional(),
+        secrets: z.array(z.string().min(1)).optional()
+    }).strict().optional(),
+    compatibility: z.object({
+        hapi: z.string().min(1).optional(),
+        os: z.array(z.enum(['darwin', 'linux', 'win32'])).optional()
+    }).strict().optional()
+}).strict()
+
+export const RawPluginManifestLiteSchema = PluginManifestLiteBaseSchema
+
+export const PluginManifestLiteSchema = PluginManifestLiteBaseSchema.extend({
+    pluginApiVersion: z.literal(HAPI_PLUGIN_API_VERSION)
+}).strict()
+
+export type PluginManifestLite = z.infer<typeof PluginManifestLiteSchema>
+export type RawPluginManifestLite = z.infer<typeof RawPluginManifestLiteSchema>
