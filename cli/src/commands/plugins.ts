@@ -356,6 +356,12 @@ async function runInspect(args: string[]): Promise<void> {
         manifest: record.manifest,
         config: sanitizePluginConfigForView(record.config, record.manifest?.permissions?.secrets ?? []),
         runtimeEntryPaths: record.runtimeEntryPaths,
+        contributions: {
+            notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
+            ...(record.manifest?.contributions?.runner ? { runner: record.manifest.contributions.runner } : {}),
+            ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
+            ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
+        },
         permissions: {
             network: record.manifest?.permissions?.network ?? [],
             secrets: (record.manifest?.permissions?.secrets ?? []).map((name) => ({ name, present: Boolean(process.env[name]) }))
@@ -372,6 +378,14 @@ async function runInspect(args: string[]): Promise<void> {
     console.log(`Root: ${item.rootPath}`)
     console.log(`Manifest: ${item.manifestPath}`)
     console.log(`Hub entry: ${record.manifest?.runtimes?.hub?.entry ?? '(none)'}`)
+    console.log(`Runner entry: ${record.manifest?.runtimes?.runner?.entry ?? '(none)'}`)
+    const runnerContributions = record.manifest?.contributions?.runner
+    const extensionLabels = [
+        ...(runnerContributions?.environmentProviders ?? []).map((entry) => `env:${entry.id}`),
+        ...(runnerContributions?.commandResolvers ?? []).map((entry) => `command:${entry.id}`),
+        ...(runnerContributions?.spawnHooks ?? []).map((entry) => `spawn:${entry.id}`)
+    ]
+    console.log(`Runner extensions: ${extensionLabels.join(', ') || '(none)'}`)
     console.log(`Network: ${(record.manifest?.permissions?.network ?? []).join(', ') || '(none)'}`)
     console.log(`Secrets: ${(record.manifest?.permissions?.secrets ?? []).join(', ') || '(none)'}`)
     if (record.config) {

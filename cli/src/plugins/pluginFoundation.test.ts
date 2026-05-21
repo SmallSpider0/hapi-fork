@@ -2,7 +2,13 @@ import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { PluginManifestLiteSchema, PluginTargetScopeSchema } from '@hapi/protocol/plugins'
+import {
+    PluginManifestLiteSchema,
+    PluginTargetScopeSchema,
+    RunnerCommandResolverProposalSchema,
+    RunnerEnvironmentProposalSchema,
+    RunnerSpawnHookProposalSchema
+} from '@hapi/protocol/plugins'
 import {
     discoverPlugins,
     getPluginStateFile,
@@ -293,6 +299,17 @@ describe('plugin multi-runtime schemas', () => {
         }))
 
         expect(parsed.success).toBe(true)
+    })
+
+    it('validates Runner extension proposal schemas', () => {
+        expect(RunnerEnvironmentProposalSchema.safeParse({
+            env: { EXAMPLE_HOME: '/opt/example' },
+            pathPrepend: ['/opt/example/bin']
+        }).success).toBe(true)
+        expect(RunnerEnvironmentProposalSchema.safeParse({ env: { BAD: 42 } }).success).toBe(false)
+        expect(RunnerCommandResolverProposalSchema.safeParse({ args: ['codex', '--model', 'gpt-5.5'] }).success).toBe(true)
+        expect(RunnerCommandResolverProposalSchema.safeParse({ command: '/bin/sh' }).success).toBe(false)
+        expect(RunnerSpawnHookProposalSchema.safeParse({ block: { reason: 'policy' } }).success).toBe(true)
     })
 
     it('validates Runner entry paths with the same escape guards as Hub entries', async () => {

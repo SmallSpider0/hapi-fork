@@ -107,7 +107,7 @@ describe('RunnerPluginManager runtime', () => {
             const log = ${JSON.stringify(logFile)};
             export function activate(ctx) {
                 appendFileSync(log, 'activate-v1\\n');
-                ctx.runtime.registerEnvironmentProvider({ dispose() { appendFileSync(log, 'dispose-v1\\n'); } });
+                ctx.runtime.registerEnvironmentProvider({ id: 'env', dispose() { appendFileSync(log, 'dispose-v1\\n'); } });
             }
         `)
         writeState(testDir)
@@ -131,8 +131,8 @@ describe('RunnerPluginManager runtime', () => {
             import { appendFileSync } from 'node:fs';
             const log = ${JSON.stringify(logFile)};
             export function activate(ctx) {
-                ctx.runtime.registerEnvironmentProvider({ dispose() { appendFileSync(log, 'dispose-env\\n'); } });
-                ctx.runtime.registerSpawnHook({ dispose() { throw new Error('dispose failed'); } });
+                ctx.runtime.registerEnvironmentProvider({ id: 'env', dispose() { appendFileSync(log, 'dispose-env\\n'); } });
+                ctx.runtime.registerSpawnHook({ id: 'spawn', dispose() { throw new Error('dispose failed'); } });
             }
         `)
         writeState(testDir)
@@ -154,7 +154,7 @@ describe('RunnerPluginManager runtime', () => {
             const log = ${JSON.stringify(logFile)};
             export async function activate(ctx) {
                 await new Promise((resolve) => setTimeout(resolve, 20));
-                ctx.runtime.registerEnvironmentProvider({ dispose() { appendFileSync(log, 'dispose-race\\n'); } });
+                ctx.runtime.registerEnvironmentProvider({ id: 'env', dispose() { appendFileSync(log, 'dispose-race\\n'); } });
             }
         `)
         writeState(testDir)
@@ -179,6 +179,132 @@ describe('RunnerPluginManager runtime', () => {
         expect(result.ok).toBe(false)
         expect(manager.listPlugins()[0]).toMatchObject({ status: 'failed', active: false })
         expect(manager.getDiagnostics().some((diagnostic) => diagnostic.code === 'runner-plugin-activate-failed')).toBe(true)
+    })
+
+    it('applies active Runner extension proposals to spawn plans', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerEnvironmentProvider({
+                    id: 'env',
+                    priority: 1,
+                    provide() {
+                        return {
+                            env: { EXAMPLE_TOOL_HOME: '/opt/example' },
+                            pathPrepend: ['/opt/example/bin'],
+                            diagnostics: [{ severity: 'info', code: 'custom-env-diagnostic', message: 'env provider ran' }]
+                        };
+                    }
+                });
+                ctx.runtime.registerCommandResolver({
+                    id: 'cmd',
+                    resolve() {
+                        return { args: ['codex', '--model', 'gpt-5.5'] };
+                    }
+                });
+            }
+        `)
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        const plan = await manager.resolveSpawnPlan({
+            options: { directory: '/repo', agent: 'codex' },
+            agent: 'codex',
+            basePlan: {
+                command: '/opt/hapi/current',
+                args: ['codex'],
+                displayArgs: ['codex'],
+                mode: 'compiled'
+            },
+            cwd: '/repo',
+            env: { PATH: '/usr/bin' }
+        })
+
+        expect(plan.env.EXAMPLE_TOOL_HOME).toBe('/opt/example')
+        expect(plan.env.PATH).toBe('/opt/example/bin:/usr/bin')
+        expect(plan.displayArgs).toEqual(['codex', '--model', 'gpt-5.5'])
+        expect(manager.getPlugin('com.example.runner')?.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'custom-env-diagnostic' }),
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-extension-audit' })
+        ]))
+        expect(manager.getInventory().extensions?.environmentProviders).toEqual([
+            expect.objectContaining({ pluginId: 'com.example.runner', id: 'env', type: 'environmentProvider', active: true })
+        ])
+    })
+
+    it('isolates throwing hooks and runs afterSpawn/onExit diagnostics without crashing', async () => {
+        writeFileSync(runnerEntry, `
+            import { appendFileSync } from 'node:fs';
+            const log = ${JSON.stringify(logFile)};
+            export function activate(ctx) {
+                ctx.runtime.registerSpawnHook({
+                    id: 'spawn',
+                    beforeSpawn() { throw new Error('before failed'); },
+                    afterSpawn(input) { appendFileSync(log, 'after:' + input.pid + '\\n'); },
+                    onExit(input) { appendFileSync(log, 'exit:' + input.exitCode + ':' + input.signal + '\\n'); }
+                });
+            }
+        `)
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+        const plan = await manager.resolveSpawnPlan({
+            options: { directory: '/repo', agent: 'codex' },
+            agent: 'codex',
+            basePlan: {
+                command: '/opt/hapi/current',
+                args: ['codex'],
+                displayArgs: ['codex'],
+                mode: 'compiled'
+            },
+            cwd: '/repo',
+            env: {}
+        })
+
+        expect(plan.blocked).toBeUndefined()
+        expect(plan.diagnostics.map((entry) => entry.code)).toContain('runner-extension-before-spawn-failed')
+        expect(manager.getPlugin('com.example.runner')?.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-extension-before-spawn-failed' })
+        ]))
+        await manager.notifyAfterSpawn({
+            context: { machineId: 'runner-1', agent: 'codex', directory: '/repo', cwd: '/repo', args: ['codex'], envKeys: [] },
+            pid: 123
+        })
+        await manager.notifyExit({
+            context: { machineId: 'runner-1', agent: 'codex', directory: '/repo', cwd: '/repo', args: ['codex'], envKeys: [] },
+            pid: 123,
+            exitCode: 0,
+            signal: null
+        })
+
+        const log = readFileSync(logFile, 'utf8')
+        expect(log).toContain('after:123')
+        expect(log).toContain('exit:0:null')
+    })
+
+    it('attributes afterSpawn and onExit failures to the plugin detail diagnostics', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerSpawnHook({
+                    id: 'spawn',
+                    afterSpawn() { throw new Error('after failed'); },
+                    onExit() { throw new Error('exit failed'); }
+                });
+            }
+        `)
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        const context = { machineId: 'runner-1', agent: 'codex', directory: '/repo', cwd: '/repo', args: ['codex'], envKeys: [] }
+        await manager.notifyAfterSpawn({ context, pid: 123 })
+        await manager.notifyExit({ context, pid: 123, exitCode: 1, signal: null })
+
+        const diagnostics = manager.getPlugin('com.example.runner')?.diagnostics ?? []
+        expect(diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-extension-after-spawn-failed' }),
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-extension-on-exit-failed' })
+        ]))
     })
 
     it('does not import invalid Runner plugins', async () => {

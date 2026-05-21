@@ -10,7 +10,7 @@ import { authAndSetupMachineIfNeeded } from '@/ui/auth';
 import { configuration } from '@/configuration';
 import packageJson from '../../package.json';
 import { getEnvironmentInfo } from '@/ui/doctor';
-import { spawnHappyCLI } from '@/utils/spawnHappyCLI';
+import { buildHappyCliSpawnPlan, spawnHappyCLI, spawnHappyCLIPlan } from '@/utils/spawnHappyCLI';
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
@@ -25,6 +25,7 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 import { RunnerPluginManager } from './plugins/runnerPluginManager';
+import { RunnerSpawnContextSchema } from '@hapi/protocol/plugins';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -159,6 +160,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       return String(error);
     };
 
+    const runnerPluginManager = new RunnerPluginManager({
+      hapiHome: configuration.happyHomeDir,
+      machineId,
+      envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
+      env: process.env
+    });
+    await runnerPluginManager.start();
+
     // Helper functions
     const getCurrentChildren = () => Array.from(pidToTrackedSession.values());
 
@@ -242,7 +251,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       let directoryCreated = false;
       let spawnDirectory = directory;
       let worktreeInfo: WorktreeInfo | null = null;
-      let happyProcess: ReturnType<typeof spawnHappyCLI> | null = null;
+      let happyProcess: ReturnType<typeof spawnHappyCLIPlan> | null = null;
 
       if (sessionType === 'simple') {
         try {
@@ -380,6 +389,50 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
         }
 
         const args = buildCliArgs(agent, options, yolo);
+        const basePlan = buildHappyCliSpawnPlan(args);
+        const extensionPlan = await runnerPluginManager.resolveSpawnPlan({
+          options,
+          agent,
+          basePlan,
+          cwd: spawnDirectory,
+          env: {
+            ...process.env,
+            ...extraEnv
+          }
+        });
+
+        if (extensionPlan.blocked) {
+          const errorMessage = `Plugin beforeSpawn blocked session spawn: ${extensionPlan.blocked.reason}`;
+          logger.debug(`[RUNNER RUN] ${errorMessage}`);
+          reportSpawnOutcomeToHub?.({
+            type: 'error',
+            details: {
+              message: errorMessage
+            }
+          });
+          await maybeCleanupWorktree('plugin-before-spawn-blocked');
+          return {
+            type: 'error',
+            errorMessage
+          };
+        }
+
+        const pluginSpawnContext = RunnerSpawnContextSchema.parse({
+          machineId,
+          agent,
+          directory,
+          cwd: extensionPlan.cwd,
+          args: extensionPlan.displayArgs,
+          envKeys: Object.keys(extensionPlan.env).sort(),
+          ...(options.sessionType ? { sessionType: options.sessionType } : {}),
+          ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
+          ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
+          ...(options.model ? { model: options.model } : {}),
+          ...(options.effort ? { effort: options.effort } : {}),
+          ...(options.modelReasoningEffort ? { modelReasoningEffort: options.modelReasoningEffort } : {}),
+          ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+          ...(options.yolo !== undefined ? { yolo: options.yolo } : {})
+        });
 
         // sessionId reserved for future use
         const MAX_TAIL_CHARS = 4000;
@@ -400,14 +453,16 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           logger.debug('[RUNNER RUN] Child stderr tail', trimmed);
         };
 
-        happyProcess = spawnHappyCLI(args, {
-          cwd: spawnDirectory,
+        happyProcess = spawnHappyCLIPlan({
+          command: basePlan.command,
+          args: extensionPlan.args,
+          displayArgs: extensionPlan.displayArgs,
+          mode: basePlan.mode
+        }, {
+          cwd: extensionPlan.cwd,
           detached: true,  // Sessions stay alive when runner stops
           stdio: ['ignore', 'pipe', 'pipe'],  // Capture stdout/stderr for debugging
-          env: {
-            ...process.env,
-            ...extraEnv
-          }
+          env: extensionPlan.env
         });
 
         happyProcess.stderr?.on('data', (data) => {
@@ -485,10 +540,22 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
         pidToTrackedSession.set(pid, trackedSession);
 
+        void runnerPluginManager.notifyAfterSpawn({ context: pluginSpawnContext, pid }).catch((error) => {
+          logger.debug('[RUNNER RUN] Runner plugin afterSpawn notification failed', error);
+        });
+
         happyProcess.on('exit', (code, signal) => {
           observedExitCode = typeof code === 'number' ? code : null;
           observedExitSignal = signal ?? null;
           logger.debug(`[RUNNER RUN] Child PID ${pid} exited with code ${code}, signal ${signal}`);
+          void runnerPluginManager.notifyExit({
+            context: pluginSpawnContext,
+            pid,
+            exitCode: observedExitCode,
+            signal: observedExitSignal
+          }).catch((error) => {
+            logger.debug('[RUNNER RUN] Runner plugin onExit notification failed', error);
+          });
           if (code !== 0 || signal) {
             logStderrTail();
           }
@@ -659,14 +726,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     });
 
     const startedWithCliMtimeMs = getInstalledCliMtimeMs();
-
-    const runnerPluginManager = new RunnerPluginManager({
-      hapiHome: configuration.happyHomeDir,
-      machineId,
-      envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
-      env: process.env
-    });
-    await runnerPluginManager.start();
 
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {

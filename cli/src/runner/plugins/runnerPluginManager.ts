@@ -27,7 +27,19 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import type { PluginStateFile } from '@hapi/protocol/plugins'
-import { redactText, RunnerPluginRegistry, type RunnerPluginModule } from './runnerPluginRegistry'
+import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerPluginModule } from './runnerPluginRegistry'
+import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
+import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
+import {
+    resolveRunnerPluginSpawnPlan,
+    runRunnerPluginAfterSpawnHooks,
+    runRunnerPluginExitHooks,
+    type RegisteredRunnerContribution,
+    type RunnerCommandResolverContribution,
+    type RunnerEnvironmentProviderContribution,
+    type RunnerSpawnHookContribution
+} from './runnerExtensionPipeline'
+import type { RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
 
 export interface RunnerPluginManagerOptions {
     hapiHome: string
@@ -186,8 +198,68 @@ export class RunnerPluginManager {
             machineId: this.options.machineId,
             updatedAt: this.lastInventoryUpdatedAt,
             plugins: this.listPlugins(),
-            diagnostics: this.getDiagnostics()
+            diagnostics: this.getDiagnostics(),
+            extensions: {
+                environmentProviders: this.collectContributionSummaries('environmentProvider'),
+                commandResolvers: this.collectContributionSummaries('commandResolver'),
+                spawnHooks: this.collectContributionSummaries('spawnHook')
+            }
         }
+    }
+
+    async resolveSpawnPlan(args: {
+        options: SpawnSessionOptions
+        agent: string
+        basePlan: HappyCliSpawnPlan
+        cwd: string
+        env: NodeJS.ProcessEnv
+    }): Promise<RunnerResolvedSpawnPlan> {
+        const result = await resolveRunnerPluginSpawnPlan({
+            machineId: this.options.machineId,
+            options: args.options,
+            agent: args.agent,
+            basePlan: {
+                command: args.basePlan.command,
+                args: args.basePlan.args,
+                displayArgs: args.basePlan.displayArgs,
+                mode: args.basePlan.mode,
+                cwd: args.cwd,
+                env: args.env
+            },
+            environmentProviders: this.collectEnvironmentProviders(),
+            commandResolvers: this.collectCommandResolvers(),
+            spawnHooks: this.collectSpawnHooks()
+        })
+        this.recordSpawnDiagnostics([
+            ...result.diagnostics,
+            ...result.audit.map((entry) => ({
+                severity: 'info' as const,
+                code: 'runner-extension-audit',
+                pluginId: entry.pluginId,
+                message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${entry.message}`
+            }))
+        ])
+        return result
+    }
+
+    async notifyAfterSpawn(args: { context: RunnerSpawnContext; pid: number }): Promise<void> {
+        await runRunnerPluginAfterSpawnHooks({
+            baseContext: args.context,
+            pid: args.pid,
+            hooks: this.collectSpawnHooks(),
+            onDiagnostic: (diagnostic) => this.recordSpawnDiagnostics([diagnostic])
+        })
+    }
+
+    async notifyExit(args: { context: RunnerSpawnContext; pid: number; exitCode: number | null; signal: NodeJS.Signals | null }): Promise<void> {
+        await runRunnerPluginExitHooks({
+            baseContext: args.context,
+            pid: args.pid,
+            exitCode: args.exitCode,
+            signal: args.signal,
+            hooks: this.collectSpawnHooks(),
+            onDiagnostic: (diagnostic) => this.recordSpawnDiagnostics([diagnostic])
+        })
     }
 
     async reload(targetId?: string, reason: ReloadReason = 'manual'): Promise<PluginReloadResult> {
@@ -580,6 +652,67 @@ export class RunnerPluginManager {
         }
     }
 
+    private recordSpawnDiagnostics(diagnostics: PluginDiagnosticView[]): void {
+        for (const diagnostic of diagnostics) {
+            this.managerDiagnostics.push({
+                severity: diagnostic.severity,
+                code: diagnostic.code,
+                message: diagnostic.message,
+                ...(diagnostic.pluginId ? { pluginId: diagnostic.pluginId } : {}),
+                ...(diagnostic.path ? { path: diagnostic.path } : {})
+            })
+        }
+        if (this.managerDiagnostics.length > 500) {
+            this.managerDiagnostics = this.managerDiagnostics.slice(-500)
+        }
+        if (diagnostics.length > 0) {
+            this.lastInventoryUpdatedAt = Date.now()
+        }
+    }
+
+    private collectEnvironmentProviders(): RegisteredRunnerContribution<RunnerEnvironmentProviderContribution>[] {
+        return this.collectRegistryContributions((registry) => registry.getEnvironmentProviders())
+    }
+
+    private collectCommandResolvers(): RegisteredRunnerContribution<RunnerCommandResolverContribution>[] {
+        return this.collectRegistryContributions((registry) => registry.getCommandResolvers())
+    }
+
+    private collectSpawnHooks(): RegisteredRunnerContribution<RunnerSpawnHookContribution>[] {
+        return this.collectRegistryContributions((registry) => registry.getSpawnHooks())
+    }
+
+    private collectRegistryContributions<T>(
+        getEntries: (registry: RunnerPluginRegistry) => RegisteredRuntimeContribution<T>[]
+    ): RegisteredRunnerContribution<T>[] {
+        return Array.from(this.activePlugins.values()).flatMap((instance) =>
+            getEntries(instance.registry).map((entry) => ({
+                pluginId: entry.pluginId,
+                id: entry.id,
+                order: entry.order,
+                priority: entry.priority,
+                contribution: entry.contribution
+            }))
+        )
+    }
+
+    private collectContributionSummaries(type: RegisteredRuntimeContribution['type']) {
+        return Array.from(this.activePlugins.values()).flatMap((instance) => {
+            const entries = type === 'environmentProvider'
+                ? instance.registry.getEnvironmentProviders()
+                : type === 'commandResolver'
+                    ? instance.registry.getCommandResolvers()
+                    : instance.registry.getSpawnHooks()
+            return entries.map((entry) => ({
+                pluginId: entry.pluginId,
+                id: entry.id,
+                type,
+                priority: entry.priority,
+                active: true
+            }))
+        })
+    }
+
     private toListItem(record: DiscoveredPluginRecord): PluginListItem {
         const id = pluginDisplayId(record)
         const active = record.manifest && record.status !== 'blocked' ? this.activePlugins.has(record.manifest.id) : false
@@ -611,7 +744,8 @@ export class RunnerPluginManager {
             },
             diagnostics: [
                 ...record.diagnostics.map((entry) => diagnosticView(id, entry)),
-                ...(activeInstance?.registry.diagnostics.map((entry) => diagnosticView(id, entry)) ?? [])
+                ...(activeInstance?.registry.diagnostics.map((entry) => diagnosticView(id, entry)) ?? []),
+                ...this.managerDiagnostics.filter((entry) => entry.pluginId === id)
             ],
             target: this.targetSummary(),
             ...(activeInstance ? { updatedAt: activeInstance.loadedAt } : {})
@@ -621,6 +755,28 @@ export class RunnerPluginManager {
     private toDetail(record: DiscoveredPluginRecord): PluginDetail {
         const item = this.toListItem(record)
         const declaredSecrets = record.manifest?.permissions?.secrets ?? []
+        const activeInstance = record.manifest ? this.activePlugins.get(record.manifest.id) : undefined
+        const activeRunnerContributions = activeInstance ? {
+            environmentProviders: activeInstance.registry.getEnvironmentProviders().map((entry) => ({
+                id: entry.id,
+                pluginId: entry.pluginId,
+                priority: entry.priority,
+                active: true
+            })),
+            commandResolvers: activeInstance.registry.getCommandResolvers().map((entry) => ({
+                id: entry.id,
+                pluginId: entry.pluginId,
+                priority: entry.priority,
+                active: true
+            })),
+            spawnHooks: activeInstance.registry.getSpawnHooks().map((entry) => ({
+                id: entry.id,
+                pluginId: entry.pluginId,
+                priority: entry.priority,
+                active: true
+            }))
+        } : undefined
+        const manifestRunnerContributions = record.manifest?.contributions?.runner
         return {
             ...item,
             manifest: record.manifest,
@@ -634,7 +790,25 @@ export class RunnerPluginManager {
             },
             contributions: {
                 notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
-                ...(record.manifest?.contributions?.runner ? { runner: record.manifest.contributions.runner } : {}),
+                ...(manifestRunnerContributions || activeRunnerContributions ? {
+                    runner: {
+                        ...(manifestRunnerContributions ?? {}),
+                        ...(activeRunnerContributions ? {
+                            environmentProviders: [
+                                ...(manifestRunnerContributions?.environmentProviders ?? []),
+                                ...activeRunnerContributions.environmentProviders
+                            ],
+                            commandResolvers: [
+                                ...(manifestRunnerContributions?.commandResolvers ?? []),
+                                ...activeRunnerContributions.commandResolvers
+                            ],
+                            spawnHooks: [
+                                ...(manifestRunnerContributions?.spawnHooks ?? []),
+                                ...activeRunnerContributions.spawnHooks
+                            ]
+                        } : {})
+                    }
+                } : {}),
                 ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
                 ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
             },
