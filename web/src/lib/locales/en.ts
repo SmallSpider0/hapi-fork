@@ -419,7 +419,7 @@ export default {
   'settings.plugins.install.title': 'Install plugins',
   'settings.plugins.install.description': 'Copy a trusted plugin from a filesystem path on the machine running HAPI Hub.',
   'settings.plugins.install.localTitle': 'Install from Hub local path',
-  'settings.plugins.install.localDescription': 'The path is resolved on the machine running HAPI Hub, not in this browser. Enable only trusted plugins.',
+  'settings.plugins.install.localDescription': 'The path is resolved on the machine running HAPI Hub, not in this browser or on a remote Runner. Enable only trusted plugins.',
   'settings.plugins.install.pathPlaceholder': '/path/to/plugin-directory',
   'settings.plugins.install.browse': 'Browse',
   'settings.plugins.install.browserTitle': 'Choose plugin folder',

@@ -27,7 +27,7 @@ import {
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { HAPI_PLUGIN_MANIFEST_FILE } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import type { PluginStateFile } from '@hapi/protocol/plugins'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
@@ -158,63 +158,6 @@ function diagnosticView(pluginId: string | undefined, diagnostic: { severity: 'i
     }
 }
 
-function sanitizeConfigForView(config: Record<string, unknown> | undefined, declaredSecrets: string[] = []): Record<string, unknown> | undefined {
-    if (!config) {
-        return undefined
-    }
-    const secretKeys = new Set(declaredSecrets.map((key) => key.toLowerCase()))
-    const sanitize = (value: unknown, key = ''): unknown => {
-        const lowerKey = key.toLowerCase()
-        if (secretKeys.has(lowerKey) || lowerKey.includes('secret') || lowerKey.includes('token') || lowerKey.includes('password')) {
-            return '[REDACTED]'
-        }
-        if (Array.isArray(value)) {
-            return value.map((entry) => sanitize(entry))
-        }
-        if (value && typeof value === 'object') {
-            return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([entryKey, entry]) => [entryKey, sanitize(entry, entryKey)]))
-        }
-        return value
-    }
-    return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, sanitize(value, key)]))
-}
-
-function ensureConfigHasNoDeclaredSecrets(config: Record<string, unknown> | undefined, declaredSecrets: string[], pluginId: string): void {
-    if (!config) {
-        return
-    }
-    const lowerSecrets = new Set(declaredSecrets.map((secret) => secret.toLowerCase()))
-    for (const key of Object.keys(config)) {
-        if (lowerSecrets.has(key.toLowerCase())) {
-            throw new Error(`Config for ${pluginId} must not store declared secret ${key}; set it as an environment variable instead.`)
-        }
-    }
-    const redactedPath = findRedactedPlaceholderPath(config)
-    if (redactedPath) {
-        throw new Error(`Config for ${pluginId} contains a redacted placeholder at ${redactedPath}; replace it with a real value or remove the field before saving.`)
-    }
-}
-
-function findRedactedPlaceholderPath(value: unknown, path = '$'): string | null {
-    if (value === '[REDACTED]') {
-        return path
-    }
-    if (Array.isArray(value)) {
-        for (let index = 0; index < value.length; index += 1) {
-            const found = findRedactedPlaceholderPath(value[index], `${path}[${index}]`)
-            if (found) return found
-        }
-        return null
-    }
-    if (value && typeof value === 'object') {
-        for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-            const found = findRedactedPlaceholderPath(entry, `${path}.${key}`)
-            if (found) return found
-        }
-    }
-    return null
-}
-
 function assertDiscoveredRecordCanBeEnabled(
     record: DiscoveredPluginRecord,
     id: string
@@ -298,7 +241,7 @@ export class HubPluginManager {
         const record = await this.findDiscoveredRecord(id)
         if (!record) throw new Error(`Plugin ${id} was not found.`)
         assertDiscoveredRecordCanBeEnabled(record, id)
-        ensureConfigHasNoDeclaredSecrets(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
+        assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
         const previous = state.enabled[record.manifest.id]
         state.enabled[record.manifest.id] = {
             enabled: true,
@@ -326,7 +269,7 @@ export class HubPluginManager {
         const record = await this.findDiscoveredRecord(id)
         if (!record) throw new Error(`Plugin ${id} was not found.`)
         assertDiscoveredRecordCanBeEnabled(record, id)
-        ensureConfigHasNoDeclaredSecrets(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
+        assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
         const previous = state.enabled[record.manifest.id]
         state.enabled[record.manifest.id] = {
             enabled: previous?.enabled === true,
@@ -807,7 +750,7 @@ export class HubPluginManager {
         return {
             ...item,
             manifest: record.manifest,
-            config: sanitizeConfigForView(record.config, declaredSecrets),
+            config: sanitizePluginConfigForView(record.config, declaredSecrets),
             permissions: {
                 network: record.manifest?.permissions?.network ?? [],
                 secrets: declaredSecrets.map((name) => ({

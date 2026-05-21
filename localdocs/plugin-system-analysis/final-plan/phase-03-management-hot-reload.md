@@ -156,8 +156,9 @@ Authenticated REST endpoints，仅操作 Hub 当前 `$HAPI_HOME` 与 Hub 本机�
 - [x] Reload 失败不会拖垮 Hub，也不会让旧的可用插件实例丢失。
 - [x] Web 管理 UI 不执行插件 JS、不显示 secret value。
 - [x] CLI 离线时仍可管理本地 `plugins.json`，并明确提示如何应用变更。
-- [ ] Web 文档明确说明 Hub 本地路径安装不等于 Runner 本地路径安装。
+- [x] Web 文档明确说明 Hub 本地路径安装不等于 Runner 本地路径安装。
 
 ## 验证记录
 
 - 2026-05-21 — review sub-agent — Phase 03 勾选状态来自当前本地实现与已运行验证；如后续修改勾选项，必须追加新的子代理验证记录。
+- 2026-05-21 — review sub-agent — 补充 Web 安装说明，明确 Hub 本地路径不是浏览器本机路径，也不是远端 Runner 路径；新增递归 secret/redacted config 持久化防护与 Web plugin action invalidation 测试；验证命令：`bun run --cwd cli test -- src/commands/plugins.test.ts src/plugins/pluginFoundation.test.ts`、`bun run --cwd hub test src/plugins/pluginManager.test.ts src/web/routes/plugins.test.ts src/plugins/hubPluginRuntime.test.ts`、`bun run --cwd web test -- src/hooks/mutations/usePluginActions.test.tsx src/routes/settings/index.test.tsx`、`bun run typecheck`、`git diff --check`；Phase 03 checklist 全部完成。
