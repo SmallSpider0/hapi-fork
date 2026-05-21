@@ -1,5 +1,7 @@
-import { basename, isAbsolute, relative, resolve } from 'node:path'
-import { realpath, rm } from 'node:fs/promises'
+import { createHash } from 'node:crypto'
+import { mkdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, isAbsolute, relative } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import type {
     PluginDeleteResult,
     PluginDetail,
@@ -25,6 +27,7 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import type { PluginStateFile } from '@hapi/protocol/plugins'
+import { redactText, RunnerPluginRegistry, type RunnerPluginModule } from './runnerPluginRegistry'
 
 export interface RunnerPluginManagerOptions {
     hapiHome: string
@@ -33,11 +36,76 @@ export interface RunnerPluginManagerOptions {
     env?: NodeJS.ProcessEnv
 }
 
+type ActiveRunnerPluginInstance = {
+    pluginId: string
+    registry: RunnerPluginRegistry
+    record: DiscoveredPluginRecord
+    signature: string
+    loadedAt: number
+}
+
 type ReloadReason = 'startup' | 'manual' | 'state-change'
 
 type InternalReloadResult = {
     records: DiscoveredPluginRecord[]
     items: PluginReloadItem[]
+}
+
+function errorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message
+    }
+    return String(error)
+}
+
+function getActivate(value: unknown): RunnerPluginModule['activate'] | null {
+    if (!value || typeof value !== 'object') {
+        return null
+    }
+    const moduleObject = value as { activate?: unknown; default?: unknown }
+    if (typeof moduleObject.activate === 'function') {
+        return moduleObject.activate as RunnerPluginModule['activate']
+    }
+    if (typeof moduleObject.default === 'function') {
+        return moduleObject.default as RunnerPluginModule['activate']
+    }
+    if (moduleObject.default && typeof moduleObject.default === 'object') {
+        const defaultObject = moduleObject.default as { activate?: unknown }
+        if (typeof defaultObject.activate === 'function') {
+            return defaultObject.activate as RunnerPluginModule['activate']
+        }
+    }
+    return null
+}
+
+function stableStringify(value: unknown): string {
+    if (Array.isArray(value)) {
+        return `[${value.map((entry) => stableStringify(entry)).join(',')}]`
+    }
+    if (value && typeof value === 'object') {
+        return `{${Object.entries(value as Record<string, unknown>)
+            .sort(([left], [right]) => left.localeCompare(right))
+            .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+            .join(',')}}`
+    }
+    return JSON.stringify(value)
+}
+
+async function materializeReloadImportPath(realPath: string, pluginId: string, signature: string): Promise<string> {
+    const hash = createHash('sha256').update(signature).digest('hex').slice(0, 16)
+    const safePluginId = pluginId.replace(/[^A-Za-z0-9._-]/g, '_')
+    const shadowPath = `${realPath.slice(0, realPath.lastIndexOf('.')) || realPath}.hapi-runner-reload-${safePluginId}-${hash}.mjs`
+    await mkdir(dirname(shadowPath), { recursive: true })
+    await writeFile(shadowPath, await readFile(realPath, 'utf8'))
+    return shadowPath
+}
+
+async function safeMtime(path: string): Promise<number> {
+    try {
+        return (await stat(path)).mtimeMs
+    } catch {
+        return 0
+    }
 }
 
 function pluginDisplayId(record: DiscoveredPluginRecord): string {
@@ -79,6 +147,7 @@ function assertDiscoveredRecordCanBeEnabled(
 }
 
 export class RunnerPluginManager {
+    private readonly activePlugins = new Map<string, ActiveRunnerPluginInstance>()
     private records: DiscoveredPluginRecord[] = []
     private managerDiagnostics: PluginDiagnosticView[] = []
     private reloadQueue: Promise<InternalReloadResult> = Promise.resolve({ records: [], items: [] })
@@ -106,7 +175,10 @@ export class RunnerPluginManager {
             const id = pluginDisplayId(record)
             return record.diagnostics.map((entry) => diagnosticView(id, entry))
         })
-        return [...this.managerDiagnostics, ...recordDiagnostics]
+        const activeDiagnostics = Array.from(this.activePlugins.values()).flatMap((entry) =>
+            entry.registry.diagnostics.map((diagnostic) => diagnosticView(entry.pluginId, diagnostic))
+        )
+        return [...this.managerDiagnostics, ...recordDiagnostics, ...activeDiagnostics]
     }
 
     getInventory(): RunnerPluginInventory {
@@ -215,6 +287,9 @@ export class RunnerPluginManager {
         if (nextState) {
             await writePluginState(getPluginStateFile(this.options.hapiHome), nextState)
         }
+        if (statePluginId) {
+            await this.disposeActive(statePluginId)
+        }
         await rm(rootRealPath, { recursive: true, force: true })
         const reloadResult = shouldReload ? await this.reload(pluginId, 'state-change') : undefined
         return {
@@ -230,6 +305,15 @@ export class RunnerPluginManager {
 
     async dispose(): Promise<void> {
         this.disposed = true
+        const instances = Array.from(this.activePlugins.values()).reverse()
+        this.activePlugins.clear()
+        await Promise.all(instances.map(async (instance) => {
+            try {
+                await instance.registry.dispose()
+            } catch (error) {
+                console.error('[RunnerPluginManager] Plugin dispose failed:', error)
+            }
+        }))
     }
 
     private async performReload(targetId: string | undefined): Promise<InternalReloadResult> {
@@ -254,23 +338,209 @@ export class RunnerPluginManager {
             })
         }
 
+        const seenIds = new Set(records.filter((record) => record.manifest).map((record) => record.manifest!.id))
+        for (const [pluginId, instance] of Array.from(this.activePlugins.entries())) {
+            if (targetId && pluginId !== targetId) {
+                continue
+            }
+            if (!seenIds.has(pluginId)) {
+                await this.disposeActive(pluginId)
+                items.push({
+                    id: pluginId,
+                    action: 'deactivated',
+                    status: 'disabled',
+                    message: 'Plugin is no longer discovered.',
+                    diagnostics: []
+                })
+            } else if (!records.some((record) => record.manifest?.id === pluginId && record.status === 'enabled' && record.manifest.runtimes?.runner)) {
+                await this.disposeActive(pluginId)
+                items.push({
+                    id: pluginId,
+                    action: 'deactivated',
+                    status: 'disabled',
+                    message: 'Plugin is no longer enabled for the Runner runtime.',
+                    diagnostics: []
+                })
+            } else {
+                instance.record = records.find((record) => record.manifest?.id === pluginId) ?? instance.record
+            }
+        }
+
         for (const record of records) {
             const id = pluginDisplayId(record)
             if (targetId && id !== targetId && record.manifest?.id !== targetId) {
                 continue
             }
-            items.push({
-                id,
-                action: 'unchanged',
-                status: record.status,
-                diagnostics: record.diagnostics.map((entry) => diagnosticView(id, entry))
-            })
+
+            if (!record.manifest || record.status !== 'enabled' || !record.manifest.runtimes?.runner) {
+                if (!items.some((item) => item.id === id)) {
+                    items.push({
+                        id,
+                        action: 'unchanged',
+                        status: record.status,
+                        diagnostics: record.diagnostics.map((entry) => diagnosticView(id, entry))
+                    })
+                }
+                continue
+            }
+
+            const pluginId = record.manifest.id
+            const signature = await this.computeSignature(record)
+            const existing = this.activePlugins.get(pluginId)
+            if (existing && existing.signature === signature) {
+                record.status = 'active'
+                existing.record = record
+                items.push({ id: pluginId, action: 'unchanged', status: 'active', diagnostics: [] })
+                continue
+            }
+
+            const activation = await this.activateRecord(record, signature)
+            if (activation.ok) {
+                if (this.disposed) {
+                    await activation.instance.registry.dispose()
+                    items.push({
+                        id: pluginId,
+                        action: 'deactivated',
+                        status: 'disabled',
+                        message: 'Runner plugin manager disposed during activation.',
+                        diagnostics: []
+                    })
+                    continue
+                }
+                const action = existing ? 'reloaded' : 'activated'
+                this.activePlugins.set(pluginId, activation.instance)
+                record.status = 'active'
+                if (existing) {
+                    await existing.registry.dispose()
+                }
+                items.push({ id: pluginId, action, status: 'active', diagnostics: [] })
+                continue
+            }
+
+            record.diagnostics.push(...activation.diagnostics.map((diagnostic) => ({
+                severity: diagnostic.severity,
+                code: diagnostic.code,
+                message: diagnostic.message,
+                ...(diagnostic.path ? { path: diagnostic.path } : {})
+            })))
+            if (existing) {
+                record.status = 'reload-failed'
+                existing.record = record
+                items.push({
+                    id: pluginId,
+                    action: 'kept-previous',
+                    status: 'reload-failed',
+                    message: activation.message,
+                    diagnostics: activation.diagnostics
+                })
+            } else {
+                record.status = 'failed'
+                items.push({
+                    id: pluginId,
+                    action: 'failed',
+                    status: 'failed',
+                    message: activation.message,
+                    diagnostics: activation.diagnostics
+                })
+            }
         }
 
         this.records = records
         this.managerDiagnostics = managerDiagnostics
         this.lastInventoryUpdatedAt = Date.now()
         return { records, items }
+    }
+
+    private async activateRecord(record: DiscoveredPluginRecord, signature: string): Promise<{
+        ok: true
+        instance: ActiveRunnerPluginInstance
+    } | {
+        ok: false
+        message: string
+        diagnostics: PluginDiagnosticView[]
+    }> {
+        const pluginId = record.manifest!.id
+        const runnerEntry = record.runtimeEntryPaths.find((entry) => entry.runtime === 'runner')
+        if (!runnerEntry) {
+            return {
+                ok: false,
+                message: 'Runner runtime entry is missing.',
+                diagnostics: [{ pluginId, severity: 'error', code: 'missing-runner-entry', message: 'Runner runtime entry is missing.', path: record.manifestPath }]
+            }
+        }
+
+        const declaredSecrets = record.manifest?.permissions?.secrets ?? []
+        const registry = new RunnerPluginRegistry(this.options.machineId)
+        try {
+            const importPath = await materializeReloadImportPath(runnerEntry.realPath, pluginId, signature)
+            const importUrl = `${pathToFileURL(importPath).href}?hapiRunnerPlugin=${encodeURIComponent(pluginId)}&signature=${encodeURIComponent(signature)}`
+            const importedModule = await import(importUrl)
+            const activate = getActivate(importedModule)
+            if (!activate) {
+                return {
+                    ok: false,
+                    message: 'Runner runtime entry must export activate(ctx).',
+                    diagnostics: [{ pluginId, severity: 'error', code: 'invalid-runner-entry', message: 'Runner runtime entry must export activate(ctx).', path: record.manifestPath }]
+                }
+            }
+
+            const disposableStart = registry.getDisposableCount()
+            const activation = registry.createContext({
+                pluginId,
+                config: record.config,
+                declaredSecrets,
+                env: this.options.env
+            })
+            try {
+                await activate(activation.ctx)
+                activation.close()
+            } catch (error) {
+                activation.close()
+                await registry.disposeFrom(disposableStart)
+                throw error
+            }
+
+            return {
+                ok: true,
+                instance: {
+                    pluginId,
+                    registry,
+                    record,
+                    signature,
+                    loadedAt: Date.now()
+                }
+            }
+        } catch (error) {
+            await registry.dispose().catch(() => undefined)
+            const message = redactText(`Failed to import or activate runner plugin: ${errorMessage(error)}`, declaredSecrets, this.options.env)
+            return {
+                ok: false,
+                message,
+                diagnostics: [{ pluginId, severity: 'error', code: 'runner-plugin-activate-failed', message, path: record.manifestPath }]
+            }
+        }
+    }
+
+    private async computeSignature(record: DiscoveredPluginRecord): Promise<string> {
+        const runnerEntry = record.runtimeEntryPaths.find((entry) => entry.runtime === 'runner')
+        return stableStringify({
+            manifestPath: record.manifestPath,
+            manifestMtime: await safeMtime(record.manifestPath),
+            runnerEntry: runnerEntry?.realPath,
+            runnerEntryMtime: runnerEntry ? await safeMtime(runnerEntry.realPath) : 0,
+            config: record.config ?? {},
+            pluginApiVersion: record.manifest?.pluginApiVersion,
+            version: record.manifest?.version
+        })
+    }
+
+    private async disposeActive(pluginId: string): Promise<void> {
+        const existing = this.activePlugins.get(pluginId)
+        if (!existing) {
+            return
+        }
+        this.activePlugins.delete(pluginId)
+        await existing.registry.dispose()
     }
 
     private async findDiscoveredRecord(id: string): Promise<DiscoveredPluginRecord | null> {
@@ -294,7 +564,7 @@ export class RunnerPluginManager {
             ok: true,
             targetId,
             target: this.targetSummary(),
-            results: [{ id: targetId, action: 'unchanged', status: 'enabled', diagnostics: [] }],
+            results: [{ id: targetId, action: 'unchanged', status: this.activePlugins.has(targetId) ? 'active' : 'enabled', diagnostics: [] }],
             plugins: this.listPlugins()
         }
     }
@@ -312,15 +582,17 @@ export class RunnerPluginManager {
 
     private toListItem(record: DiscoveredPluginRecord): PluginListItem {
         const id = pluginDisplayId(record)
+        const active = record.manifest && record.status !== 'blocked' ? this.activePlugins.has(record.manifest.id) : false
+        const activeInstance = record.manifest ? this.activePlugins.get(record.manifest.id) : undefined
         return {
             id,
             name: record.manifest?.name,
             version: record.manifest?.version,
             description: record.manifest?.description,
             source: record.source,
-            status: record.status,
+            status: active && record.status === 'enabled' ? 'active' : record.status,
             enabled: record.enabled === true,
-            active: false,
+            active,
             rootPath: record.rootPath,
             manifestPath: record.manifestPath,
             runtimes: {
@@ -333,12 +605,16 @@ export class RunnerPluginManager {
                 ...(record.manifest?.runtimes?.runner ? {
                     runner: {
                         entry: record.manifest.runtimes.runner.entry,
-                        active: false
+                        active
                     }
                 } : {})
             },
-            diagnostics: record.diagnostics.map((entry) => diagnosticView(id, entry)),
-            target: this.targetSummary()
+            diagnostics: [
+                ...record.diagnostics.map((entry) => diagnosticView(id, entry)),
+                ...(activeInstance?.registry.diagnostics.map((entry) => diagnosticView(id, entry)) ?? [])
+            ],
+            target: this.targetSummary(),
+            ...(activeInstance ? { updatedAt: activeInstance.loadedAt } : {})
         }
     }
 
