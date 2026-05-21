@@ -162,6 +162,25 @@ describe('HubPluginManager', () => {
         expect(readJsonl(logFile)).toContainEqual({ type: 'old-send' })
     })
 
+    it('does not import Runner-only runtime entries in the Hub process', async () => {
+        mkdirSync(join(pluginRoot, 'dist'), { recursive: true })
+        writeFileSync(join(pluginRoot, 'dist', 'runner.js'), 'throw new Error("Hub must not import Runner runtime")')
+        writeManifest(pluginRoot, manifest({
+            runtimes: { runner: { entry: 'dist/runner.js' } },
+            contributions: { runner: { environmentProviders: [{ id: 'env' }] } }
+        }))
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: { 'com.example.plugin': { enabled: true } }
+        })
+
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+        const result = await manager.start()
+        await manager.dispose()
+
+        expect(result.ok).toBe(true)
+        expect(manager.listPlugins()[0]).toMatchObject({ id: 'com.example.plugin', status: 'enabled', active: false, runtimes: { runner: { entry: 'dist/runner.js', active: false } } })
+    })
+
     it('does not import disabled or invalid plugins during reload', async () => {
         writePlugin(pluginRoot, `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(logFile)}, 'imported'); export function activate() {}`)
         writeManifest(pluginRoot, manifest({ id: 'bad/id' }))

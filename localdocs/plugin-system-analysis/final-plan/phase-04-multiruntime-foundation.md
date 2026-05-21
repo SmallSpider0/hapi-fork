@@ -1,7 +1,7 @@
 # Phase 04 — Multi-runtime foundation：作用域、状态、Hub↔Runner 管理协议
 
 更新时间: 2026-05-21
-状态: 计划阶段。
+状态: 已完成。
 
 ## 目标
 
@@ -83,30 +83,31 @@ RPC 必须沿用 machine identity、namespace/auth 边界，不向插件暴露 g
 
 ### 实现
 
-- [ ] Shared 增加 runtime scope DTO：`hub` / `runner:<machineId>` / `all-runners`。
-- [ ] Shared 增加 per-target plugin inventory/status schema。
-- [ ] Manifest schema 支持 `runtimes.runner` 与 `contributions.runner/agent/web` 静态声明。
-- [ ] Hub plugin API 接收 target scope，不再默认把全局列表等同 Hub 本机。
-- [ ] Web plugin list/detail 能显示 Hub 与每个 Runner 的插件状态。
-- [ ] Hub 保存 Runner plugin inventory cache，并标记 offline/stale 时间。
-- [ ] Runner 注册插件管理 RPC handlers；本阶段只返回 discovery/state，不 import runtime。
-- [ ] API error model 能表达 partial success、runner offline、unsupported runtime。
+- [x] Shared 增加 runtime scope DTO：`hub` / `runner:<machineId>` / `all-runners`。
+- [x] Shared 增加 per-target plugin inventory/status schema。
+- [x] Manifest schema 支持 `runtimes.runner` 与 `contributions.runner/agent/web` 静态声明。
+- [x] Hub plugin API 接收 target scope，不再默认把全局列表等同 Hub 本机。
+- [x] Web plugin list/detail 能显示 Hub 与每个 Runner 的插件状态。
+- [x] Hub 保存 Runner plugin inventory cache，并标记 offline/stale 时间。
+- [x] Runner 注册插件管理 RPC handlers；本阶段只返回 discovery/state，不 import runtime。
+- [x] API error model 能表达 partial success、runner offline、unsupported runtime。
 
 ### 测试
 
-- [ ] Shared scope schema 拒绝非法 machine id 与未知 scope。
-- [ ] Hub list 聚合 Hub + 多 Runner 状态。
-- [ ] Runner offline 时 Hub 返回 stale/offline，不假装 active。
-- [ ] Hub 不直接访问 Runner 插件路径；测试用 mock RPC 验证边界。
-- [ ] `all-runners` partial failure 返回 per-runner result。
-- [ ] Runner RPC handler 校验请求 schema 与 auth/machine context。
+- [x] Shared scope schema 拒绝非法 machine id 与未知 scope。
+- [x] Hub list 聚合 Hub + 多 Runner 状态。
+- [x] Runner offline 时 Hub 返回 stale/offline，不假装 active。
+- [x] Hub 不直接访问 Runner 插件路径；测试用 mock RPC 验证边界。
+- [x] `all-runners` partial failure 返回 per-runner result。
+- [x] Runner RPC handler 校验请求 schema 与 auth/machine context。
 
 ### 验收
 
-- [ ] 用户能在 Web/CLI 区分“Hub 插件”和“某台 Runner 的插件”。
-- [ ] Hub 与 Runner 不在同一台机器时，Hub 不再给出误导性本地路径语义。
-- [ ] 后续 Phase 05 可以在 Runner 内部接入 runtime，而不改 Phase 04 DTO 基础。
+- [x] 用户能在 Web/CLI 区分“Hub 插件”和“某台 Runner 的插件”。
+- [x] Hub 与 Runner 不在同一台机器时，Hub 不再给出误导性本地路径语义。
+- [x] 后续 Phase 05 可以在 Runner 内部接入 runtime，而不改 Phase 04 DTO 基础。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：review 子代理复核 Phase 04 DTO、Hub↔Runner RPC、offline/stale、all-runners partial、Runner cold discovery 边界；初审 blockers 已修复，复核结论为可以提交。
+- [x] 验证命令：`bun run --cwd cli test -- src/commands/plugins.test.ts src/plugins/pluginFoundation.test.ts src/api/apiMachine.test.ts src/runner/plugins/runnerPluginManager.test.ts`（35 passed）；`bun run --cwd hub test src/web/routes/plugins.test.ts src/plugins/pluginManager.test.ts src/sync/rpcGateway.test.ts`（25 passed）；`bun run --cwd web test -- src/hooks/mutations/usePluginActions.test.tsx src/routes/settings/index.test.tsx`（16 passed）；`bun run typecheck`；`git diff --check`。

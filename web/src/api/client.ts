@@ -38,7 +38,8 @@ import type {
     PluginInstallResult,
     PluginLocalDirectoryListResponse,
     PluginListResponse,
-    PluginReloadResult
+    PluginReloadResult,
+    PluginTargetScope
 } from '@hapi/protocol/plugins/admin'
 
 type ApiClientOptions = {
@@ -49,6 +50,12 @@ type ApiClientOptions = {
 
 type ErrorPayload = {
     error?: unknown
+}
+
+function withPluginTarget(path: string, target?: PluginTargetScope): string {
+    if (!target) return path
+    const separator = path.includes('?') ? '&' : '?'
+    return `${path}${separator}target=${encodeURIComponent(target)}`
 }
 
 function parseErrorCode(bodyText: string): string | undefined {
@@ -175,43 +182,43 @@ export class ApiClient {
     }
 
 
-    async getPlugins(): Promise<PluginListResponse> {
-        return await this.request<PluginListResponse>('/api/plugins')
+    async getPlugins(target?: PluginTargetScope): Promise<PluginListResponse> {
+        return await this.request<PluginListResponse>(withPluginTarget('/api/plugins', target))
     }
 
-    async getPlugin(pluginId: string): Promise<PluginDetailResponse> {
-        return await this.request<PluginDetailResponse>(`/api/plugins/${encodeURIComponent(pluginId)}`)
+    async getPlugin(pluginId: string, target?: PluginTargetScope): Promise<PluginDetailResponse> {
+        return await this.request<PluginDetailResponse>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}`, target))
     }
 
-    async enablePlugin(pluginId: string, config?: Record<string, unknown>): Promise<PluginReloadResult> {
+    async enablePlugin(pluginId: string, config?: Record<string, unknown>, target?: PluginTargetScope): Promise<PluginReloadResult> {
         const body: PluginEnableRequest = { ...(config ? { config } : {}) }
-        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/enable`, {
+        return await this.request<PluginReloadResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/enable`, target), {
             method: 'POST',
             body: JSON.stringify(body)
         })
     }
 
-    async disablePlugin(pluginId: string): Promise<PluginReloadResult> {
-        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/disable`, {
+    async disablePlugin(pluginId: string, target?: PluginTargetScope): Promise<PluginReloadResult> {
+        return await this.request<PluginReloadResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/disable`, target), {
             method: 'POST',
             body: JSON.stringify({})
         })
     }
 
-    async updatePluginConfig(pluginId: string, config: Record<string, unknown>): Promise<PluginReloadResult> {
+    async updatePluginConfig(pluginId: string, config: Record<string, unknown>, target?: PluginTargetScope): Promise<PluginReloadResult> {
         const body: PluginConfigUpdateRequest = { config }
-        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/config`, {
+        return await this.request<PluginReloadResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/config`, target), {
             method: 'PATCH',
             body: JSON.stringify(body)
         })
     }
 
-    async reloadPlugins(): Promise<PluginReloadResult> {
-        return await this.request<PluginReloadResult>('/api/plugins/reload', { method: 'POST' })
+    async reloadPlugins(target?: PluginTargetScope): Promise<PluginReloadResult> {
+        return await this.request<PluginReloadResult>(withPluginTarget('/api/plugins/reload', target), { method: 'POST' })
     }
 
-    async reloadPlugin(pluginId: string): Promise<PluginReloadResult> {
-        return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/reload`, { method: 'POST' })
+    async reloadPlugin(pluginId: string, target?: PluginTargetScope): Promise<PluginReloadResult> {
+        return await this.request<PluginReloadResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/reload`, target), { method: 'POST' })
     }
 
     async installLocalPlugin(body: PluginInstallLocalRequest): Promise<PluginInstallResult> {
@@ -228,8 +235,8 @@ export class ApiClient {
         })
     }
 
-    async deletePlugin(pluginId: string): Promise<PluginDeleteResult> {
-        return await this.request<PluginDeleteResult>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+    async deletePlugin(pluginId: string, target?: PluginTargetScope): Promise<PluginDeleteResult> {
+        return await this.request<PluginDeleteResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}`, target), {
             method: 'DELETE'
         })
     }

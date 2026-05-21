@@ -24,6 +24,7 @@ import { join } from 'path';
 import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
+import { RunnerPluginManager } from './plugins/runnerPluginManager';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -659,6 +660,14 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
     const startedWithCliMtimeMs = getInstalledCliMtimeMs();
 
+    const runnerPluginManager = new RunnerPluginManager({
+      hapiHome: configuration.happyHomeDir,
+      machineId,
+      envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
+      env: process.env
+    });
+    await runnerPluginManager.start();
+
     // Write initial runner state (no lock needed for state file)
     const fileState: RunnerLocallyPersistedState = {
       pid: process.pid,
@@ -679,7 +688,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       status: 'offline',
       pid: process.pid,
       httpPort: controlPort,
-      startedAt: Date.now()
+      startedAt: Date.now(),
+      pluginInventory: runnerPluginManager.getInventory()
     };
 
     // Create API client
@@ -717,6 +727,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       stopSession,
       requestShutdown: () => requestShutdown('hapi-app')
     });
+    apiMachine.registerRunnerPluginHandlers(runnerPluginManager);
 
     // Connect to server
     apiMachine.connect();
@@ -880,6 +891,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       // Give time for metadata update to send
       await new Promise(resolve => setTimeout(resolve, 100));
 
+      await runnerPluginManager.dispose();
       apiMachine.shutdown();
       await stopControlServer();
       await cleanupRunnerState();

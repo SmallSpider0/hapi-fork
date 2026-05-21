@@ -734,6 +734,12 @@ export class HubPluginManager {
                         entry: record.manifest.runtimes.hub.entry,
                         active
                     }
+                } : {}),
+                ...(record.manifest?.runtimes?.runner ? {
+                    runner: {
+                        entry: record.manifest.runtimes.runner.entry,
+                        active: false
+                    }
                 } : {})
             },
             diagnostics: [
@@ -759,7 +765,10 @@ export class HubPluginManager {
                 }))
             },
             contributions: {
-                notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? []
+                notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
+                ...(record.manifest?.contributions?.runner ? { runner: record.manifest.contributions.runner } : {}),
+                ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
+                ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
             },
             runtimeEntryPaths: record.runtimeEntryPaths
         }

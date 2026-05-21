@@ -16,6 +16,18 @@ import type {
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
+import {
+    PluginDeleteResultSchema,
+    PluginDetailResponseSchema,
+    PluginReloadResultSchema,
+    RunnerPluginInventorySchema,
+    RunnerPluginUnsupportedInstallResultSchema,
+    type PluginDeleteResult,
+    type PluginDetailResponse,
+    type PluginReloadResult,
+    type RunnerPluginInventory,
+    type RunnerPluginUnsupportedInstallResult
+} from '@hapi/protocol/plugins/admin'
 import type { RpcRegistry } from '../socket/rpcRegistry'
 
 const DEFAULT_RPC_TIMEOUT_MS = 30_000
@@ -236,6 +248,52 @@ export class RpcGateway {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.machineRpc(machineId, RPC_METHODS.ListCodexModels, {}, MODEL_LIST_RPC_TIMEOUT_MS) as RpcListCodexModelsResponse
+    }
+
+
+    async listRunnerPlugins(machineId: string): Promise<RunnerPluginInventory> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsList, {})
+        return RunnerPluginInventorySchema.parse(result)
+    }
+
+    async inspectRunnerPlugin(machineId: string, pluginId: string): Promise<PluginDetailResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsInspect, { pluginId })
+        return PluginDetailResponseSchema.parse(result)
+    }
+
+    async enableRunnerPlugin(machineId: string, pluginId: string, config?: Record<string, unknown>, reload = true): Promise<PluginReloadResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsEnable, { pluginId, ...(config ? { config } : {}), reload })
+        return PluginReloadResultSchema.parse(result)
+    }
+
+    async disableRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginReloadResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsDisable, { pluginId, reload })
+        return PluginReloadResultSchema.parse(result)
+    }
+
+    async updateRunnerPluginConfig(machineId: string, pluginId: string, config: Record<string, unknown>): Promise<PluginReloadResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsConfigUpdate, { pluginId, config })
+        return PluginReloadResultSchema.parse(result)
+    }
+
+    async reloadRunnerPlugins(machineId: string, pluginId?: string): Promise<PluginReloadResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsReload, { ...(pluginId ? { pluginId } : {}) })
+        return PluginReloadResultSchema.parse(result)
+    }
+
+    async prepareRunnerPluginInstall(machineId: string, payload: unknown = {}): Promise<RunnerPluginUnsupportedInstallResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsInstallPrepare, payload)
+        return RunnerPluginUnsupportedInstallResultSchema.parse(result)
+    }
+
+    async commitRunnerPluginInstall(machineId: string, payload: unknown = {}): Promise<RunnerPluginUnsupportedInstallResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsInstallCommit, payload)
+        return RunnerPluginUnsupportedInstallResultSchema.parse(result)
+    }
+
+    async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsDelete, { pluginId, reload })
+        return PluginDeleteResultSchema.parse(result)
     }
 
     async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {

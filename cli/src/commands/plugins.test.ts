@@ -43,6 +43,8 @@ describe('hapi plugins command', () => {
     afterEach(() => {
         vi.restoreAllMocks()
         delete process.env.HAPI_HOME
+        delete process.env.CLI_API_TOKEN
+        vi.doUnmock('@/api/pluginAdmin')
         rmSync(testDir, { recursive: true, force: true })
     })
 
@@ -146,6 +148,20 @@ describe('hapi plugins command', () => {
         expect(payload.action).toBe('installed')
         expect(existsSync(join(hapiHome, 'plugins', 'com.local.install', 'hapi.plugin.json'))).toBe(true)
         expect(existsSync(marker)).toBe(false)
+    })
+
+    it('passes --target to remote reload without treating the target value as a plugin id', async () => {
+        process.env.CLI_API_TOKEN = 'test-token'
+        const reloadRemotePlugins = vi.fn(async () => ({ ok: true, results: [], plugins: [] }))
+        vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugins: vi.fn(),
+            reloadRemotePlugins
+        }))
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await handlePluginsCommand(['reload', '--target', 'runner:runner-1', '--json'])
+
+        expect(reloadRemotePlugins).toHaveBeenCalledWith('test-token', undefined, 5000, 'runner:runner-1')
     })
 
     it('redacts config-shaped secrets when printing inspect and config output', async () => {

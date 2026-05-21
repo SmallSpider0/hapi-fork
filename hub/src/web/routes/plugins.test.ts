@@ -2,6 +2,7 @@ import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import type { PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
 import { createPluginsRoutes } from './plugins'
@@ -28,11 +29,58 @@ const plugin: PluginListItem = {
     diagnostics: []
 }
 
+const runnerPlugin: PluginListItem = {
+    id: 'com.example.runner',
+    name: 'Runner Plugin',
+    version: '0.1.0',
+    source: 'user-home',
+    status: 'enabled',
+    enabled: true,
+    active: false,
+    rootPath: '/runner/plugins/com.example.runner',
+    manifestPath: '/runner/plugins/com.example.runner/hapi.plugin.json',
+    runtimes: { runner: { entry: 'runner.js', active: false } },
+    diagnostics: []
+}
+
+function makeMachine(id: string, active: boolean, plugins: PluginListItem[] = [runnerPlugin]): Machine {
+    return {
+        id,
+        namespace: 'default',
+        seq: 1,
+        createdAt: 0,
+        updatedAt: 0,
+        active,
+        activeAt: Date.now(),
+        metadata: { host: `${id}.host`, platform: 'linux', happyCliVersion: '0.0.0' },
+        metadataVersion: 1,
+        runnerState: {
+            status: active ? 'running' : 'offline',
+            pluginInventory: {
+                machineId: id,
+                updatedAt: 1234,
+                plugins,
+                diagnostics: []
+            }
+        },
+        runnerStateVersion: 1
+    }
+}
+
 function reloadResult(action: PluginReloadResult['results'][number]['action'] = 'unchanged'): PluginReloadResult {
     return {
         ok: true,
         results: [{ id: plugin.id, action, status: 'active', diagnostics: [] }],
         plugins: [plugin]
+    }
+}
+
+function runnerReloadResult(machineId: string): PluginReloadResult {
+    return {
+        ok: true,
+        target: { scope: `runner:${machineId}`, runtime: 'runner', machineId, active: true, stale: false },
+        results: [{ id: runnerPlugin.id, action: 'unchanged', status: 'enabled', diagnostics: [] }],
+        plugins: [runnerPlugin]
     }
 }
 
@@ -60,10 +108,10 @@ function deleteResult(): PluginDeleteResult {
     }
 }
 
-function createApp(manager: Partial<HubPluginManager> | null) {
+function createApp(manager: Partial<HubPluginManager> | null, engine: Partial<SyncEngine> | null = null) {
     const app = new Hono<WebAppEnv>()
     app.use('/api/*', createAuthMiddleware(secret))
-    app.route('/api', createPluginsRoutes(() => manager as HubPluginManager | null))
+    app.route('/api', createPluginsRoutes(() => manager as HubPluginManager | null, () => engine as SyncEngine | null))
     return app
 }
 
@@ -89,14 +137,93 @@ describe('plugin admin routes', () => {
         } as never)
         const auth = await token()
 
-        const listResponse = await app.request('/api/plugins', { headers: { authorization: `Bearer ${auth}` } })
+        const listResponse = await app.request('/api/plugins?target=hub', { headers: { authorization: `Bearer ${auth}` } })
         expect(listResponse.status).toBe(200)
-        expect(await listResponse.json()).toEqual({ plugins: [plugin] })
+        const list = await listResponse.json() as { plugins: PluginListItem[]; targets: Array<{ target: { scope: string } }> }
+        expect(list.plugins).toHaveLength(1)
+        expect(list.plugins[0]).toMatchObject({ id: plugin.id, target: { scope: 'hub', runtime: 'hub', active: true } })
+        expect(list.targets[0]?.target.scope).toBe('hub')
 
         const detailResponse = await app.request('/api/plugins/com.example.plugin', { headers: { authorization: `Bearer ${auth}` } })
         expect(detailResponse.status).toBe(200)
-        const detail = await detailResponse.json() as { plugin: { permissions: { secrets: Array<{ name: string; present: boolean }> } } }
+        const detail = await detailResponse.json() as { plugin: { target?: { scope: string }; permissions: { secrets: Array<{ name: string; present: boolean }> } } }
+        expect(detail.plugin.target?.scope).toBe('hub')
         expect(detail.plugin.permissions.secrets).toEqual([{ name: 'TOKEN', present: false }])
+    })
+
+    it('aggregates Hub and Runner plugin inventories without reading Runner paths directly', async () => {
+        const machine = makeMachine('runner-1', true)
+        const calls: string[] = []
+        const app = createApp(
+            { listPlugins: () => [plugin] } as never,
+            {
+                getMachinesByNamespace: () => [machine],
+                listRunnerPlugins: async (machineId: string) => {
+                    calls.push(`rpc:${machineId}`)
+                    return machine.runnerState!.pluginInventory!
+                }
+            } as never
+        )
+        const response = await app.request('/api/plugins', { headers: { authorization: `Bearer ${await token()}` } })
+
+        expect(response.status).toBe(200)
+        const payload = await response.json() as { plugins: PluginListItem[]; targets: Array<{ target: { scope: string } }> }
+        expect(payload.plugins.map((entry) => entry.id).sort()).toEqual([plugin.id, runnerPlugin.id].sort())
+        expect(payload.plugins.find((entry) => entry.id === runnerPlugin.id)?.target).toMatchObject({ scope: 'runner:runner-1', runtime: 'runner', active: true })
+        expect(payload.targets.map((entry) => entry.target.scope).sort()).toEqual(['hub', 'runner:runner-1'])
+        expect(calls).toEqual(['rpc:runner-1'])
+    })
+
+    it('returns stale cached Runner inventory while a Runner is offline', async () => {
+        const cachedActive = { ...runnerPlugin, status: 'active' as const, active: true, runtimes: { runner: { entry: 'runner.js', active: true } } }
+        const machine = makeMachine('runner-offline', false, [cachedActive])
+        const app = createApp(
+            { listPlugins: () => [] } as never,
+            {
+                getMachineByNamespace: () => machine,
+                listRunnerPlugins: async () => { throw new Error('must not call offline runner RPC') }
+            } as never
+        )
+        const response = await app.request('/api/plugins?target=runner:runner-offline', { headers: { authorization: `Bearer ${await token()}` } })
+
+        expect(response.status).toBe(200)
+        const payload = await response.json() as { plugins: PluginListItem[]; targets: Array<{ target: { active: boolean; stale?: boolean } }> }
+        expect(payload.targets[0]?.target).toMatchObject({ active: false, stale: true })
+        expect(payload.plugins[0]).toMatchObject({ id: runnerPlugin.id, active: false, runtimes: { runner: { active: false } } })
+    })
+
+    it('rejects all-runners for plugin detail instead of throwing', async () => {
+        const app = createApp({ listPlugins: () => [], getPlugin: () => null } as never, { getMachinesByNamespace: () => [] } as never)
+
+        const response = await app.request('/api/plugins/com.example.runner?target=all-runners', {
+            headers: { authorization: `Bearer ${await token()}` }
+        })
+
+        expect(response.status).toBe(400)
+        expect(await response.json()).toEqual({ error: 'Plugin detail requires target=hub or target=runner:<machineId>.' })
+    })
+
+    it('reports all-runners partial failures per target', async () => {
+        const online = makeMachine('runner-online', true)
+        const offline = makeMachine('runner-offline', false)
+        const app = createApp(
+            { listPlugins: () => [] } as never,
+            {
+                getMachinesByNamespace: () => [online, offline],
+                reloadRunnerPlugins: async (machineId: string) => runnerReloadResult(machineId)
+            } as never
+        )
+        const response = await app.request('/api/plugins/reload?target=all-runners', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token()}` }
+        })
+
+        expect(response.status).toBe(200)
+        const payload = await response.json() as PluginReloadResult
+        expect(payload.ok).toBe(false)
+        expect(payload.targetResults).toHaveLength(2)
+        expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.ok).toBe(true)
+        expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
     })
 
     it('validates config bodies and calls manager actions', async () => {

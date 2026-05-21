@@ -2,7 +2,7 @@ import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync 
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { PluginManifestLiteSchema } from '@hapi/protocol/plugins'
+import { PluginManifestLiteSchema, PluginTargetScopeSchema } from '@hapi/protocol/plugins'
 import {
     discoverPlugins,
     getPluginStateFile,
@@ -256,5 +256,59 @@ describe('plugin foundation cold path', () => {
             'D:\\hapi\\two',
             'E:\\hapi\\three'
         ])
+    })
+})
+
+describe('plugin multi-runtime schemas', () => {
+    it('rejects invalid plugin target scopes', () => {
+        expect(PluginTargetScopeSchema.safeParse('hub').success).toBe(true)
+        expect(PluginTargetScopeSchema.safeParse('all-runners').success).toBe(true)
+        expect(PluginTargetScopeSchema.safeParse('runner:runner-1').success).toBe(true)
+        expect(PluginTargetScopeSchema.safeParse('runner:bad/id').success).toBe(false)
+        expect(PluginTargetScopeSchema.safeParse('workspace').success).toBe(false)
+    })
+
+    it('accepts Runner runtime and contribution declarations', () => {
+        const parsed = PluginManifestLiteSchema.safeParse(validManifest({
+            runtimes: {
+                runner: { entry: 'dist/runner.js' }
+            },
+            contributions: {
+                runner: {
+                    environmentProviders: [{ id: 'env', displayName: 'Env' }],
+                    commandResolvers: [{ id: 'cmd' }],
+                    spawnHooks: [{ id: 'spawn' }]
+                },
+                agent: {
+                    adapters: [{ id: 'codex' }],
+                    capabilityProviders: [{ id: 'caps' }]
+                },
+                web: {
+                    settingsPanels: [{ id: 'settings' }],
+                    newSessionFields: [{ id: 'field' }],
+                    actions: [{ id: 'action' }],
+                    badges: [{ id: 'badge' }]
+                }
+            }
+        }))
+
+        expect(parsed.success).toBe(true)
+    })
+
+    it('validates Runner entry paths with the same escape guards as Hub entries', async () => {
+        const testDir = mkdtempSync(join(tmpdir(), 'hapi-runner-entry-'))
+        try {
+            const root = join(testDir, 'escape')
+            mkdirSync(root, { recursive: true })
+            writeFileSync(join(testDir, 'evil.js'), '')
+            writeManifest(root, validManifest({ runtimes: { runner: { entry: '../evil.js' } } }))
+
+            const record = await validatePluginRoot(root)
+
+            expect(record.status).toBe('invalid')
+            expect(record.diagnostics.map((entry) => entry.code)).toContain('entry-path-escape')
+        } finally {
+            rmSync(testDir, { recursive: true, force: true })
+        }
     })
 })

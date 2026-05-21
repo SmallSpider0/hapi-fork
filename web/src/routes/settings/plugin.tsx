@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useNavigate, useParams } from '@tanstack/react-router'
+import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugin } from '@/hooks/queries/usePlugin'
@@ -10,7 +10,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
-import type { PluginDetail, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import { PluginTargetScopeSchema, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
 type ResultState = {
@@ -62,6 +62,19 @@ function severityVariant(severity: string): BadgeVariant {
 
 function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
+}
+
+function pluginTargetLabel(plugin: PluginDetail): string {
+    if (!plugin.target) return 'Local'
+    if (plugin.target.scope === 'hub') return 'Hub'
+    if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
+    return plugin.target.scope
+}
+
+function runtimeActive(plugin: PluginDetail, runtime: string): boolean {
+    if (runtime === 'hub') return plugin.runtimes.hub?.active === true
+    if (runtime === 'runner') return plugin.runtimes.runner?.active === true
+    return false
 }
 
 function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }) {
@@ -175,11 +188,13 @@ function DiagnosticsList(props: { plugin: PluginDetail; t: (key: string, params?
 
 export default function PluginPage() {
     const { pluginId } = useParams({ from: '/settings/plugins/$pluginId' })
+    const search = useSearch({ from: '/settings/plugins/$pluginId' })
+    const target = PluginTargetScopeSchema.safeParse(search.target).success ? search.target as PluginTargetScope : undefined
     const { api } = useAppContext()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const { t } = useTranslation()
-    const { plugin, isLoading, error } = usePlugin(api, pluginId)
+    const { plugin, isLoading, error } = usePlugin(api, pluginId, target)
     const actions = usePluginActions(api)
     const [configText, setConfigText] = useState('{}')
     const [initialConfigText, setInitialConfigText] = useState('{}')
@@ -220,22 +235,22 @@ export default function PluginPage() {
 
     const enable = async () => {
         if (!plugin) return
-        showReloadResult(t('settings.plugins.action.enable'), await actions.enablePlugin(plugin.id))
+        showReloadResult(t('settings.plugins.action.enable'), await actions.enablePlugin(plugin.id, undefined, target))
     }
 
     const disable = async () => {
         if (!plugin) return
-        await runAction(t('settings.plugins.action.disable'), async () => await actions.disablePlugin(plugin.id))
+        await runAction(t('settings.plugins.action.disable'), async () => await actions.disablePlugin(plugin.id, target))
     }
 
     const reload = async () => {
         if (!plugin) return
-        await runAction(t('settings.plugins.action.reload'), async () => await actions.reloadPlugin(plugin.id))
+        await runAction(t('settings.plugins.action.reload'), async () => await actions.reloadPlugin(plugin.id, target))
     }
 
     const deletePlugin = async () => {
         if (!plugin) return
-        await actions.deletePlugin(plugin.id)
+        await actions.deletePlugin(plugin.id, target)
         navigate({ to: '/settings/plugins', replace: true })
     }
 
@@ -244,7 +259,7 @@ export default function PluginPage() {
         try {
             const parsed = parseConfig(configText, t)
             setConfigError(null)
-            const saved = await runAction(t('settings.plugins.action.configSaved'), async () => await actions.saveConfig(plugin.id, parsed))
+            const saved = await runAction(t('settings.plugins.action.configSaved'), async () => await actions.saveConfig(plugin.id, parsed, target))
             if (!saved) {
                 return
             }
@@ -297,6 +312,8 @@ export default function PluginPage() {
                                             <div className="mt-1 text-sm text-[var(--app-hint)]">{t('settings.plugins.detail.meta', { id: plugin.id, version: plugin.version ?? t('settings.plugins.unknown'), status: t(`settings.plugins.status.${plugin.status}`) })}</div>
                                             {plugin.description ? <p className="mt-2 text-sm text-[var(--app-hint)]">{plugin.description}</p> : null}
                                             <div className="mt-3 flex flex-wrap gap-1.5">
+                                                <Chip label={pluginTargetLabel(plugin)} variant={plugin.target?.active === false ? 'warning' : 'default'} />
+                                                {plugin.target?.stale ? <Chip label="Stale" variant="warning" /> : null}
                                                 <Chip icon={<PowerIcon />} label={plugin.enabled ? t('settings.plugins.state.enabled') : t('settings.plugins.state.disabled')} variant={plugin.enabled ? 'success' : 'default'} />
                                                 <Chip icon={<ActivityIcon />} label={plugin.active ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')} variant={plugin.active ? 'success' : 'default'} />
                                                 <Chip icon={<FolderIcon />} label={sourceLabel(t, plugin.source)} />
@@ -324,6 +341,7 @@ export default function PluginPage() {
                             <SectionCard title={t('settings.plugins.detail.overview')}>
                                 <div className="space-y-2">
                                     <KeyValue label={t('settings.plugins.detail.idLabel')} value={plugin.id} />
+                                    <KeyValue label="Target" value={pluginTargetLabel(plugin)} />
                                     <KeyValue label={t('settings.plugins.detail.sourceLabel')} value={sourceLabel(t, plugin.source)} />
                                     <KeyValue label={t('settings.plugins.detail.rootLabel')} value={plugin.rootPath} />
                                     <KeyValue label={t('settings.plugins.detail.manifestLabel')} value={plugin.manifestPath} />
@@ -336,9 +354,9 @@ export default function PluginPage() {
                                         <div key={`${entry.runtime}-${entry.realPath}`} className="rounded-lg border border-[var(--app-border)] p-3 text-sm">
                                             <div className="mb-2 flex flex-wrap items-center gap-2">
                                                 <Badge>{entry.runtime}</Badge>
-                                                <Badge variant={plugin.runtimes.hub?.active ? 'success' : 'default'}>{plugin.runtimes.hub?.active ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')}</Badge>
+                                                <Badge variant={runtimeActive(plugin, entry.runtime) ? 'success' : 'default'}>{runtimeActive(plugin, entry.runtime) ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')}</Badge>
                                             </div>
-                                            <KeyValue label={t('settings.plugins.detail.hubEntryLabel')} value={entry.entry} />
+                                            <KeyValue label={entry.runtime === 'runner' ? 'Runner entry' : t('settings.plugins.detail.hubEntryLabel')} value={entry.entry} />
                                             <div className="mt-2"><KeyValue label={t('settings.plugins.detail.resolvedPathLabel')} value={entry.resolvedPath} /></div>
                                             <div className="mt-2"><KeyValue label={t('settings.plugins.detail.realPathLabel')} value={entry.realPath} /></div>
                                         </div>
