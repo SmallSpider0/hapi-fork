@@ -1,4 +1,6 @@
-import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -18,6 +20,7 @@ import {
     getPluginStateFile,
     getUserPluginInstallDir,
     installPluginFromDirectory,
+    installPluginFromPackage,
     splitPluginDirs,
     validatePluginRoot,
     writePluginState,
@@ -230,6 +233,78 @@ describe('plugin foundation cold path', () => {
         symlinkSync(sourceRoot, sourceLink, 'dir')
 
         await expect(installPluginFromDirectory({ hapiHome: testDir, sourcePath: sourceLink })).rejects.toThrow('symbolic link')
+    })
+
+    it('installs plugin packages only after checksum and package manifest validation', async () => {
+        const sourceRoot = join(testDir, 'package-source')
+        mkdirSync(join(sourceRoot, 'dist'), { recursive: true })
+        writeFileSync(join(sourceRoot, 'dist/hub.js'), 'export function activate() {}')
+        const manifest = validManifest({ id: 'com.example.package', version: '1.2.3' })
+        const parsedManifest = PluginManifestLiteSchema.parse(manifest)
+        writeManifest(sourceRoot, manifest)
+        const packagePath = join(testDir, 'plugin.tgz')
+        execFileSync('tar', ['-czf', packagePath, '-C', sourceRoot, '.'])
+        const bytes = readFileSync(packagePath)
+        const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+        const hubEntryChecksum = `sha256:${createHash('sha256').update(readFileSync(join(sourceRoot, 'dist/hub.js'))).digest('hex')}`
+
+        await expect(installPluginFromPackage({
+            hapiHome: testDir,
+            filename: 'plugin.tgz',
+            contentBase64: bytes.toString('base64'),
+            checksum: 'sha256:deadbeef',
+            format: 'tgz'
+        })).rejects.toThrow('checksum mismatch')
+
+        await expect(installPluginFromPackage({
+            hapiHome: testDir,
+            filename: 'plugin.tgz',
+            contentBase64: bytes.toString('base64'),
+            checksum,
+            format: 'tgz',
+            manifest: {
+                formatVersion: 'hapi-plugin-package/v1',
+                manifest: parsedManifest,
+                checksum,
+                files: [{ path: './dist/hub.js', sha256: 'sha256:deadbeef' }],
+                signature: { algorithm: 'test-none', value: 'unsigned-test' }
+            }
+        })).rejects.toThrow('file checksum mismatch')
+
+        await expect(installPluginFromPackage({
+            hapiHome: testDir,
+            filename: 'plugin.tgz',
+            contentBase64: bytes.toString('base64'),
+            checksum,
+            format: 'tgz',
+            manifest: {
+                formatVersion: 'hapi-plugin-package/v1',
+                manifest: PluginManifestLiteSchema.parse(validManifest({ id: 'com.example.other' })),
+                checksum,
+                files: [{ path: './dist/hub.js', sha256: hubEntryChecksum }]
+            }
+        })).rejects.toThrow('metadata does not match')
+
+        const result = await installPluginFromPackage({
+            hapiHome: testDir,
+            filename: 'plugin.tgz',
+            contentBase64: bytes.toString('base64'),
+            checksum,
+            format: 'tgz',
+            manifest: {
+                formatVersion: 'hapi-plugin-package/v1',
+                manifest: parsedManifest,
+                checksum,
+                files: [{ path: './dist/hub.js', sha256: hubEntryChecksum }],
+                signature: { algorithm: 'test-none', value: 'unsigned-test' }
+            }
+        })
+
+        expect(result.action).toBe('installed')
+        expect(result.checksum).toBe(checksum)
+        expect(result.packageFormat).toBe('tgz')
+        expect(result.record.manifest?.id).toBe('com.example.package')
+        expect(existsSync(join(getUserPluginInstallDir(testDir, 'com.example.package'), 'hapi.plugin.json'))).toBe(true)
     })
 
     it('reads plugins.json parse errors as fail-closed disabled state', async () => {

@@ -10,6 +10,7 @@ import type {
     PluginInstallAction,
     PluginInstallLocalRequest,
     PluginInstallResult,
+    PluginInstallPackageRequest,
     PluginListItem,
     PluginLocalDirectoryEntry,
     PluginLocalDirectoryListResponse,
@@ -23,12 +24,13 @@ import {
     getPluginStateFile,
     getUserPluginsDir,
     installPluginFromDirectory,
+    installPluginFromPackage,
     readPluginState,
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
-import type { PluginStateFile } from '@hapi/protocol/plugins'
+import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
@@ -245,7 +247,8 @@ export class HubPluginManager {
         const previous = state.enabled[record.manifest.id]
         state.enabled[record.manifest.id] = {
             enabled: true,
-            ...(config ?? previous?.config ? { config: config ?? previous?.config } : {})
+            ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
+            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
@@ -258,7 +261,8 @@ export class HubPluginManager {
         const previous = state.enabled[pluginId]
         state.enabled[pluginId] = {
             enabled: false,
-            ...(previous?.config ? { config: previous.config } : {})
+            ...(previous?.config ? { config: previous.config } : {}),
+            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
@@ -273,7 +277,8 @@ export class HubPluginManager {
         const previous = state.enabled[record.manifest.id]
         state.enabled[record.manifest.id] = {
             enabled: previous?.enabled === true,
-            config
+            config,
+            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
@@ -286,21 +291,45 @@ export class HubPluginManager {
             overwrite: options.overwrite === true
         })
         const pluginId = install.record.manifest!.id
-
-        if (options.enable === true) {
-            const state = await this.readWritableState()
-            const previous = state.enabled[pluginId]
-            state.enabled[pluginId] = {
-                enabled: true,
-                ...(previous?.config ? { config: previous.config } : {})
-            }
-            await writePluginState(getPluginStateFile(this.options.hapiHome), state)
-        }
+        await this.recordInstallState(pluginId, {
+            sourceType: 'hub-local-path',
+            sourcePath: install.sourcePath,
+            version: install.record.manifest!.version
+        }, options.enable === true)
 
         return await this.buildInstallResult({
             action: install.action,
             pluginId,
             sourcePath: install.sourcePath,
+            targetPath: install.targetPath,
+            diagnostics: install.record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+            reload: options.reload !== false,
+            reloadReason: options.enable === true ? 'state-change' : 'manual'
+        })
+    }
+
+    async installPluginPackage(options: PluginInstallPackageRequest): Promise<PluginInstallResult> {
+        const install = await installPluginFromPackage({
+            hapiHome: this.options.hapiHome,
+            filename: options.filename,
+            contentBase64: options.contentBase64,
+            checksum: options.checksum,
+            format: options.format,
+            manifest: options.manifest,
+            overwrite: options.overwrite === true
+        })
+        const pluginId = install.record.manifest!.id
+        await this.recordInstallState(pluginId, {
+            sourceType: 'uploaded-package',
+            checksum: install.checksum,
+            packageFormat: install.packageFormat,
+            version: install.record.manifest!.version
+        }, options.enable === true)
+
+        return await this.buildInstallResult({
+            action: install.action,
+            pluginId,
+            sourcePath: options.filename,
             targetPath: install.targetPath,
             diagnostics: install.record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
             reload: options.reload !== false,
@@ -416,6 +445,22 @@ export class HubPluginManager {
                 console.error('[HubPluginManager] Plugin dispose failed:', error)
             }
         }))
+    }
+
+    private async recordInstallState(pluginId: string, metadata: Omit<PluginInstallMetadata, 'installedAt' | 'updatedAt'>, enable: boolean): Promise<void> {
+        const state = await this.readWritableState()
+        const previous = state.enabled[pluginId]
+        const now = Date.now()
+        state.enabled[pluginId] = {
+            enabled: enable ? true : previous?.enabled === true,
+            ...(previous?.config ? { config: previous.config } : {}),
+            install: {
+                ...metadata,
+                installedAt: previous?.install?.installedAt ?? now,
+                updatedAt: now
+            }
+        }
+        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
     }
 
     private async buildInstallResult(options: {
@@ -746,6 +791,7 @@ export class HubPluginManager {
                 ...record.diagnostics.map((entry) => diagnosticView(id, entry)),
                 ...(activeInstance?.registry.diagnostics.map((entry) => diagnosticView(id, entry)) ?? [])
             ],
+            install: record.install ?? { sourceType: record.source, version: record.manifest?.version },
             ...(activeInstance ? { updatedAt: activeInstance.loadedAt } : {})
         }
     }

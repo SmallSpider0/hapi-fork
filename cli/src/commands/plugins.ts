@@ -2,13 +2,14 @@ import chalk from 'chalk'
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import { existsSync } from 'node:fs'
+import { createHash } from 'node:crypto'
 import { readFile, realpath, rm } from 'node:fs/promises'
 import { basename, isAbsolute, relative, resolve } from 'node:path'
 import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
 import { initializeToken } from '@/ui/tokenInit'
-import { getRemotePlugins, reloadRemotePlugins } from '@/api/pluginAdmin'
+import { getRemotePlugins, installRemoteLocalPlugin, installRemotePackagePlugin, reloadRemotePlugins } from '@/api/pluginAdmin'
 import type { CommandDefinition } from './types'
 import {
     applyPluginState,
@@ -88,6 +89,7 @@ function toLocalListItem(record: DiscoveredPluginRecord): PluginListItem {
             ...(record.manifest?.runtimes?.runner ? { runner: { entry: record.manifest.runtimes.runner.entry, active: false } } : {})
         },
         target: { scope: 'hub', runtime: 'hub', active: false, stale: true, displayName: 'Local Hub files' },
+        install: record.install ?? { sourceType: record.source, version: record.manifest?.version },
         diagnostics: record.diagnostics.map((diagnostic) => ({ ...diagnostic, pluginId: id }))
     }
 }
@@ -300,7 +302,8 @@ async function enableInstalledPlugin(record: DiscoveredPluginRecord, config?: Re
     const previous = state.enabled[record.manifest.id]
     state.enabled[record.manifest.id] = {
         enabled: true,
-        ...(config ?? previous?.config ? { config: config ?? previous?.config } : {})
+        ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
+        ...(previous?.install ? { install: previous.install } : {})
     }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
 }
@@ -409,7 +412,8 @@ async function runEnable(args: string[]): Promise<void> {
     const previous = writableState.enabled[record.manifest.id]
     writableState.enabled[record.manifest.id] = {
         enabled: true,
-        ...(config ?? previous?.config ? { config: config ?? previous?.config } : {})
+        ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
+        ...(previous?.install ? { install: previous.install } : {})
     }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), writableState)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), json, 'Plugin enabled locally.')
@@ -425,7 +429,11 @@ async function runDisable(args: string[]): Promise<void> {
     await confirmRisk(record, 'disable', hasFlag(args, '--yes') || hasFlag(args, '-y'))
     const state = await readWritableState()
     const previous = state.enabled[record.manifest.id]
-    state.enabled[record.manifest.id] = { enabled: false, ...(previous?.config ? { config: previous.config } : {}) }
+    state.enabled[record.manifest.id] = {
+        enabled: false,
+        ...(previous?.config ? { config: previous.config } : {}),
+        ...(previous?.install ? { install: previous.install } : {})
+    }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), json, 'Plugin disabled locally.')
 }
@@ -454,56 +462,72 @@ async function runConfig(args: string[]): Promise<void> {
     }
     const nextConfig = { ...(entry.config ?? {}), [key]: parseValue(value) }
     assertPluginConfigSafeForPersistence(nextConfig, record.manifest.permissions?.secrets ?? [], record.manifest.id)
-    state.enabled[record.manifest.id] = { enabled: entry.enabled, config: nextConfig }
+    state.enabled[record.manifest.id] = {
+        enabled: entry.enabled,
+        config: nextConfig,
+        ...(entry.install ? { install: entry.install } : {})
+    }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), hasFlag(args, '--json'), 'Plugin config saved locally.')
 }
 
 async function runInstallLocal(args: string[]): Promise<void> {
-    const sourcePath = args.find((arg) => !arg.startsWith('-'))
-    if (!sourcePath) throw new Error('Usage: hapi plugins install-local <path> [--enable] [--reload] [--overwrite] [--json] [--yes]')
-    const json = hasFlag(args, '--json')
-    const install = await installPluginFromDirectory({
-        hapiHome: configuration.happyHomeDir,
+    const sourcePath = positionalArgs(args, ['--target'])[0]
+    const target = parseTargetArg(args)
+    if (!sourcePath || !target) throw new Error('Usage: hapi plugins install-local <path> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]')
+    await initializeApiUrl()
+    await initializeToken()
+    const payload = await installRemoteLocalPlugin(configuration.cliApiToken, {
         sourcePath,
+        enable: hasFlag(args, '--enable'),
+        reload: hasFlag(args, '--reload'),
         overwrite: hasFlag(args, '--overwrite')
-    })
-    const pluginIdValue = install.record.manifest!.id
-    if (hasFlag(args, '--enable')) {
-        await confirmRisk(install.record, 'enable', hasFlag(args, '--yes') || hasFlag(args, '-y'))
-        await enableInstalledPlugin(install.record)
-    }
-
-    let reloadResult: PluginReloadResult | undefined
-    try {
-        reloadResult = await reloadRemoteOptional(pluginIdValue, hasFlag(args, '--reload'))
-    } catch (error) {
-        if (!json) {
-            console.log(chalk.yellow(`Plugin installed locally, but Hub reload was not applied: ${error instanceof Error ? error.message : String(error)}`))
-            console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
-        }
-    }
-
-    const payload = await buildLocalInstallResult({
-        action: install.action,
-        pluginId: pluginIdValue,
-        sourcePath: install.sourcePath,
-        targetPath: install.targetPath,
-        record: install.record,
-        reload: reloadResult
-    })
-    if (json) {
+    }, 120000, target)
+    if (hasFlag(args, '--json')) {
         console.log(JSON.stringify(payload, null, 2))
         return
     }
+    console.log(chalk.green(`Plugin install ${payload.ok ? 'completed' : 'completed with issues'} on ${target}.`))
+    for (const targetResult of payload.targetResults ?? []) {
+        console.log(`${targetResult.target.scope}: ${targetResult.ok ? 'ok' : 'failed'}${targetResult.error ? ` - ${targetResult.error}` : ''}`)
+    }
+    if (!payload.targetResults) {
+        console.log(chalk.gray(`Plugin: ${payload.pluginId ?? '(unknown)'}`))
+        console.log(chalk.gray(`Target path: ${payload.targetPath ?? '(multiple)'}`))
+    }
+}
 
-    console.log(chalk.green(`Plugin ${install.action}: ${pluginIdValue}`))
-    console.log(chalk.gray(`Source: ${install.sourcePath}`))
-    console.log(chalk.gray(`Target: ${install.targetPath}`))
-    if (!hasFlag(args, '--reload')) {
-        console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
-    } else if (reloadResult) {
-        console.log(chalk.green(reloadResult.ok ? 'Hub reload applied.' : 'Hub reload completed with issues.'))
+async function runInstallPackage(args: string[]): Promise<void> {
+    const packagePath = positionalArgs(args, ['--target'])[0]
+    const target = parseTargetArg(args)
+    if (!packagePath || !target) throw new Error('Usage: hapi plugins install-package <package.tgz|package.zip> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]')
+    const bytes = await readFile(packagePath)
+    const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
+    const lowered = packagePath.toLowerCase()
+    const format = lowered.endsWith('.zip') ? 'zip' : lowered.endsWith('.tgz') || lowered.endsWith('.tar.gz') ? 'tgz' : undefined
+    if (!format) throw new Error('Plugin package must be .tgz, .tar.gz, or .zip.')
+    await initializeApiUrl()
+    await initializeToken()
+    const payload = await installRemotePackagePlugin(configuration.cliApiToken, {
+        filename: basename(packagePath),
+        contentBase64: bytes.toString('base64'),
+        checksum,
+        format,
+        enable: hasFlag(args, '--enable'),
+        reload: hasFlag(args, '--reload'),
+        overwrite: hasFlag(args, '--overwrite')
+    }, 120000, target)
+    if (hasFlag(args, '--json')) {
+        console.log(JSON.stringify(payload, null, 2))
+        return
+    }
+    console.log(chalk.green(`Plugin package install ${payload.ok ? 'completed' : 'completed with issues'} on ${target}.`))
+    for (const targetResult of payload.targetResults ?? []) {
+        console.log(`${targetResult.target.scope}: ${targetResult.ok ? 'ok' : 'failed'}${targetResult.error ? ` - ${targetResult.error}` : ''}`)
+    }
+    if (!payload.targetResults) {
+        console.log(chalk.gray(`Plugin: ${payload.pluginId ?? '(unknown)'}`))
+        console.log(chalk.gray(`Target path: ${payload.targetPath ?? '(multiple)'}`))
     }
 }
 
@@ -626,10 +650,13 @@ ${chalk.bold('Usage:')}
   hapi plugins disable <id> [--reload] [--yes]
   hapi plugins config get <id> [--json]
   hapi plugins config set <id> <key> <value> [--reload]
-  hapi plugins install-local <path> [--enable] [--reload] [--overwrite] [--json] [--yes]
+  hapi plugins install-local <path> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
+  hapi plugins install-package <package.tgz|package.zip> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
   hapi plugins delete <id> [--reload] [--json] [--yes]
   hapi plugins reload [id] [--json]
   hapi plugins doctor [id] [--json]
+
+Package archives must include hapi.plugin.package.json metadata. Hub validates checksum and metadata before distributing uploads to Runner targets.
 `)
 }
 
@@ -646,6 +673,7 @@ export async function handlePluginsCommand(args: string[]): Promise<void> {
     if (subcommand === 'disable') return await runDisable(rest)
     if (subcommand === 'config') return await runConfig(rest)
     if (subcommand === 'install-local' || subcommand === 'install') return await runInstallLocal(rest)
+    if (subcommand === 'install-package' || subcommand === 'install-upload') return await runInstallPackage(rest)
     if (subcommand === 'delete' || subcommand === 'remove' || subcommand === 'uninstall') return await runDelete(rest)
     if (subcommand === 'reload') return await runReload(rest)
     if (subcommand === 'doctor') return await runDoctor(rest)

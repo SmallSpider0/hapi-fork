@@ -15,6 +15,7 @@ import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
     PluginDeleteResultSchema,
     PluginDetailResponseSchema,
+    PluginInstallResultSchema,
     PluginReloadResultSchema,
     RunnerPluginInventorySchema,
     RunnerPluginsConfigUpdateRequestSchema,
@@ -23,7 +24,10 @@ import {
     RunnerPluginsEnableRequestSchema,
     RunnerPluginsInspectRequestSchema,
     RunnerPluginsInstallCommitRequestSchema,
+    RunnerPluginsInstallLocalRequestSchema,
+    RunnerPluginsInstallPackageRequestSchema,
     RunnerPluginsInstallPrepareRequestSchema,
+    RunnerPluginsLocalDirectoryListRequestSchema,
     RunnerPluginsListRequestSchema,
     RunnerPluginsReloadRequestSchema,
     RunnerPluginUnsupportedInstallResultSchema
@@ -389,6 +393,25 @@ export class ApiMachineClient {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInstallCommit, (params: unknown) => {
             RunnerPluginsInstallCommitRequestSchema.parse(params ?? {})
             return RunnerPluginUnsupportedInstallResultSchema.parse(manager.installCommitUnsupported())
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsLocalDirectory, async (params: unknown) => {
+            const request = RunnerPluginsLocalDirectoryListRequestSchema.parse(params ?? {})
+            return await manager.listLocalDirectory(request.path)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInstallLocal, async (params: unknown) => {
+            const request = RunnerPluginsInstallLocalRequestSchema.parse(params)
+            const result = await manager.installLocalPlugin(request)
+            await publishInventory()
+            return PluginInstallResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInstallPackage, async (params: unknown) => {
+            const request = RunnerPluginsInstallPackageRequestSchema.parse(params)
+            const result = await manager.installPluginPackage(request)
+            await publishInventory()
+            return PluginInstallResultSchema.parse(result)
         })
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsDelete, async (params: unknown) => {

@@ -2,6 +2,9 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { PluginManifestLiteSchema } from '@hapi/protocol/plugins'
 import { RunnerPluginManager } from './runnerPluginManager'
 
 function writeManifest(root: string, overrides: Record<string, unknown> = {}): void {
@@ -662,6 +665,81 @@ describe('RunnerPluginManager runtime', () => {
             expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-extension-after-spawn-failed' }),
             expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-extension-on-exit-failed' })
         ]))
+    })
+
+    it('installs Runner local-path plugins and records per-target install metadata', async () => {
+        const sourceRoot = join(testDir, 'source-runner-plugin')
+        mkdirSync(join(sourceRoot, 'dist'), { recursive: true })
+        writeFileSync(join(sourceRoot, 'dist', 'runner.js'), 'export function activate() {}')
+        writeManifest(sourceRoot, { id: 'com.installed.runner', version: '1.2.3' })
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        const result = await manager.installLocalPlugin({ sourcePath: sourceRoot, reload: true })
+        const state = JSON.parse(readFileSync(join(testDir, 'plugins.json'), 'utf8')) as {
+            enabled: Record<string, { install?: { sourceType: string; sourcePath?: string; version?: string; installedAt?: number; updatedAt?: number } }>
+        }
+
+        expect(result.ok).toBe(true)
+        expect(result.pluginId).toBe('com.installed.runner')
+        expect(result.target?.scope).toBe('runner:runner-1')
+        expect(state.enabled['com.installed.runner']?.install).toMatchObject({
+            sourceType: 'runner-local-path',
+            sourcePath: sourceRoot,
+            version: '1.2.3'
+        })
+        expect(state.enabled['com.installed.runner']?.install?.installedAt).toBeTypeOf('number')
+        expect(manager.getInventory().plugins.find((entry) => entry.id === 'com.installed.runner')?.install).toMatchObject({
+            sourceType: 'runner-local-path',
+            version: '1.2.3'
+        })
+    })
+
+    it('installs uploaded Runner packages and rejects checksum mismatches', async () => {
+        const packageSource = join(testDir, 'package-runner-plugin')
+        mkdirSync(join(packageSource, 'dist'), { recursive: true })
+        writeFileSync(join(packageSource, 'dist', 'runner.js'), 'export function activate() {}')
+        writeManifest(packageSource, { id: 'com.package.runner', version: '2.0.0' })
+        const packageManifest = PluginManifestLiteSchema.parse(JSON.parse(readFileSync(join(packageSource, 'hapi.plugin.json'), 'utf8')) as unknown)
+        const packagePath = join(testDir, 'runner-plugin.tgz')
+        execFileSync('tar', ['-czf', packagePath, '-C', packageSource, '.'])
+        const packageBytes = readFileSync(packagePath)
+        const checksum = `sha256:${createHash('sha256').update(packageBytes).digest('hex')}`
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        await expect(manager.installPluginPackage({
+            filename: 'runner-plugin.tgz',
+            contentBase64: packageBytes.toString('base64'),
+            checksum: 'sha256:deadbeef',
+            format: 'tgz'
+        })).rejects.toThrow('checksum mismatch')
+
+        const result = await manager.installPluginPackage({
+            filename: 'runner-plugin.tgz',
+            contentBase64: packageBytes.toString('base64'),
+            checksum,
+            format: 'tgz',
+            manifest: {
+                formatVersion: 'hapi-plugin-package/v1',
+                manifest: packageManifest,
+                checksum,
+                files: [{ path: './hapi.plugin.json' }],
+                signature: { algorithm: 'test-none', value: 'unsigned-test' }
+            }
+        })
+        const state = JSON.parse(readFileSync(join(testDir, 'plugins.json'), 'utf8')) as {
+            enabled: Record<string, { install?: { sourceType: string; checksum?: string; packageFormat?: string; version?: string } }>
+        }
+
+        expect(result.ok).toBe(true)
+        expect(result.pluginId).toBe('com.package.runner')
+        expect(state.enabled['com.package.runner']?.install).toMatchObject({
+            sourceType: 'uploaded-package',
+            checksum,
+            packageFormat: 'tgz',
+            version: '2.0.0'
+        })
     })
 
     it('does not import invalid Runner plugins', async () => {

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 
 type PluginsModule = typeof import('./plugins')
 
@@ -133,21 +134,77 @@ describe('hapi plugins command', () => {
         expect(state.enabled['com.example.plugin']).toBeUndefined()
     })
 
-    it('installs local plugin directories without importing runtime code', async () => {
+    it('sends local install requests to the selected remote target without importing runtime code', async () => {
         const sourceRoot = join(testDir, 'source-plugin')
         const marker = join(testDir, 'imported-by-install')
         mkdirSync(sourceRoot, { recursive: true })
         writeFileSync(join(sourceRoot, 'hub.js'), `import { writeFileSync } from 'node:fs'; writeFileSync(${JSON.stringify(marker)}, 'bad'); export function activate() {}`)
         writeManifest(sourceRoot, { id: 'com.local.install' })
+        process.env.CLI_API_TOKEN = 'test-token'
+        const installRemoteLocalPlugin = vi.fn(async () => ({
+            ok: true,
+            action: 'installed',
+            pluginId: 'com.local.install',
+            targetPath: '/runner/plugins/com.local.install',
+            diagnostics: [],
+            plugins: []
+        }))
+        vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugins: vi.fn(),
+            reloadRemotePlugins: vi.fn(),
+            installRemoteLocalPlugin,
+            installRemotePackagePlugin: vi.fn()
+        }))
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 
-        await handlePluginsCommand(['install-local', sourceRoot, '--json'])
+        await handlePluginsCommand(['install-local', sourceRoot, '--target', 'runner:runner-1', '--enable', '--reload', '--overwrite', '--json'])
 
         const payload = JSON.parse(logs.join('\n')) as { pluginId: string; action: string }
         expect(payload.pluginId).toBe('com.local.install')
         expect(payload.action).toBe('installed')
-        expect(existsSync(join(hapiHome, 'plugins', 'com.local.install', 'hapi.plugin.json'))).toBe(true)
+        expect(installRemoteLocalPlugin).toHaveBeenCalledWith('test-token', {
+            sourcePath: sourceRoot,
+            enable: true,
+            reload: true,
+            overwrite: true
+        }, 120000, 'runner:runner-1')
+        expect(existsSync(join(hapiHome, 'plugins', 'com.local.install', 'hapi.plugin.json'))).toBe(false)
         expect(existsSync(marker)).toBe(false)
+    })
+
+    it('uploads package installs with checksum and target scope', async () => {
+        const packagePath = join(testDir, 'plugin.tgz')
+        const content = Buffer.from('fake-package-bytes')
+        writeFileSync(packagePath, content)
+        process.env.CLI_API_TOKEN = 'test-token'
+        const installRemotePackagePlugin = vi.fn(async () => ({
+            ok: true,
+            action: 'installed',
+            pluginId: 'com.package.install',
+            targetPath: '/hub/plugins/com.package.install',
+            diagnostics: [],
+            plugins: []
+        }))
+        vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugins: vi.fn(),
+            reloadRemotePlugins: vi.fn(),
+            installRemoteLocalPlugin: vi.fn(),
+            installRemotePackagePlugin
+        }))
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await handlePluginsCommand(['install-package', packagePath, '--target', 'hub', '--json'])
+
+        const expectedChecksum = `sha256:${createHash('sha256').update(content).digest('hex')}`
+        expect(installRemotePackagePlugin).toHaveBeenCalledWith('test-token', expect.objectContaining({
+            filename: 'plugin.tgz',
+            contentBase64: content.toString('base64'),
+            checksum: expectedChecksum,
+            format: 'tgz',
+            enable: false,
+            reload: false,
+            overwrite: false
+        }), 120000, 'hub')
     })
 
     it('passes --target to remote reload without treating the target value as a plugin id', async () => {
@@ -155,7 +212,9 @@ describe('hapi plugins command', () => {
         const reloadRemotePlugins = vi.fn(async () => ({ ok: true, results: [], plugins: [] }))
         vi.doMock('@/api/pluginAdmin', () => ({
             getRemotePlugins: vi.fn(),
-            reloadRemotePlugins
+            reloadRemotePlugins,
+            installRemoteLocalPlugin: vi.fn(),
+            installRemotePackagePlugin: vi.fn()
         }))
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 

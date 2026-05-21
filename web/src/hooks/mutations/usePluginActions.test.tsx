@@ -52,6 +52,7 @@ describe('usePluginActions', () => {
         const api = {
             enablePlugin: vi.fn(async () => reloadResult()),
             installLocalPlugin: vi.fn(async () => installResult('com.installed.plugin')),
+            installPackagePlugin: vi.fn(async () => installResult('com.package.plugin')),
             deletePlugin: vi.fn(async () => deleteResult('com.example.plugin')),
         } as unknown as ApiClient
 
@@ -64,6 +65,9 @@ describe('usePluginActions', () => {
             await result.current.installLocalPlugin({ sourcePath: '/tmp/plugin', enable: true, reload: true })
         })
         await act(async () => {
+            await result.current.installPackagePlugin({ filename: 'plugin.tgz', contentBase64: 'AA==', checksum: 'sha256:test' }, 'hub')
+        })
+        await act(async () => {
             await result.current.deletePlugin('com.example.plugin')
         })
 
@@ -73,8 +77,11 @@ describe('usePluginActions', () => {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.pluginDiagnostics })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.example.plugin') })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.installed.plugin') })
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugins('hub') })
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.package.plugin', 'hub') })
         expect(api.enablePlugin).toHaveBeenCalledWith('com.example.plugin', undefined, undefined)
-        expect(api.installLocalPlugin).toHaveBeenCalledWith({ sourcePath: '/tmp/plugin', enable: true, reload: true })
+        expect(api.installLocalPlugin).toHaveBeenCalledWith({ sourcePath: '/tmp/plugin', enable: true, reload: true }, undefined)
+        expect(api.installPackagePlugin).toHaveBeenCalledWith({ filename: 'plugin.tgz', contentBase64: 'AA==', checksum: 'sha256:test' }, 'hub')
         expect(api.deletePlugin).toHaveBeenCalledWith('com.example.plugin', undefined)
     })
 
