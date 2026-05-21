@@ -191,17 +191,49 @@ describe('HubPluginManager', () => {
         expect(result.results[0]?.status).toBe('incompatible')
     })
 
-    it('rejects redacted placeholders in config updates', async () => {
+    it('rejects config updates that would persist secrets', async () => {
         writePlugin(pluginRoot, 'export function activate() {}')
-        writeManifest(pluginRoot, manifest())
+        writeManifest(pluginRoot, manifest({ permissions: { secrets: ['PLUGIN_TOKEN'] } }))
         await writePluginState(join(hapiHome, 'plugins.json'), {
-            enabled: { 'com.example.plugin': { enabled: true, config: { apiToken: 'secret-value' } } }
+            enabled: { 'com.example.plugin': { enabled: true, config: { label: 'safe' } } }
         })
 
         const manager = new HubPluginManager({ hapiHome, watch: false })
         await manager.start()
-        await expect(manager.updatePluginConfig('com.example.plugin', { apiToken: '[REDACTED]' })).rejects.toThrow('redacted placeholder')
+        await expect(manager.updatePluginConfig('com.example.plugin', { nested: { PLUGIN_TOKEN: 'secret-value' } })).rejects.toThrow('declared secret')
+        await expect(manager.updatePluginConfig('com.example.plugin', { nested: { webhookToken: 'secret-value' } })).rejects.toThrow('secret-like field')
+        await expect(manager.updatePluginConfig('com.example.plugin', { api: { key: '[REDACTED]' } })).rejects.toThrow('redacted placeholder')
         await manager.dispose()
+
+        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as { enabled: Record<string, { config: Record<string, unknown> }> }
+        expect(JSON.stringify(state)).not.toContain('secret-value')
+        expect(state.enabled['com.example.plugin']?.config).toEqual({ label: 'safe' })
+    })
+
+
+    it('redacts existing secret-shaped config values in detail views', async () => {
+        writePlugin(pluginRoot, 'export function activate() {}')
+        writeManifest(pluginRoot, manifest({ permissions: { secrets: ['PLUGIN_TOKEN'] } }))
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: {
+                'com.example.plugin': {
+                    enabled: true,
+                    config: {
+                        url: 'https://example.test',
+                        nested: { PLUGIN_TOKEN: 'declared-secret', apiKey: 'api-key-secret' }
+                    }
+                }
+            }
+        })
+
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+        await manager.start()
+        const detail = manager.getPlugin('com.example.plugin')
+        await manager.dispose()
+
+        expect(JSON.stringify(detail)).not.toContain('declared-secret')
+        expect(JSON.stringify(detail)).not.toContain('api-key-secret')
+        expect(detail?.config).toEqual({ url: 'https://example.test', nested: { PLUGIN_TOKEN: '[REDACTED]', apiKey: '[REDACTED]' } })
     })
 
     it('deletes user-home plugin files and removes saved state', async () => {

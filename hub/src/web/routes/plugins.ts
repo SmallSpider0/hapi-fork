@@ -28,7 +28,7 @@ function errorStatus(error: unknown): 400 | 404 | 409 | 500 {
     if (message.includes('was not found')) {
         return 404
     }
-    if (message.includes('plugins.json') || message.includes('must not store declared secret')) {
+    if (message.includes('plugins.json') || message.includes('must not store declared secret') || message.includes('secret-like field') || message.includes('redacted placeholder')) {
         return 409
     }
     if (message.includes('cannot be deleted')) {

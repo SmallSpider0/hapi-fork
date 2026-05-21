@@ -20,6 +20,7 @@ import {
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
+import { assertPluginConfigSafeForPersistence, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile } from '@hapi/protocol/plugins'
 
 function hasFlag(args: string[], flag: string): boolean {
@@ -129,62 +130,6 @@ function printDiagnostics(diagnostics: PluginDiagnostic[]): void {
             console.log(chalk.gray(`  ${diagnostic.path}`))
         }
     }
-}
-
-function sanitizeConfigForView(config: Record<string, unknown> | undefined, declaredSecrets: string[] = []): Record<string, unknown> | undefined {
-    if (!config) {
-        return undefined
-    }
-    const secretKeys = new Set(declaredSecrets.map((key) => key.toLowerCase()))
-    const sanitize = (value: unknown, key = ''): unknown => {
-        const lowerKey = key.toLowerCase()
-        if (secretKeys.has(lowerKey) || lowerKey.includes('secret') || lowerKey.includes('token') || lowerKey.includes('password')) {
-            return '[REDACTED]'
-        }
-        if (Array.isArray(value)) {
-            return value.map((entry) => sanitize(entry))
-        }
-        if (value && typeof value === 'object') {
-            return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([entryKey, entry]) => [entryKey, sanitize(entry, entryKey)]))
-        }
-        return value
-    }
-    return Object.fromEntries(Object.entries(config).map(([key, value]) => [key, sanitize(value, key)]))
-}
-
-
-function ensureConfigHasNoDeclaredSecrets(config: Record<string, unknown> | undefined, declaredSecrets: string[], id: string): void {
-    if (!config) return
-    const secrets = new Set(declaredSecrets.map((secret) => secret.toLowerCase()))
-    for (const key of Object.keys(config)) {
-        if (secrets.has(key.toLowerCase())) {
-            throw new Error(`Config for ${id} must not store declared secret ${key}; set it as an environment variable instead.`)
-        }
-    }
-    const redactedPath = findRedactedPlaceholderPath(config)
-    if (redactedPath) {
-        throw new Error(`Config for ${id} contains a redacted placeholder at ${redactedPath}; replace it with a real value or remove the field before saving.`)
-    }
-}
-
-function findRedactedPlaceholderPath(value: unknown, path = '$'): string | null {
-    if (value === '[REDACTED]') {
-        return path
-    }
-    if (Array.isArray(value)) {
-        for (let index = 0; index < value.length; index += 1) {
-            const found = findRedactedPlaceholderPath(value[index], `${path}[${index}]`)
-            if (found) return found
-        }
-        return null
-    }
-    if (value && typeof value === 'object') {
-        for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-            const found = findRedactedPlaceholderPath(entry, `${path}.${key}`)
-            if (found) return found
-        }
-    }
-    return null
 }
 
 function assertLocalRecordCanBeEnabled(record: DiscoveredPluginRecord, id: string): asserts record is DiscoveredPluginRecord & { manifest: NonNullable<DiscoveredPluginRecord['manifest']> } {
@@ -312,7 +257,7 @@ async function enableInstalledPlugin(record: DiscoveredPluginRecord, config?: Re
     if (!record.manifest) {
         throw new Error('Cannot enable plugin without a valid manifest.')
     }
-    ensureConfigHasNoDeclaredSecrets(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
+    assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
     const state = await readWritableState()
     const previous = state.enabled[record.manifest.id]
     state.enabled[record.manifest.id] = {
@@ -370,7 +315,7 @@ async function runInspect(args: string[]): Promise<void> {
     const detail = {
         ...item,
         manifest: record.manifest,
-        config: sanitizeConfigForView(record.config, record.manifest?.permissions?.secrets ?? []),
+        config: sanitizePluginConfigForView(record.config, record.manifest?.permissions?.secrets ?? []),
         runtimeEntryPaths: record.runtimeEntryPaths,
         permissions: {
             network: record.manifest?.permissions?.network ?? [],
@@ -391,7 +336,7 @@ async function runInspect(args: string[]): Promise<void> {
     console.log(`Network: ${(record.manifest?.permissions?.network ?? []).join(', ') || '(none)'}`)
     console.log(`Secrets: ${(record.manifest?.permissions?.secrets ?? []).join(', ') || '(none)'}`)
     if (record.config) {
-        console.log(`Config: ${JSON.stringify(sanitizeConfigForView(record.config, record.manifest?.permissions?.secrets ?? []), null, 2)}`)
+        console.log(`Config: ${JSON.stringify(sanitizePluginConfigForView(record.config, record.manifest?.permissions?.secrets ?? []), null, 2)}`)
     }
     printDiagnostics(record.diagnostics)
 }
@@ -406,7 +351,7 @@ async function runEnable(args: string[]): Promise<void> {
     assertLocalRecordCanBeEnabled(record, id)
     await confirmRisk(record, 'enable', hasFlag(args, '--yes') || hasFlag(args, '-y'))
     const config = await parseConfigArg(valueAfter(args, '--config'))
-    ensureConfigHasNoDeclaredSecrets(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
+    assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
     const writableState = await readWritableState()
     const previous = writableState.enabled[record.manifest.id]
     writableState.enabled[record.manifest.id] = {
@@ -445,7 +390,7 @@ async function runConfig(args: string[]): Promise<void> {
     const state = await readWritableState()
     const entry = state.enabled[record.manifest.id] ?? { enabled: false }
     if (sub === 'get') {
-        const payload = { id: record.manifest.id, config: sanitizeConfigForView(entry.config, record.manifest.permissions?.secrets ?? []) ?? {} }
+        const payload = { id: record.manifest.id, config: sanitizePluginConfigForView(entry.config, record.manifest.permissions?.secrets ?? []) ?? {} }
         console.log(hasFlag(args, '--json') ? JSON.stringify(payload, null, 2) : JSON.stringify(payload.config, null, 2))
         return
     }
@@ -455,7 +400,7 @@ async function runConfig(args: string[]): Promise<void> {
         throw new Error('Usage: hapi plugins config set <id> <key> <value> [--reload]')
     }
     const nextConfig = { ...(entry.config ?? {}), [key]: parseValue(value) }
-    ensureConfigHasNoDeclaredSecrets(nextConfig, record.manifest.permissions?.secrets ?? [], record.manifest.id)
+    assertPluginConfigSafeForPersistence(nextConfig, record.manifest.permissions?.secrets ?? [], record.manifest.id)
     state.enabled[record.manifest.id] = { enabled: entry.enabled, config: nextConfig }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), hasFlag(args, '--json'), 'Plugin config saved locally.')

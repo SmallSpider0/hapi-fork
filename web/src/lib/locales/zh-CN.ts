@@ -421,7 +421,7 @@ export default {
   'settings.plugins.install.title': '安装插件',
   'settings.plugins.install.description': '从运行 HAPI Hub 的机器文件系统中复制一个可信插件目录。',
   'settings.plugins.install.localTitle': '从 Hub 本地路径安装',
-  'settings.plugins.install.localDescription': '该路径在运行 HAPI Hub 的机器上解析，不是浏览器本机路径。仅启用可信插件。',
+  'settings.plugins.install.localDescription': '该路径在运行 HAPI Hub 的机器上解析，不是浏览器本机路径，也不是远端 Runner 路径。仅启用可信插件。',
   'settings.plugins.install.pathPlaceholder': '/path/to/plugin-directory',
   'settings.plugins.install.browse': '浏览',
   'settings.plugins.install.browserTitle': '选择插件目录',

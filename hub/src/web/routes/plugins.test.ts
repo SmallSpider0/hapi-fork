@@ -102,7 +102,11 @@ describe('plugin admin routes', () => {
     it('validates config bodies and calls manager actions', async () => {
         const calls: string[] = []
         const app = createApp({
-            updatePluginConfig: async (id: string) => { calls.push(`config:${id}`); return reloadResult('reloaded') },
+            updatePluginConfig: async (id: string, config?: Record<string, unknown>) => {
+                calls.push(`config:${id}`)
+                if (config && 'apiKey' in config) throw new Error('Config for com.example.plugin must not store secret-like field apiKey; set secrets as environment variables instead.')
+                return reloadResult('reloaded')
+            },
             enablePlugin: async (id: string) => { calls.push(`enable:${id}`); return reloadResult('activated') },
             disablePlugin: async (id: string) => { calls.push(`disable:${id}`); return reloadResult('deactivated') },
             reload: async (id?: string) => { calls.push(`reload:${id ?? '*'}`); return reloadResult('unchanged') },
@@ -121,6 +125,7 @@ describe('plugin admin routes', () => {
         expect(invalid.status).toBe(400)
 
         expect((await app.request('/api/plugins/com.example.plugin/config', { method: 'PATCH', headers, body: JSON.stringify({ config: { label: 'v2' } }) })).status).toBe(200)
+        expect((await app.request('/api/plugins/com.example.plugin/config', { method: 'PATCH', headers, body: JSON.stringify({ config: { apiKey: 'secret-value' } }) })).status).toBe(409)
         expect((await app.request('/api/plugins/com.example.plugin/enable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin/disable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin/reload', { method: 'POST', headers })).status).toBe(200)
@@ -136,6 +141,7 @@ describe('plugin admin routes', () => {
         })
         expect(invalidInstall.status).toBe(400)
         expect(calls).toEqual([
+            'config:com.example.plugin',
             'config:com.example.plugin',
             'enable:com.example.plugin',
             'disable:com.example.plugin',

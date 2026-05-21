@@ -97,6 +97,22 @@ describe('hapi plugins command', () => {
         expect(JSON.stringify(state)).not.toContain('secret-value')
     })
 
+
+    it('refuses to persist declared, secret-shaped, or redacted config values', async () => {
+        writeFileSync(join(pluginRoot, 'hub.js'), 'export function activate() {}')
+        writeManifest(pluginRoot, { permissions: { secrets: ['PLUGIN_TOKEN'] } })
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await expect(handlePluginsCommand(['enable', 'com.example.plugin', '--yes', '--config', '{"nested":{"PLUGIN_TOKEN":"secret-value"}}'])).rejects.toThrow('declared secret')
+        await expect(handlePluginsCommand(['enable', 'com.example.plugin', '--yes', '--config', '{"nested":{"webhookToken":"secret-value"}}'])).rejects.toThrow('secret-like field')
+        await expect(handlePluginsCommand(['enable', 'com.example.plugin', '--yes', '--config', '{"nested":{"safe":"[REDACTED]"}}'])).rejects.toThrow('redacted placeholder')
+        await handlePluginsCommand(['enable', 'com.example.plugin', '--yes', '--config', '{"url":"https://example.test"}'])
+
+        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as { enabled: Record<string, { config?: Record<string, unknown> }> }
+        expect(JSON.stringify(state)).not.toContain('secret-value')
+        expect(state.enabled['com.example.plugin']?.config).toEqual({ url: 'https://example.test' })
+    })
+
     it('deletes user-home plugin files and state as JSON', async () => {
         writeFileSync(join(pluginRoot, 'hub.js'), 'export function activate() {}')
         writeManifest(pluginRoot)
@@ -142,7 +158,7 @@ describe('hapi plugins command', () => {
                     config: {
                         url: 'https://example.test',
                         PLUGIN_TOKEN: 'secret-value',
-                        nested: { webhookToken: 'nested-secret' }
+                        nested: { webhookToken: 'nested-secret', apiKey: 'api-key-secret' }
                     }
                 }
             }
@@ -155,6 +171,7 @@ describe('hapi plugins command', () => {
         const output = logs.join('\n')
         expect(output).not.toContain('secret-value')
         expect(output).not.toContain('nested-secret')
+        expect(output).not.toContain('api-key-secret')
         expect(output).toContain('[REDACTED]')
     })
 })
