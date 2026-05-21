@@ -10,6 +10,7 @@ import type {
     PluginReloadItem,
     PluginReloadResult,
     PluginTargetSummary,
+    PluginWebContributionView,
     RunnerPluginInventory,
     RunnerPluginUnsupportedInstallResult
 } from '@hapi/protocol/plugins'
@@ -244,7 +245,8 @@ export class RunnerPluginManager {
                 environmentProviders: this.collectContributionSummaries('environmentProvider'),
                 commandResolvers: this.collectContributionSummaries('commandResolver'),
                 spawnHooks: this.collectContributionSummaries('spawnHook')
-            }
+            },
+            webContributions: this.collectWebContributions()
         }
     }
 
@@ -1017,6 +1019,18 @@ export class RunnerPluginManager {
             }))
         })
     }
+
+    private collectWebContributions(): PluginWebContributionView[] {
+        return this.records
+            .filter((record) => record.enabled === true && record.manifest?.contributions?.web)
+            .map((record) => ({
+                pluginId: record.manifest!.id,
+                pluginName: record.manifest!.name,
+                target: this.targetSummary().scope,
+                contributions: record.manifest!.contributions!.web!
+            }))
+    }
+
 
     private toListItem(record: DiscoveredPluginRecord): PluginListItem {
         const id = pluginDisplayId(record)
