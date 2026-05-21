@@ -26,6 +26,43 @@ function createMachine(overrides?: Partial<Machine>): Machine {
 }
 
 describe('machines routes', () => {
+    it('accepts plugin agent ids when spawning a session', async () => {
+        const machine = createMachine()
+        const calls: Array<{
+            machineId: string
+            directory: string
+            agent: string | undefined
+        }> = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            spawnSession: async (machineId: string, directory: string, agent?: string) => {
+                calls.push({ machineId, directory, agent })
+                return { type: 'success' as const, sessionId: 'session-1' }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/spawn', {
+            method: 'POST',
+            body: JSON.stringify({
+                directory: '/repo',
+                agent: 'vendor:example-agent'
+            }),
+            headers: { 'content-type': 'application/json' }
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ type: 'success', sessionId: 'session-1' })
+        expect(calls).toEqual([{ machineId: 'machine-1', directory: '/repo', agent: 'vendor:example-agent' }])
+    })
+
     it('returns Codex models for an online machine', async () => {
         const machine = createMachine()
         const engine = {

@@ -27,7 +27,6 @@ import type {
     OpencodeModelsResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
-import type { AgentFlavor } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 import type {
     PluginConfigUpdateRequest,
@@ -540,7 +539,7 @@ export class ApiClient {
     async spawnSession(
         machineId: string,
         directory: string,
-        agent?: AgentFlavor,
+        agent?: string,
         model?: string,
         modelReasoningEffort?: string,
         yolo?: boolean,

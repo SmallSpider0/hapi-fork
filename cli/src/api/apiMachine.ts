@@ -331,7 +331,8 @@ export class ApiMachineClient {
                 ...(state ?? {}),
                 status: state?.status ?? 'running',
                 pid: state?.pid ?? process.pid,
-                pluginInventory: manager.getInventory()
+                pluginInventory: manager.getInventory(),
+                agentDescriptors: manager.getAgentDescriptors()
             }))
         }
 

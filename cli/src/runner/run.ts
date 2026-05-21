@@ -14,6 +14,7 @@ import { buildHappyCliSpawnPlan, spawnHappyCLI, spawnHappyCLIPlan } from '@/util
 import { writeRunnerState, RunnerLocallyPersistedState, readRunnerState, acquireRunnerLock, releaseRunnerLock } from '@/persistence';
 import { isProcessAlive, isWindows, killProcess, killProcessByChildProcess } from '@/utils/process';
 import { PERMISSION_MODES } from '@hapi/protocol/modes';
+import type { PermissionMode } from '@hapi/protocol/modes';
 import { withRetry } from '@/utils/time';
 import { isRetryableConnectionError } from '@/utils/errorUtils';
 
@@ -25,7 +26,7 @@ import { buildMachineMetadata } from '@/agent/sessionFactory';
 import { resolveWorkspaceRoots } from '@/utils/workspaceRoot';
 import { hashRunnerCliApiToken } from './runnerIdentity';
 import { RunnerPluginManager } from './plugins/runnerPluginManager';
-import { RunnerSpawnContextSchema } from '@hapi/protocol/plugins';
+import { AgentIdSchema, RunnerSpawnContextSchema } from '@hapi/protocol/plugins';
 
 export async function startRunner(options: { workspaceRoots?: string[] } = {}): Promise<void> {
   // We don't have cleanup function at the time of server construction
@@ -252,6 +253,33 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       let spawnDirectory = directory;
       let worktreeInfo: WorktreeInfo | null = null;
       let happyProcess: ReturnType<typeof spawnHappyCLIPlan> | null = null;
+
+      const agentDescriptor = runnerPluginManager.getAgentDescriptor(agent);
+      if (!agentDescriptor || agentDescriptor.available === false) {
+        const unavailableReason = agentDescriptor?.unavailableReason ? `: ${agentDescriptor.unavailableReason}` : '';
+        return {
+          type: 'error',
+          errorMessage: `Agent ${agent} is not available on this runner${unavailableReason}`
+        };
+      }
+      if (
+        options.permissionMode
+        && (
+          !(PERMISSION_MODES as readonly string[]).includes(options.permissionMode)
+          || !agentDescriptor.capabilities.permissionModes.includes(options.permissionMode as PermissionMode)
+        )
+      ) {
+        return {
+          type: 'error',
+          errorMessage: `Permission mode ${options.permissionMode} is not available for agent ${agent}`
+        };
+      }
+      if (yolo && !agentDescriptor.capabilities.permissionModes.some((mode) => mode === 'yolo' || mode === 'bypassPermissions')) {
+        return {
+          type: 'error',
+          errorMessage: `YOLO mode is not available for agent ${agent}`
+        };
+      }
 
       if (sessionType === 'simple') {
         try {
@@ -748,7 +776,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       pid: process.pid,
       httpPort: controlPort,
       startedAt: Date.now(),
-      pluginInventory: runnerPluginManager.getInventory()
+      pluginInventory: runnerPluginManager.getInventory(),
+      agentDescriptors: runnerPluginManager.getAgentDescriptors()
     };
 
     // Create API client
@@ -984,8 +1013,12 @@ export function buildCliArgs(
         ? 'gemini'
         : agent === 'opencode'
           ? 'opencode'
-          : 'claude';
-  const args = [agentCommand];
+          : agent === 'claude'
+            ? 'claude'
+            : 'agent-plugin';
+  const args = agentCommand === 'agent-plugin'
+    ? ['agent-plugin', '--type', AgentIdSchema.parse(agent)]
+    : [agentCommand];
   if (options.resumeSessionId) {
     if (agent === 'codex') {
       args.push('resume', options.resumeSessionId);

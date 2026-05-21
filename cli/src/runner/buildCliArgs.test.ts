@@ -60,6 +60,26 @@ describe('buildCliArgs', () => {
         expect(args).toContain('ollama/exaone:4.5-33b-q8')
     })
 
+    it('routes plugin agents through the generic agent-plugin command', () => {
+        const args = buildCliArgs('vendor:example-agent', {
+            directory: '/tmp',
+            model: 'example-large',
+            permissionMode: 'yolo',
+        })
+
+        expect(args.slice(0, 3)).toEqual(['agent-plugin', '--type', 'vendor:example-agent'])
+        expect(args).toContain('--started-by')
+        expect(args).toContain('runner')
+        expect(args).toContain('--model')
+        expect(args).toContain('example-large')
+        expect(args).toContain('--permission-mode')
+        expect(args).toContain('yolo')
+    })
+
+    it('rejects invalid plugin agent ids before spawn args are built', () => {
+        expect(() => buildCliArgs('bad/agent', { directory: '/tmp' })).toThrow()
+    })
+
     it('validates all known permission modes', () => {
         for (const mode of ['default', 'acceptEdits', 'bypassPermissions', 'plan', 'ask', 'read-only', 'safe-yolo', 'yolo']) {
             const args = buildCliArgs('claude', {

@@ -3,12 +3,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import {
+    AgentDescriptorSchema,
     PluginManifestLiteSchema,
     PluginTargetScopeSchema,
     RunnerCommandResolverProposalSchema,
     RunnerEnvironmentProposalSchema,
     RunnerSpawnHookProposalSchema
 } from '@hapi/protocol/plugins'
+import { SpawnSessionRequestSchema } from '@hapi/protocol/apiTypes'
 import {
     discoverPlugins,
     getPluginStateFile,
@@ -310,6 +312,39 @@ describe('plugin multi-runtime schemas', () => {
         expect(RunnerCommandResolverProposalSchema.safeParse({ args: ['codex', '--model', 'gpt-5.5'] }).success).toBe(true)
         expect(RunnerCommandResolverProposalSchema.safeParse({ command: '/bin/sh' }).success).toBe(false)
         expect(RunnerSpawnHookProposalSchema.safeParse({ block: { reason: 'policy' } }).success).toBe(true)
+    })
+
+    it('validates plugin agent descriptors and accepts plugin agent spawn ids', () => {
+        expect(AgentDescriptorSchema.safeParse({
+            id: 'vendor:example-agent',
+            displayName: 'Example Agent',
+            adapter: {
+                runtime: 'runner',
+                kind: 'custom-runner-plugin',
+                contributionId: 'example-adapter'
+            },
+            capabilities: {
+                permissionModes: ['default', 'yolo'],
+                models: ['example-small']
+            }
+        }).success).toBe(true)
+        expect(AgentDescriptorSchema.safeParse({
+            id: 'bad/agent',
+            displayName: 'Bad Agent',
+            adapter: {
+                runtime: 'runner',
+                kind: 'custom-runner-plugin',
+                contributionId: 'bad'
+            }
+        }).success).toBe(false)
+        expect(SpawnSessionRequestSchema.safeParse({
+            directory: '/repo',
+            agent: 'vendor:example-agent'
+        }).success).toBe(true)
+        expect(SpawnSessionRequestSchema.safeParse({
+            directory: '/repo',
+            agent: 'bad/agent'
+        }).success).toBe(false)
     })
 
     it('validates Runner entry paths with the same escape guards as Hub entries', async () => {

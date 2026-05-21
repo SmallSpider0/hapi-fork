@@ -181,6 +181,110 @@ describe('RunnerPluginManager runtime', () => {
         expect(manager.getDiagnostics().some((diagnostic) => diagnostic.code === 'runner-plugin-activate-failed')).toBe(true)
     })
 
+    it('registers plugin agent adapters and exposes runner-local descriptors and factories', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'vendor:example-agent',
+                    descriptor: {
+                        id: 'vendor:example-agent',
+                        displayName: 'Example Agent',
+                        description: 'Example plugin-backed agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'example-adapter'
+                        },
+                        capabilities: {
+                            supportsResume: false,
+                            permissionModes: ['default', 'yolo'],
+                            models: ['example-small', 'example-large']
+                        }
+                    },
+                    createBackend() {
+                        return {
+                            async initialize() {},
+                            async newSession() { return 'plugin-session'; },
+                            async prompt() {},
+                            async cancelPrompt() {},
+                            async respondToPermission() {},
+                            onPermissionRequest() {},
+                            async disconnect() {}
+                        };
+                    }
+                });
+            }
+        `)
+        writeManifest(pluginRoot, {
+            contributions: {
+                agent: {
+                    adapters: [{ id: 'example-adapter', displayName: 'Example Agent Adapter' }]
+                }
+            }
+        })
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+
+        const result = await manager.start()
+
+        expect(result.ok).toBe(true)
+        const descriptor = manager.getAgentDescriptor('vendor:example-agent')
+        expect(descriptor).toMatchObject({
+            id: 'vendor:example-agent',
+            displayName: 'Example Agent',
+            source: 'plugin',
+            pluginId: 'com.example.runner',
+            available: true,
+            capabilities: {
+                permissionModes: ['default', 'yolo'],
+                models: ['example-small', 'example-large']
+            }
+        })
+        expect(manager.getAgentAdapterFactory('vendor:example-agent')).toBeTypeOf('function')
+        expect(manager.getAgentDescriptor('claude')).toMatchObject({ id: 'claude', source: 'builtin' })
+    })
+
+    it('rejects invalid plugin agent descriptors during activation before spawn', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'vendor:example-agent',
+                    descriptor: {
+                        id: 'other-agent',
+                        displayName: 'Broken Agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'broken-adapter'
+                        }
+                    },
+                    createBackend() {
+                        return {};
+                    }
+                });
+            }
+        `)
+        writeManifest(pluginRoot, {
+            contributions: {
+                agent: {
+                    adapters: [{ id: 'broken-adapter', displayName: 'Broken Agent Adapter' }]
+                }
+            }
+        })
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+
+        const result = await manager.start()
+
+        expect(result.ok).toBe(false)
+        expect(manager.getAgentDescriptor('vendor:example-agent')).toBeNull()
+        expect(manager.getAgentAdapterFactory('vendor:example-agent')).toBeNull()
+        expect(manager.listPlugins()[0]).toMatchObject({ status: 'failed', active: false })
+        expect(manager.getDiagnostics()).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'runner-plugin-activate-failed' })
+        ]))
+    })
+
     it('applies active Runner extension proposals to spawn plans', async () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
