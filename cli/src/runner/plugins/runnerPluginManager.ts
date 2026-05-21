@@ -14,7 +14,9 @@ import type {
     RunnerPluginUnsupportedInstallResult
 } from '@hapi/protocol/plugins'
 import {
+    AgentDescriptorSchema,
     assertPluginConfigSafeForPersistence,
+    builtinAgentDescriptors,
     sanitizePluginConfigForView
 } from '@hapi/protocol/plugins'
 import {
@@ -27,9 +29,10 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import type { PluginStateFile } from '@hapi/protocol/plugins'
-import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerPluginModule } from './runnerPluginRegistry'
+import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerAgentAdapterContribution, type RunnerPluginModule } from './runnerPluginRegistry'
 import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
 import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
+import type { AgentBackendFactory } from '@/agent/types'
 import {
     resolveRunnerPluginSpawnPlan,
     runRunnerPluginAfterSpawnHooks,
@@ -39,7 +42,7 @@ import {
     type RunnerEnvironmentProviderContribution,
     type RunnerSpawnHookContribution
 } from './runnerExtensionPipeline'
-import type { RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
+import type { AgentDescriptor, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
 
 export interface RunnerPluginManagerOptions {
     hapiHome: string
@@ -57,6 +60,18 @@ type ActiveRunnerPluginInstance = {
 }
 
 type ReloadReason = 'startup' | 'manual' | 'state-change'
+type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter'>
+const BUILTIN_AGENT_IDS = new Set(builtinAgentDescriptors().map((descriptor) => descriptor.id))
+
+function agentAdapterSort(
+    left: RegisteredRunnerContribution<RunnerAgentAdapterContribution>,
+    right: RegisteredRunnerContribution<RunnerAgentAdapterContribution>
+): number {
+    return left.priority - right.priority
+        || left.pluginId.localeCompare(right.pluginId)
+        || left.id.localeCompare(right.id)
+        || left.order - right.order
+}
 
 type InternalReloadResult = {
     records: DiscoveredPluginRecord[]
@@ -205,6 +220,31 @@ export class RunnerPluginManager {
                 spawnHooks: this.collectContributionSummaries('spawnHook')
             }
         }
+    }
+
+    getAgentDescriptors(): AgentDescriptor[] {
+        const pluginDescriptors = this.collectAgentAdapters().map((entry) => AgentDescriptorSchema.parse({
+            ...entry.contribution.descriptor,
+            source: 'plugin',
+            pluginId: entry.pluginId,
+            available: true
+        }))
+        const firstById = new Map<string, AgentDescriptor>()
+        for (const descriptor of [...builtinAgentDescriptors(), ...pluginDescriptors]) {
+            if (!firstById.has(descriptor.id)) {
+                firstById.set(descriptor.id, descriptor)
+            }
+        }
+        return Array.from(firstById.values())
+    }
+
+    getAgentDescriptor(agentId: string): AgentDescriptor | null {
+        return this.getAgentDescriptors().find((descriptor) => descriptor.id === agentId) ?? null
+    }
+
+    getAgentAdapterFactory(agentId: string): AgentBackendFactory | null {
+        const match = this.collectAgentAdapters().find((entry) => entry.contribution.descriptor.id === agentId)
+        return match?.contribution.createBackend ?? null
     }
 
     async resolveSpawnPlan(args: {
@@ -682,6 +722,12 @@ export class RunnerPluginManager {
         return this.collectRegistryContributions((registry) => registry.getSpawnHooks())
     }
 
+    private collectAgentAdapters(): RegisteredRunnerContribution<RunnerAgentAdapterContribution>[] {
+        return this.collectRegistryContributions((registry) => registry.getAgentAdapters())
+            .filter((entry) => !BUILTIN_AGENT_IDS.has(entry.contribution.descriptor.id))
+            .sort(agentAdapterSort)
+    }
+
     private collectRegistryContributions<T>(
         getEntries: (registry: RunnerPluginRegistry) => RegisteredRuntimeContribution<T>[]
     ): RegisteredRunnerContribution<T>[] {
@@ -696,7 +742,7 @@ export class RunnerPluginManager {
         )
     }
 
-    private collectContributionSummaries(type: RegisteredRuntimeContribution['type']) {
+    private collectContributionSummaries(type: RunnerExtensionRuntimeContributionType) {
         return Array.from(this.activePlugins.values()).flatMap((instance) => {
             const entries = type === 'environmentProvider'
                 ? instance.registry.getEnvironmentProviders()

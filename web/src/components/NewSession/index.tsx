@@ -11,7 +11,7 @@ import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggesti
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
 import { useTranslation } from '@/lib/use-translation'
-import type { AgentType, ClaudeEffort, CodexReasoningEffort, SessionType } from './types'
+import { agentSupportsYolo, type AgentType, type ClaudeEffort, type CodexReasoningEffort, type SessionType } from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
 import { DirectorySection } from './DirectorySection'
@@ -30,6 +30,7 @@ import {
 import { SessionTypeSelector } from './SessionTypeSelector'
 import { YoloToggle } from './YoloToggle'
 import { formatRunnerSpawnError } from '../../utils/formatRunnerSpawnError'
+import { builtinAgentDescriptors } from '@hapi/protocol/plugins'
 
 export function NewSession(props: {
     api: ApiClient
@@ -104,6 +105,22 @@ export function NewSession(props: {
         () => (machineId ? props.machines.find((machine) => machine.id === machineId) ?? null : null),
         [machineId, props.machines]
     )
+    const agentDescriptors = useMemo(() => {
+        const descriptors = selectedMachine?.runnerState?.agentDescriptors
+        return descriptors && descriptors.length > 0 ? descriptors : builtinAgentDescriptors()
+    }, [selectedMachine])
+    const selectedAgentDescriptor = useMemo(
+        () => agentDescriptors.find((descriptor) => descriptor.id === agent) ?? null,
+        [agentDescriptors, agent]
+    )
+    const selectedAgentSupportsYolo = agentSupportsYolo(selectedAgentDescriptor)
+    useEffect(() => {
+        if (agentDescriptors.some((descriptor) => descriptor.id === agent && descriptor.available !== false)) {
+            return
+        }
+        const fallback = agentDescriptors.find((descriptor) => descriptor.available !== false)?.id ?? 'claude'
+        setAgent(fallback)
+    }, [agent, agentDescriptors])
     const codexModelsState = useCodexModels({
         api: props.api,
         machineId,
@@ -127,6 +144,20 @@ export function NewSession(props: {
         }
         return options
     }, [codexModelsState.models, model])
+    const descriptorModelOptions = useMemo(() => {
+        const descriptorModels = selectedAgentDescriptor?.capabilities.models ?? []
+        if (descriptorModels.length === 0) {
+            return undefined
+        }
+        const options = [
+            { value: 'auto', label: 'Default' },
+            ...descriptorModels.map((modelId) => ({ value: modelId, label: modelId }))
+        ]
+        if (model !== 'auto' && !options.some((option) => option.value === model)) {
+            options.splice(1, 0, { value: model, label: model })
+        }
+        return options
+    }, [model, selectedAgentDescriptor])
 
     const recentPaths = useMemo(
         () => getRecentPaths(machineId),
@@ -329,7 +360,7 @@ export function NewSession(props: {
                 model: resolvedModel,
                 effort: resolvedEffort,
                 modelReasoningEffort: resolvedModelReasoningEffort,
-                yolo: yoloMode,
+                yolo: selectedAgentSupportsYolo ? yoloMode : false,
                 sessionType,
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined
             })
@@ -392,6 +423,7 @@ export function NewSession(props: {
             />
             <AgentSelector
                 agent={agent}
+                agents={agentDescriptors}
                 isDisabled={isFormDisabled}
                 onAgentChange={setAgent}
             />
@@ -411,7 +443,7 @@ export function NewSession(props: {
                 <ModelSelector
                     agent={agent}
                     model={model}
-                    options={agent === 'codex' ? codexModelOptions : undefined}
+                    options={agent === 'codex' ? codexModelOptions : descriptorModelOptions}
                     isDisabled={isFormDisabled || (agent === 'codex' && Boolean(codexModelsState.error))}
                     isLoading={agent === 'codex' && codexModelsState.isLoading}
                     error={agent === 'codex' && codexModelsState.error
@@ -434,7 +466,7 @@ export function NewSession(props: {
             />
             <YoloToggle
                 yoloMode={yoloMode}
-                isDisabled={isFormDisabled}
+                isDisabled={isFormDisabled || !selectedAgentSupportsYolo}
                 onToggle={setYoloMode}
             />
 

@@ -1,7 +1,7 @@
 # Phase 07 — Agent adapter plugins：新 agent 接入插件化
 
 更新时间: 2026-05-21
-状态: 计划阶段。
+状态: 已完成。
 
 ## 目标
 
@@ -46,30 +46,36 @@ type AgentDescriptor = {
 
 ### 实现
 
-- [ ] Manifest 支持 `contributions.agent.adapters`。
-- [ ] Shared 增加 `AgentDescriptor` 与 validation schema。
-- [ ] Runner 插件可注册 agent adapter，并返回 descriptor。
-- [ ] Hub 聚合 Runner agent descriptors，按 machine/availability 展示。
-- [ ] Web 新建 session 的 agent 选项从 descriptor registry 读取。
-- [ ] Runner spawn 使用 descriptor + adapter proposal，Core 负责最终 session lifecycle。
-- [ ] Adapter 错误映射为稳定 diagnostics 与 user-facing error。
-- [ ] Descriptor capability 影响 UI 可用项，但不绕过 Core 权限策略。
+- [x] Manifest 支持 `contributions.agent.adapters`。
+- [x] Shared 增加 `AgentDescriptor` 与 validation schema。
+- [x] Runner 插件可注册 agent adapter，并返回 descriptor。
+- [x] Hub 聚合 Runner agent descriptors，按 machine/availability 展示。
+- [x] Web 新建 session 的 agent 选项从 descriptor registry 读取。
+- [x] Runner spawn 使用 descriptor + adapter proposal，Core 负责最终 session lifecycle。
+- [x] Adapter 错误映射为稳定 diagnostics 与 user-facing error。
+- [x] Descriptor capability 影响 UI 可用项，但不绕过 Core 权限策略。
 
 ### 测试
 
-- [ ] Invalid agent descriptor rejected before spawn。
-- [ ] Adapter plugin 未 active 时对应 agent 不可选或标记 unavailable。
-- [ ] Web agent list 能显示 built-in + plugin agents。
-- [ ] Plugin agent session spawn 成功走 Runner adapter。
-- [ ] Adapter throw 不 crash Runner/Hub。
-- [ ] Namespace/session id 仍由 Core 创建与校验。
+- [x] Invalid agent descriptor rejected before spawn。
+- [x] Adapter plugin 未 active 时对应 agent 不可选或标记 unavailable。
+- [x] Web agent list 能显示 built-in + plugin agents。
+- [x] Plugin agent session spawn 成功走 Runner adapter。
+- [x] Adapter throw 不 crash Runner/Hub。
+- [x] Namespace/session id 仍由 Core 创建与校验。
 
 ### 验收
 
-- [ ] 新增一个 agent adapter 插件后，用户无需改 core 枚举即可在 Web 选择该 agent。
-- [ ] Hub 与 Runner 分机部署时，只有拥有该 adapter 的 Runner 标记该 agent available。
-- [ ] 删除/禁用 adapter 插件后，Web 立即反映不可用状态。
+- [x] 新增一个 agent adapter 插件后，用户无需改 core 枚举即可在 Web 选择该 agent。
+- [x] Hub 与 Runner 分机部署时，只有拥有该 adapter 的 Runner 标记该 agent available。
+- [x] 删除/禁用 adapter 插件后，Web 立即反映不可用状态。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：architecture-location 子代理确认 Phase 8/Agent adapter 相关边界：Runner 执行插件代码，Hub/Web 仅消费 descriptor/snapshot，Core 保持 session、namespace、permission、message invariants。
+- [x] 2026-05-21：review 子代理发现 stale YOLO 与模型状态风险；已修复为 Web 按 descriptor 抑制 YOLO、Runner spawn fail-closed、模型仅在 `setModel` 成功后通过 keepalive 记录，并增加 descriptor payload bounds。
+- [x] 2026-05-21：review 子代理复核后结论：No blockers found。
+- [x] 2026-05-21：验证命令通过：`bun run --cwd cli test -- src/runner/buildCliArgs.test.ts src/runner/plugins/runnerPluginManager.test.ts src/plugins/pluginFoundation.test.ts`。
+- [x] 2026-05-21：验证命令通过：`bun run --cwd hub test -- src/web/routes/machines.test.ts src/sync/rpcGateway.test.ts`。
+- [x] 2026-05-21：验证命令通过：`bun run --cwd web test -- src/components/NewSession/preferences.test.ts src/components/NewSession/AgentSelector.test.tsx src/components/NewSession/types.test.ts`。
+- [x] 2026-05-21：验证命令通过：`bun run typecheck`、`git diff --check`。

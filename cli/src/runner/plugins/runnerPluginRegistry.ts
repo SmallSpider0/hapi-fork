@@ -1,5 +1,6 @@
 import { logger as runnerLogger } from '@/ui/logger'
-import type { PluginDiagnostic } from '@hapi/protocol/plugins'
+import { AgentDescriptorSchema, AgentIdSchema, type AgentDescriptor, type PluginDiagnostic } from '@hapi/protocol/plugins'
+import type { AgentBackendFactory } from '@/agent/types'
 import type {
     RunnerCommandResolverContribution,
     RunnerEnvironmentProviderContribution,
@@ -36,6 +37,7 @@ export type RunnerPluginContext = {
         registerEnvironmentProvider(provider: RunnerEnvironmentProviderContribution): Disposable
         registerCommandResolver(resolver: RunnerCommandResolverContribution): Disposable
         registerSpawnHook(hook: RunnerSpawnHookContribution): Disposable
+        registerAgentAdapter(adapter: RunnerAgentAdapterContribution): Disposable
     }
 }
 
@@ -43,8 +45,16 @@ export type RunnerPluginModule = {
     activate(ctx: RunnerPluginContext): void | Promise<void>
 }
 
+export type RunnerAgentAdapterContribution = {
+    id: string
+    priority?: number
+    descriptor: AgentDescriptor
+    createBackend: AgentBackendFactory
+    dispose?: () => void | Promise<void>
+}
+
 export type RegisteredRuntimeContribution<T = unknown> = {
-    type: 'environmentProvider' | 'commandResolver' | 'spawnHook'
+    type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter'
     pluginId: string
     id: string
     priority: number
@@ -103,7 +113,8 @@ export class RunnerPluginRegistry {
             runtime: {
                 registerEnvironmentProvider: (provider: unknown): Disposable => register('environmentProvider', provider),
                 registerCommandResolver: (resolver: unknown): Disposable => register('commandResolver', resolver),
-                registerSpawnHook: (hook: unknown): Disposable => register('spawnHook', hook)
+                registerSpawnHook: (hook: unknown): Disposable => register('spawnHook', hook),
+                registerAgentAdapter: (adapter: unknown): Disposable => register('agentAdapter', adapter)
             }
         }
 
@@ -150,6 +161,10 @@ export class RunnerPluginRegistry {
 
     getSpawnHooks(): RegisteredRuntimeContribution<RunnerSpawnHookContribution>[] {
         return this.getContributionsByType('spawnHook')
+    }
+
+    getAgentAdapters(): RegisteredRuntimeContribution<RunnerAgentAdapterContribution>[] {
+        return this.getContributionsByType('agentAdapter')
     }
 
     async disposeFrom(startIndex: number): Promise<void> {
@@ -225,7 +240,12 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
     if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
         throw new Error(`${type} contribution must have a non-empty id.`)
     }
-    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate.id)) {
+    if (type === 'agentAdapter') {
+        const parsedId = AgentIdSchema.safeParse(candidate.id)
+        if (!parsedId.success) {
+            throw new Error(`agentAdapter contribution id must be a valid agent id.`)
+        }
+    } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate.id)) {
         throw new Error(`${type} contribution id must contain only alphanumeric characters, dots, underscores, or dashes.`)
     }
     if (candidate.priority !== undefined && (
@@ -247,6 +267,21 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
             if (candidate[method] !== undefined && typeof candidate[method] !== 'function') {
                 throw new Error(`spawnHook ${method} must be a function.`)
             }
+        }
+    }
+    if (type === 'agentAdapter') {
+        const descriptor = AgentDescriptorSchema.safeParse(candidate.descriptor)
+        if (!descriptor.success) {
+            throw new Error('agentAdapter descriptor is invalid.')
+        }
+        if (descriptor.data.id !== candidate.id) {
+            throw new Error('agentAdapter id must match descriptor.id.')
+        }
+        if (descriptor.data.adapter.runtime !== 'runner') {
+            throw new Error('agentAdapter descriptor runtime must be runner.')
+        }
+        if (typeof candidate.createBackend !== 'function') {
+            throw new Error('agentAdapter createBackend must be a function.')
         }
     }
     return contribution as T

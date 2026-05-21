@@ -1,12 +1,10 @@
-import type { AgentFlavor } from '@hapi/protocol'
-
 export interface SpawnSessionOptions {
     machineId?: string
     directory: string
     sessionId?: string
     resumeSessionId?: string
     approvedNewDirectoryCreation?: boolean
-    agent?: AgentFlavor
+    agent?: string
     model?: string
     effort?: string
     modelReasoningEffort?: string

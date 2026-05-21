@@ -461,7 +461,7 @@ export class SyncEngine {
     async spawnSession(
         machineId: string,
         directory: string,
-        agent: AgentFlavor = 'claude',
+        agent: string = 'claude',
         model?: string,
         modelReasoningEffort?: string,
         yolo?: boolean,

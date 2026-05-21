@@ -7,7 +7,7 @@ import {
     PermissionModeSchema,
     SessionSchema
 } from './schemas'
-import { AgentFlavorSchema } from './modes'
+import { AgentIdSchema } from './plugins/agentDescriptors'
 import type {
     DecryptedMessage,
     Machine,
@@ -176,7 +176,7 @@ export type SendMessageRequest = z.infer<typeof SendMessageRequestSchema>
 
 export const SpawnSessionRequestSchema = z.object({
     directory: z.string().min(1),
-    agent: AgentFlavorSchema.optional(),
+    agent: AgentIdSchema.optional(),
     model: z.string().optional(),
     effort: z.string().optional(),
     modelReasoningEffort: z.string().optional(),

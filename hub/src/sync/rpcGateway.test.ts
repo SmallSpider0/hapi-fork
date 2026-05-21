@@ -61,6 +61,30 @@ describe('RpcGateway RPC timeouts', () => {
     })
 })
 
+describe('RpcGateway spawnSession', () => {
+    it('forwards plugin agent ids to the machine-scoped spawn RPC', async () => {
+        const seen: Array<{ method: string; params: unknown }> = []
+        const { gateway } = createGateway((payload) => {
+            seen.push({ method: payload.method, params: JSON.parse(payload.params) as unknown })
+            return { type: 'success', sessionId: 'session-1' }
+        })
+
+        const result = await gateway.spawnSession('machine-1', '/repo', 'vendor:example-agent')
+
+        expect(result).toEqual({ type: 'success', sessionId: 'session-1' })
+        expect(seen).toEqual([
+            {
+                method: 'machine-1:spawn-happy-session',
+                params: expect.objectContaining({
+                    type: 'spawn-in-directory',
+                    directory: '/repo',
+                    agent: 'vendor:example-agent'
+                })
+            }
+        ])
+    })
+})
+
 
 
 describe('RpcGateway runner plugin RPC methods', () => {
