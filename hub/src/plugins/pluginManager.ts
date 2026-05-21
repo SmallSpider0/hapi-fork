@@ -15,7 +15,8 @@ import type {
     PluginLocalDirectoryEntry,
     PluginLocalDirectoryListResponse,
     PluginReloadItem,
-    PluginReloadResult
+    PluginReloadResult,
+    PluginTargetSummary
 } from '@hapi/protocol/plugins'
 import {
     applyPluginState,
@@ -26,10 +27,12 @@ import {
     installPluginFromDirectory,
     installPluginFromPackage,
     readPluginState,
+    resolvePluginScopedConfig,
+    setPluginScopedConfig,
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, hubPluginConfigScope, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
@@ -217,7 +220,10 @@ export class HubPluginManager {
     getDiagnostics(): PluginDiagnosticView[] {
         const recordDiagnostics = this.records.flatMap((record) => {
             const id = pluginDisplayId(record)
-            return record.diagnostics.map((entry) => diagnosticView(id, entry))
+            return [
+                ...record.diagnostics.map((entry) => diagnosticView(id, entry)),
+                ...this.missingSecretDiagnostics(record)
+            ]
         })
         const activeDiagnostics = Array.from(this.activePlugins.values()).flatMap((entry) =>
             entry.registry.diagnostics.map((diagnostic) => diagnosticView(entry.pluginId, diagnostic))
@@ -245,11 +251,9 @@ export class HubPluginManager {
         assertDiscoveredRecordCanBeEnabled(record, id)
         assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
         const previous = state.enabled[record.manifest.id]
-        state.enabled[record.manifest.id] = {
-            enabled: true,
-            ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
-            ...(previous?.install ? { install: previous.install } : {})
-        }
+        state.enabled[record.manifest.id] = config
+            ? { ...setPluginScopedConfig(previous, hubPluginConfigScope(record.manifest.id), config), enabled: true }
+            : { ...previous, enabled: true }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
     }
@@ -260,9 +264,8 @@ export class HubPluginManager {
         const pluginId = record?.manifest?.id ?? id
         const previous = state.enabled[pluginId]
         state.enabled[pluginId] = {
+            ...previous,
             enabled: false,
-            ...(previous?.config ? { config: previous.config } : {}),
-            ...(previous?.install ? { install: previous.install } : {})
         }
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
@@ -275,11 +278,7 @@ export class HubPluginManager {
         assertDiscoveredRecordCanBeEnabled(record, id)
         assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
         const previous = state.enabled[record.manifest.id]
-        state.enabled[record.manifest.id] = {
-            enabled: previous?.enabled === true,
-            config,
-            ...(previous?.install ? { install: previous.install } : {})
-        }
+        state.enabled[record.manifest.id] = setPluginScopedConfig(previous, hubPluginConfigScope(record.manifest.id), config)
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
     }
@@ -454,6 +453,8 @@ export class HubPluginManager {
         state.enabled[pluginId] = {
             enabled: enable ? true : previous?.enabled === true,
             ...(previous?.config ? { config: previous.config } : {}),
+            ...(previous?.configUpdatedAt ? { configUpdatedAt: previous.configUpdatedAt } : {}),
+            ...(previous?.scopedConfig ? { scopedConfig: previous.scopedConfig } : {}),
             install: {
                 ...metadata,
                 installedAt: previous?.install?.installedAt ?? now,
@@ -527,7 +528,7 @@ export class HubPluginManager {
             hapiHome: this.options.hapiHome,
             envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS
         })
-        const records = applyPluginState(discovered, stateResult.state, stateResult.failClosed)
+        const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, stateResult.failClosed), stateResult.state)
 
         if (stateResult.parseError) {
             managerDiagnostics.push({
@@ -639,6 +640,25 @@ export class HubPluginManager {
             this.resetWatchers()
         }
         return { records, items }
+    }
+
+    private applyScopedRuntimeConfig(records: DiscoveredPluginRecord[], state: PluginStateFile): DiscoveredPluginRecord[] {
+        return records.map((record) => {
+            if (!record.manifest || record.status === 'blocked') {
+                return record
+            }
+            const resolved = resolvePluginScopedConfig(state.enabled[record.manifest.id], hubPluginConfigScope(record.manifest.id))
+            const baseRecord = { ...record }
+            delete baseRecord.config
+            delete baseRecord.configUpdatedAt
+            delete baseRecord.configSource
+            return {
+                ...baseRecord,
+                ...(resolved.config ? { config: resolved.config } : {}),
+                ...(resolved.updatedAt ? { configUpdatedAt: resolved.updatedAt } : {}),
+                configSource: resolved.source
+            }
+        })
     }
 
     private async activateRecord(record: DiscoveredPluginRecord, signature: string): Promise<{
@@ -762,6 +782,7 @@ export class HubPluginManager {
         const id = pluginDisplayId(record)
         const active = record.manifest && record.status !== 'blocked' ? this.activePlugins.has(record.manifest.id) : false
         const activeInstance = record.manifest ? this.activePlugins.get(record.manifest.id) : undefined
+        const configScope = record.manifest && record.status !== 'blocked' ? hubPluginConfigScope(record.manifest.id) : undefined
         return {
             id,
             name: record.manifest?.name,
@@ -789,8 +810,10 @@ export class HubPluginManager {
             },
             diagnostics: [
                 ...record.diagnostics.map((entry) => diagnosticView(id, entry)),
+                ...this.missingSecretDiagnostics(record),
                 ...(activeInstance?.registry.diagnostics.map((entry) => diagnosticView(id, entry)) ?? [])
             ],
+            ...(configScope ? { configScope } : {}),
             install: record.install ?? { sourceType: record.source, version: record.manifest?.version },
             ...(activeInstance ? { updatedAt: activeInstance.loadedAt } : {})
         }
@@ -799,16 +822,26 @@ export class HubPluginManager {
     private toDetail(record: DiscoveredPluginRecord): PluginDetail {
         const item = this.toListItem(record)
         const declaredSecrets = record.manifest?.permissions?.secrets ?? []
+        const sanitizedConfig = sanitizePluginConfigForView(record.config, declaredSecrets)
+        const configScope = record.manifest && record.status !== 'blocked' ? hubPluginConfigScope(record.manifest.id) : undefined
         return {
             ...item,
             manifest: record.manifest,
-            config: sanitizePluginConfigForView(record.config, declaredSecrets),
+            config: sanitizedConfig,
+            ...(configScope && record.manifest ? {
+                configMetadata: {
+                    scope: configScope,
+                    pluginId: record.manifest.id,
+                    runtime: 'hub',
+                    target: this.targetSummary(),
+                    config: sanitizedConfig ?? {},
+                    ...(record.configUpdatedAt ? { updatedAt: record.configUpdatedAt } : {}),
+                    source: record.configSource ?? 'empty'
+                }
+            } : {}),
             permissions: {
                 network: record.manifest?.permissions?.network ?? [],
-                secrets: declaredSecrets.map((name) => ({
-                    name,
-                    present: Boolean((this.options.env ?? process.env)[name])
-                }))
+                secrets: this.secretStatuses(record)
             },
             contributions: {
                 notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
@@ -818,6 +851,49 @@ export class HubPluginManager {
             },
             runtimeEntryPaths: record.runtimeEntryPaths
         }
+    }
+
+    private targetSummary(): PluginTargetSummary {
+        return {
+            scope: 'hub',
+            runtime: 'hub',
+            active: true,
+            stale: false,
+            displayName: 'Hub',
+            updatedAt: Date.now()
+        }
+    }
+
+    private secretStatuses(record: DiscoveredPluginRecord) {
+        const target = this.targetSummary()
+        const pluginId = record.manifest?.id
+        const configScope = pluginId ? hubPluginConfigScope(pluginId) : undefined
+        return (record.manifest?.permissions?.secrets ?? []).map((name) => ({
+            name,
+            present: Boolean((this.options.env ?? process.env)[name]),
+            required: true,
+            lastChecked: Date.now(),
+            target,
+            ...(configScope ? { configScope } : {})
+        }))
+    }
+
+    private missingSecretDiagnostics(record: DiscoveredPluginRecord): PluginDiagnosticView[] {
+        if (!record.manifest || record.enabled !== true) {
+            return []
+        }
+        const target = this.targetSummary()
+        const configScope = hubPluginConfigScope(record.manifest.id)
+        return (record.manifest.permissions?.secrets ?? [])
+            .filter((name) => !((this.options.env ?? process.env)[name]))
+            .map((name) => ({
+                pluginId: record.manifest!.id,
+                severity: 'warning' as const,
+                code: 'plugin-secret-missing',
+                message: `Missing required secret ${name} for ${target.scope}. Set it in the Hub runtime environment.`,
+                target,
+                configScope
+            }))
     }
 
     private resetWatchers(): void {

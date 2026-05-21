@@ -9,7 +9,7 @@ import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
 import { initializeToken } from '@/ui/tokenInit'
-import { getRemotePlugins, installRemoteLocalPlugin, installRemotePackagePlugin, reloadRemotePlugins } from '@/api/pluginAdmin'
+import { getRemotePlugin, getRemotePlugins, installRemoteLocalPlugin, installRemotePackagePlugin, reloadRemotePlugins, updateRemotePluginConfig } from '@/api/pluginAdmin'
 import type { CommandDefinition } from './types'
 import {
     applyPluginState,
@@ -293,6 +293,11 @@ async function reloadRemoteOptional(pluginId: string | undefined, requested: boo
     return await reloadRemotePlugins(configuration.cliApiToken, pluginId)
 }
 
+async function ensurePluginAdminToken(): Promise<void> {
+    await initializeApiUrl()
+    await initializeToken()
+}
+
 async function enableInstalledPlugin(record: DiscoveredPluginRecord, config?: Record<string, unknown>): Promise<void> {
     if (!record.manifest) {
         throw new Error('Cannot enable plugin without a valid manifest.')
@@ -301,9 +306,9 @@ async function enableInstalledPlugin(record: DiscoveredPluginRecord, config?: Re
     const state = await readWritableState()
     const previous = state.enabled[record.manifest.id]
     state.enabled[record.manifest.id] = {
+        ...previous,
         enabled: true,
-        ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
-        ...(previous?.install ? { install: previous.install } : {})
+        ...(config ? { config, configUpdatedAt: Date.now() } : previous?.config ? { config: previous.config } : {})
     }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
 }
@@ -411,9 +416,9 @@ async function runEnable(args: string[]): Promise<void> {
     const writableState = await readWritableState()
     const previous = writableState.enabled[record.manifest.id]
     writableState.enabled[record.manifest.id] = {
+        ...previous,
         enabled: true,
-        ...(config ?? previous?.config ? { config: config ?? previous?.config } : {}),
-        ...(previous?.install ? { install: previous.install } : {})
+        ...(config ? { config, configUpdatedAt: Date.now() } : previous?.config ? { config: previous.config } : {})
     }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), writableState)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), json, 'Plugin enabled locally.')
@@ -430,19 +435,53 @@ async function runDisable(args: string[]): Promise<void> {
     const state = await readWritableState()
     const previous = state.enabled[record.manifest.id]
     state.enabled[record.manifest.id] = {
-        enabled: false,
-        ...(previous?.config ? { config: previous.config } : {}),
-        ...(previous?.install ? { install: previous.install } : {})
+        ...previous,
+        enabled: false
     }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), json, 'Plugin disabled locally.')
 }
 
 async function runConfig(args: string[]): Promise<void> {
-    const sub = args[0]
-    const id = args[1]
+    const target = parseTargetArg(args)
+    const positional = positionalArgs(args, ['--target'])
+    const sub = positional[0]
+    const id = positional[1]
     if (!sub || !id || !['get', 'set'].includes(sub)) {
-        throw new Error('Usage: hapi plugins config get <id> [--json] | hapi plugins config set <id> <key> <value> [--reload]')
+        throw new Error('Usage: hapi plugins config get <id> [--target hub|runner:<machineId>] [--json] | hapi plugins config set <id> <key> <value> [--target hub|runner:<machineId>] [--reload] [--json]')
+    }
+    if (target) {
+        if (target === 'all-runners') {
+            throw new Error('Plugin config get/set requires target=hub or target=runner:<machineId>; all-runners is not supported for config.')
+        }
+        await ensurePluginAdminToken()
+        const detail = await getRemotePlugin(configuration.cliApiToken, id, 5000, target)
+        if (sub === 'get') {
+            const payload = {
+                id: detail.plugin.id,
+                target: detail.plugin.target,
+                configScope: detail.plugin.configMetadata?.scope ?? detail.plugin.configScope,
+                config: detail.plugin.configMetadata?.config ?? detail.plugin.config ?? {}
+            }
+            console.log(hasFlag(args, '--json') ? JSON.stringify(payload, null, 2) : JSON.stringify(payload.config, null, 2))
+            return
+        }
+        const key = positional[2]
+        const value = positional[3]
+        if (!key || value === undefined) {
+            throw new Error('Usage: hapi plugins config set <id> <key> <value> [--target hub|runner:<machineId>] [--reload] [--json]')
+        }
+        const nextConfig = { ...(detail.plugin.configMetadata?.config ?? detail.plugin.config ?? {}), [key]: parseValue(value) }
+        const result = await updateRemotePluginConfig(configuration.cliApiToken, id, { config: nextConfig }, 5000, target)
+        if (hasFlag(args, '--json')) {
+            console.log(JSON.stringify(result, null, 2))
+            return
+        }
+        console.log(chalk.green(`Plugin config saved for ${target}.`))
+        for (const item of result.results) {
+            console.log(`${item.id}: ${item.action} (${item.status})${item.message ? ` - ${item.message}` : ''}`)
+        }
+        return
     }
     const { records } = await loadLocalRecords()
     const record = findRecord(records, id)
@@ -455,17 +494,18 @@ async function runConfig(args: string[]): Promise<void> {
         console.log(hasFlag(args, '--json') ? JSON.stringify(payload, null, 2) : JSON.stringify(payload.config, null, 2))
         return
     }
-    const key = args[2]
-    const value = args[3]
+    const key = positional[2]
+    const value = positional[3]
     if (!key || value === undefined) {
         throw new Error('Usage: hapi plugins config set <id> <key> <value> [--reload]')
     }
     const nextConfig = { ...(entry.config ?? {}), [key]: parseValue(value) }
     assertPluginConfigSafeForPersistence(nextConfig, record.manifest.permissions?.secrets ?? [], record.manifest.id)
     state.enabled[record.manifest.id] = {
+        ...entry,
         enabled: entry.enabled,
         config: nextConfig,
-        ...(entry.install ? { install: entry.install } : {})
+        configUpdatedAt: Date.now()
     }
     await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), hasFlag(args, '--json'), 'Plugin config saved locally.')
@@ -648,8 +688,8 @@ ${chalk.bold('Usage:')}
   hapi plugins inspect <id> [--json]
   hapi plugins enable <id> [--config <json-or-@file>] [--reload] [--yes]
   hapi plugins disable <id> [--reload] [--yes]
-  hapi plugins config get <id> [--json]
-  hapi plugins config set <id> <key> <value> [--reload]
+  hapi plugins config get <id> [--target hub|runner:<machineId>] [--json]
+  hapi plugins config set <id> <key> <value> [--target hub|runner:<machineId>] [--reload] [--json]
   hapi plugins install-local <path> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
   hapi plugins install-package <package.tgz|package.zip> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
   hapi plugins delete <id> [--reload] [--json] [--yes]

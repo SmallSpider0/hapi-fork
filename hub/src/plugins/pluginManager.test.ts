@@ -134,6 +134,78 @@ describe('HubPluginManager', () => {
         expect(readJsonl(logFile).filter((event) => event.type === 'send').map((event) => event.label)).toEqual(['v1', 'v2'])
     })
 
+    it('uses Hub scoped config without overwriting Runner scoped config', async () => {
+        writePlugin(pluginRoot, `
+            import { appendFileSync } from 'node:fs';
+            const log = ${JSON.stringify(logFile)};
+            export function activate(ctx) {
+                appendFileSync(log, JSON.stringify({ label: ctx.config.get('label') }) + '\\n');
+            }
+        `)
+        writeManifest(pluginRoot, manifest())
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: {
+                'com.example.plugin': {
+                    enabled: true,
+                    scopedConfig: {
+                        'hub:com.example.plugin': { config: { label: 'Hub' }, updatedAt: 1 },
+                        'runner:runner-1:com.example.plugin': { config: { label: 'Runner' }, updatedAt: 2 }
+                    }
+                }
+            }
+        })
+
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+        await manager.start()
+
+        expect(readJsonl(logFile)).toContainEqual({ label: 'Hub' })
+        expect(manager.getPlugin('com.example.plugin')?.configMetadata).toMatchObject({
+            scope: 'hub:com.example.plugin',
+            source: 'scoped',
+            config: { label: 'Hub' }
+        })
+
+        await manager.updatePluginConfig('com.example.plugin', { label: 'Hub updated' }, false)
+        await manager.dispose()
+        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as { enabled: Record<string, { scopedConfig: Record<string, { config: Record<string, unknown> }> }> }
+        expect(state.enabled['com.example.plugin']?.scopedConfig['runner:runner-1:com.example.plugin']?.config).toEqual({ label: 'Runner' })
+        expect(state.enabled['com.example.plugin']?.scopedConfig['hub:com.example.plugin']?.config).toEqual({ label: 'Hub updated' })
+    })
+
+    it('reports Hub secret status and missing-secret diagnostics without leaking values', async () => {
+        writePlugin(pluginRoot, 'export function activate() {}')
+        writeManifest(pluginRoot, manifest({ permissions: { secrets: ['PLUGIN_TOKEN'] } }))
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: { 'com.example.plugin': { enabled: true } }
+        })
+        const managerWithSecret = new HubPluginManager({ hapiHome, watch: false, env: { PLUGIN_TOKEN: 'hub-secret-value' } })
+        await managerWithSecret.start()
+        const detail = managerWithSecret.getPlugin('com.example.plugin')
+
+        expect(detail?.permissions.secrets[0]).toMatchObject({
+            name: 'PLUGIN_TOKEN',
+            present: true,
+            required: true,
+            target: { scope: 'hub' },
+            configScope: 'hub:com.example.plugin'
+        })
+        expect(JSON.stringify(detail)).not.toContain('hub-secret-value')
+        await managerWithSecret.dispose()
+
+        const managerMissingSecret = new HubPluginManager({ hapiHome, watch: false, env: {} })
+        await managerMissingSecret.start()
+        expect(managerMissingSecret.getDiagnostics()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                pluginId: 'com.example.plugin',
+                code: 'plugin-secret-missing',
+                target: expect.objectContaining({ scope: 'hub' }),
+                configScope: 'hub:com.example.plugin'
+            })
+        ]))
+        expect(JSON.stringify(managerMissingSecret.getDiagnostics())).not.toContain('hub-secret-value')
+        await managerMissingSecret.dispose()
+    })
+
     it('keeps the previous active instance when reload activation fails', async () => {
         writePlugin(pluginRoot, `
             import { appendFileSync } from 'node:fs';

@@ -1,7 +1,7 @@
 # Phase 11 — Scoped config/secrets/permissions：按 runtime/machine 分域
 
 更新时间: 2026-05-21
-状态: 计划阶段。
+状态: 已完成。
 
 ## 目标
 
@@ -35,30 +35,36 @@
 
 ### 实现
 
-- [ ] Shared 增加 scoped plugin config schema。
-- [ ] Hub/Runner 分别持有本机 config state，不互相覆盖。
-- [ ] API 返回 per-scope config metadata 与 redacted values。
-- [ ] Secret present/missing 检查在目标 runtime 执行。
-- [ ] Web 支持按 target 编辑 config，禁止显示 secret value。
-- [ ] CLI 支持 `--target hub|runner:<machineId>` 读写 config。
-- [ ] Permissions 展示 runtime/target 维度与 trusted-code warning。
-- [ ] Diagnostics 标记 missing required secret 的具体 target。
+- [x] Shared 增加 scoped plugin config schema。
+- [x] Hub/Runner 分别持有本机 config state，不互相覆盖。
+- [x] API 返回 per-scope config metadata 与 redacted values。
+- [x] Secret present/missing 检查在目标 runtime 执行。
+- [x] Web 支持按 target 编辑 config，禁止显示 secret value。
+- [x] CLI 支持 `--target hub|runner:<machineId>` 读写 config。
+- [x] Permissions 展示 runtime/target 维度与 trusted-code warning。
+- [x] Diagnostics 标记 missing required secret 的具体 target。
 
 ### 测试
 
-- [ ] Hub config 更新不改变 Runner config。
-- [ ] Runner config 更新不改变 Hub config。
-- [ ] Runner secret value 不出现在 Hub API/logs/diagnostics。
-- [ ] Web config form 不渲染 secret value。
-- [ ] Missing secret diagnostic 带 target scope。
-- [ ] Permission warning 文案明确 advisory/non-sandbox。
+- [x] Hub config 更新不改变 Runner config。
+- [x] Runner config 更新不改变 Hub config。
+- [x] Runner secret value 不出现在 Hub API/logs/diagnostics。
+- [x] Web config form 不渲染 secret value。
+- [x] Missing secret diagnostic 带 target scope。
+- [x] Permission warning 文案明确 advisory/non-sandbox。
 
 ### 验收
 
-- [ ] 多台 Runner 可以为同一插件使用不同 config/secret 状态。
-- [ ] 用户能定位“哪台机器缺哪个 secret”。
-- [ ] 权限展示不会让用户误以为已有强 sandbox。
+- [x] 多台 Runner 可以为同一插件使用不同 config/secret 状态。
+- [x] 用户能定位“哪台机器缺哪个 secret”。
+- [x] 权限展示不会让用户误以为已有强 sandbox。
 
 ## 验证记录
 
-- [ ] 待实现后追加：日期、子代理类型、结论、验证命令/证据。
+- [x] 2026-05-21：architecture/review 子代理核对 scoped config、secret 不回传、permissions non-sandbox 文案、diagnostics target scope；最终 review 结论为无阻塞，同意勾选并提交。
+- [x] 2026-05-21：验证命令通过：
+  - `bun run --cwd cli test -- src/commands/plugins.test.ts src/runner/plugins/runnerPluginManager.test.ts src/plugins/pluginFoundation.test.ts`
+  - `bun run --cwd hub test -- src/plugins/pluginManager.test.ts src/web/routes/plugins.test.ts src/web/routes/machines.test.ts`
+  - `bun run --cwd web test -- src/components/plugins/DescriptorRenderer.test.tsx src/hooks/mutations/usePluginActions.test.tsx src/components/NewSession/preferences.test.ts src/components/NewSession/pluginFields.test.ts`
+  - `bun run typecheck`
+  - `git diff --check`

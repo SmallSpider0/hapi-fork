@@ -180,6 +180,13 @@ function DiagnosticsList(props: { plugin: PluginDetail; t: (key: string, params?
                         <span className="font-mono text-xs">{diagnostic.code}</span>
                     </div>
                     <div>{diagnostic.message}</div>
+                    {diagnostic.target?.scope || diagnostic.configScope ? (
+                        <div className="mt-1 break-all text-xs text-[var(--app-hint)]">
+                            {diagnostic.target?.scope ? `Target: ${diagnostic.target.scope}` : null}
+                            {diagnostic.target?.scope && diagnostic.configScope ? ' · ' : null}
+                            {diagnostic.configScope ? `Config scope: ${diagnostic.configScope}` : null}
+                        </div>
+                    ) : null}
                     {diagnostic.path ? <div className="mt-1 break-all text-xs text-[var(--app-hint)]">{diagnostic.path}</div> : null}
                 </div>
             ))}
@@ -467,19 +474,36 @@ export default function PluginPage() {
 
                             <SectionCard title={t('settings.plugins.detail.permissions')} description={t('settings.plugins.detail.permissionsDescription')}>
                                 <div className="space-y-3">
+                                    <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-3 text-sm text-[var(--app-badge-warning-text)]">
+                                        Plugin code runs as trusted code in the selected {plugin.target?.runtime ?? 'runtime'} target ({plugin.target?.scope ?? 'local'}). Permissions are advisory declarations for review, not sandbox enforcement.
+                                    </div>
                                     <div>
-                                        <div className="mb-1 text-sm font-medium">{t('settings.plugins.detail.networkLabel')}</div>
+                                        <div className="mb-1 text-sm font-medium">{t('settings.plugins.detail.networkLabel')} · {plugin.target?.scope ?? 'local'}</div>
                                         {plugin.permissions.network.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.permissions.networkEmpty')}</div> : <div className="flex flex-wrap gap-2">{plugin.permissions.network.map((entry) => <Chip key={entry} label={entry} variant="warning" />)}</div>}
                                     </div>
                                     <div>
-                                        <div className="mb-1 text-sm font-medium">{t('settings.plugins.detail.secretsLabel')}</div>
-                                        {plugin.permissions.secrets.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.permissions.secretsEmpty')}</div> : <div className="flex flex-wrap gap-2">{plugin.permissions.secrets.map((secret) => <Chip key={secret.name} label={`${secret.name}: ${secret.present ? t('settings.plugins.secret.present') : t('settings.plugins.secret.missing')}`} variant={secret.present ? 'success' : 'warning'} />)}</div>}
+                                        <div className="mb-1 text-sm font-medium">{t('settings.plugins.detail.secretsLabel')} · {plugin.target?.scope ?? 'local'}</div>
+                                        {plugin.permissions.secrets.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.permissions.secretsEmpty')}</div> : (
+                                            <div className="flex flex-wrap gap-2">
+                                                {plugin.permissions.secrets.map((secret) => {
+                                                    const checked = secret.lastChecked ? new Date(secret.lastChecked).toLocaleString() : null
+                                                    const label = `${secret.name}: ${secret.present ? t('settings.plugins.secret.present') : t('settings.plugins.secret.missing')}${secret.required === false ? ' · optional' : ' · required'}${checked ? ` · checked ${checked}` : ''}`
+                                                    return <Chip key={`${secret.configScope ?? plugin.target?.scope ?? 'local'}-${secret.name}`} label={label} variant={secret.present ? 'success' : 'warning'} />
+                                                })}
+                                            </div>
+                                        )}
                                     </div>
                                 </div>
                             </SectionCard>
 
                             <SectionCard title={t('settings.plugins.config.title')} description={t('settings.plugins.config.description')}>
                                 <div className="space-y-2">
+                                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
+                                        <div>Config scope: {plugin.configMetadata?.scope ?? plugin.configScope ?? 'local'}</div>
+                                        <div>Target: {plugin.configMetadata?.target.scope ?? plugin.target?.scope ?? 'local'}</div>
+                                        <div>Source: {plugin.configMetadata?.source ?? 'empty'}</div>
+                                        {plugin.configMetadata?.updatedAt ? <div>Updated: {new Date(plugin.configMetadata.updatedAt).toLocaleString()}</div> : null}
+                                    </div>
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <label className="text-sm font-medium" htmlFor="plugin-config-json">{t('settings.plugins.config.textareaLabel')}</label>
                                         {dirtyConfig ? <Badge variant="warning">{t('settings.plugins.config.unsaved')}</Badge> : <Badge variant="success">{t('settings.plugins.config.saved')}</Badge>}

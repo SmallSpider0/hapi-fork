@@ -15,7 +15,7 @@ import {
     type PluginManifestLite,
     type PluginRuntimeName
 } from './manifest'
-import { PluginStateFileSchema, type PluginInstallMetadata, type PluginStateFile } from './state'
+import { PluginStateFileSchema, type PluginInstallMetadata, type PluginStateEntry, type PluginStateFile } from './state'
 import type { PluginDiagnostic, PluginDiagnosticSeverity, PluginStatus } from './types'
 
 export type PluginSource = 'env' | 'user-home'
@@ -44,6 +44,8 @@ export interface DiscoveredPluginRecord {
     runtimeEntryPaths: PluginRuntimeEntryPath[]
     enabled?: boolean
     config?: Record<string, unknown>
+    configUpdatedAt?: number
+    configSource?: PluginResolvedConfig['source']
     install?: PluginInstallMetadata
 }
 
@@ -57,6 +59,12 @@ export interface PluginStateReadResult {
     state: PluginStateFile
     parseError?: string
     failClosed: boolean
+}
+
+export interface PluginResolvedConfig {
+    config?: Record<string, unknown>
+    updatedAt?: number
+    source: 'scoped' | 'legacy-default' | 'empty'
 }
 
 export type PluginDirectoryInstallAction = 'installed' | 'overwritten'
@@ -454,9 +462,50 @@ export function applyPluginState(
             status: enabled ? 'enabled' : 'disabled',
             enabled,
             ...(stateEntry?.config ? { config: stateEntry.config } : {}),
+            ...(stateEntry?.configUpdatedAt ? { configUpdatedAt: stateEntry.configUpdatedAt } : {}),
             ...(stateEntry?.install ? { install: stateEntry.install } : {})
         }
     })
+}
+
+export function resolvePluginScopedConfig(entry: PluginStateEntry | undefined, scope: string): PluginResolvedConfig {
+    const scoped = entry?.scopedConfig?.[scope]
+    if (scoped) {
+        return {
+            config: scoped.config,
+            ...(scoped.updatedAt ? { updatedAt: scoped.updatedAt } : {}),
+            source: 'scoped'
+        }
+    }
+    if (entry?.config) {
+        return {
+            config: entry.config,
+            ...(entry.configUpdatedAt ? { updatedAt: entry.configUpdatedAt } : {}),
+            source: 'legacy-default'
+        }
+    }
+    return { source: 'empty' }
+}
+
+export function setPluginScopedConfig(
+    entry: PluginStateEntry | undefined,
+    scope: string,
+    config: Record<string, unknown>,
+    updatedAt = Date.now()
+): PluginStateEntry {
+    return {
+        enabled: entry?.enabled === true,
+        ...(entry?.config ? { config: entry.config } : {}),
+        ...(entry?.configUpdatedAt ? { configUpdatedAt: entry.configUpdatedAt } : {}),
+        scopedConfig: {
+            ...(entry?.scopedConfig ?? {}),
+            [scope]: {
+                config,
+                updatedAt
+            }
+        },
+        ...(entry?.install ? { install: entry.install } : {})
+    }
 }
 
 export function getPluginStateFile(hapiHome: string): string {

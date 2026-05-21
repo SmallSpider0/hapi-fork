@@ -205,7 +205,7 @@ describe('plugin admin routes', () => {
         expect(detailResponse.status).toBe(200)
         const detail = await detailResponse.json() as { plugin: { target?: { scope: string }; permissions: { secrets: Array<{ name: string; present: boolean }> } } }
         expect(detail.plugin.target?.scope).toBe('hub')
-        expect(detail.plugin.permissions.secrets).toEqual([{ name: 'TOKEN', present: false }])
+        expect(detail.plugin.permissions.secrets).toEqual([expect.objectContaining({ name: 'TOKEN', present: false })])
     })
 
     it('aggregates Hub and Runner plugin inventories without reading Runner paths directly', async () => {
@@ -504,6 +504,39 @@ describe('plugin admin routes', () => {
         expect(payload.targetResults).toHaveLength(2)
         expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.deleted).toBe(true)
         expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
+    })
+
+    it('updates Hub and Runner plugin config through isolated target paths', async () => {
+        const online = makeMachine('runner-1', true)
+        const calls: string[] = []
+        const app = createApp({
+            updatePluginConfig: async (id: string, config: Record<string, unknown>) => {
+                calls.push(`hub:${id}:${String(config.label)}`)
+                return reloadResult('reloaded')
+            }
+        } as never, {
+            getMachineByNamespace: () => online,
+            updateRunnerPluginConfig: async (machineId: string, id: string, config: Record<string, unknown>) => {
+                calls.push(`runner:${machineId}:${id}:${String(config.label)}`)
+                return runnerReloadResult(machineId)
+            }
+        } as never)
+        const headers = { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' }
+
+        const hubConfig = await app.request('/api/plugins/com.example.plugin/config?target=hub', {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ config: { label: 'hub' } })
+        })
+        const runnerConfig = await app.request('/api/plugins/com.example.plugin/config?target=runner:runner-1', {
+            method: 'PATCH',
+            headers,
+            body: JSON.stringify({ config: { label: 'runner' } })
+        })
+
+        expect(hubConfig.status).toBe(200)
+        expect(runnerConfig.status).toBe(200)
+        expect(calls).toEqual(['hub:com.example.plugin:hub', 'runner:runner-1:com.example.plugin:runner'])
     })
 
     it('validates config bodies and calls manager actions', async () => {

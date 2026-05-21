@@ -12,9 +12,18 @@ export const PluginInstallMetadataSchema = z.object({
 
 export type PluginInstallMetadata = z.infer<typeof PluginInstallMetadataSchema>
 
+export const PluginScopedConfigStateSchema = z.object({
+    config: z.record(z.string(), z.unknown()),
+    updatedAt: z.number().optional()
+}).strict()
+
+export type PluginScopedConfigState = z.infer<typeof PluginScopedConfigStateSchema>
+
 export const PluginStateEntrySchema = z.object({
     enabled: z.boolean(),
     config: z.record(z.string(), z.unknown()).optional(),
+    configUpdatedAt: z.number().optional(),
+    scopedConfig: z.record(z.string(), PluginScopedConfigStateSchema).optional(),
     install: PluginInstallMetadataSchema.optional()
 }).strict()
 

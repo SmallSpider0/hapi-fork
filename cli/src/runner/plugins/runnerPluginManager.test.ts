@@ -80,13 +80,81 @@ describe('RunnerPluginManager runtime', () => {
         await manager.start()
 
         const result = await manager.enablePlugin('com.example.runner', { label: 'Runner' })
-        const state = JSON.parse(readFileSync(join(testDir, 'plugins.json'), 'utf8')) as { enabled: Record<string, { enabled: boolean; config?: Record<string, unknown> }> }
+        const state = JSON.parse(readFileSync(join(testDir, 'plugins.json'), 'utf8')) as { enabled: Record<string, { enabled: boolean; scopedConfig?: Record<string, { config: Record<string, unknown>; updatedAt?: number }> }> }
 
         expect(result.ok).toBe(true)
         expect(result.results[0]).toMatchObject({ id: 'com.example.runner', action: 'activated', status: 'active' })
-        expect(state.enabled['com.example.runner']).toEqual({ enabled: true, config: { label: 'Runner' } })
+        expect(state.enabled['com.example.runner']?.enabled).toBe(true)
+        expect(state.enabled['com.example.runner']?.scopedConfig?.['runner:runner-1:com.example.runner']?.config).toEqual({ label: 'Runner' })
+        expect(state.enabled['com.example.runner']?.scopedConfig?.['runner:runner-1:com.example.runner']?.updatedAt).toBeTypeOf('number')
         expect(manager.listPlugins()[0]).toMatchObject({ status: 'active', enabled: true, active: true, runtimes: { runner: { active: true } } })
         expect(readFileSync(logFile, 'utf8')).toContain('"machineId":"runner-1"')
+    })
+
+    it('uses Runner scoped config without overwriting Hub scoped config', async () => {
+        writeFileSync(runnerEntry, `
+            import { appendFileSync } from 'node:fs';
+            const log = ${JSON.stringify(logFile)};
+            export function activate(ctx) {
+                appendFileSync(log, JSON.stringify({ label: ctx.config.get('label') }) + '\\n');
+            }
+        `)
+        writeFileSync(join(testDir, 'plugins.json'), JSON.stringify({
+            enabled: {
+                'com.example.runner': {
+                    enabled: true,
+                    scopedConfig: {
+                        'hub:com.example.runner': { config: { label: 'Hub' }, updatedAt: 1 },
+                        'runner:runner-1:com.example.runner': { config: { label: 'Runner' }, updatedAt: 2 }
+                    }
+                }
+            }
+        }, null, 2))
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        expect(readFileSync(logFile, 'utf8')).toContain('"label":"Runner"')
+        expect(manager.getPlugin('com.example.runner')?.configMetadata).toMatchObject({
+            scope: 'runner:runner-1:com.example.runner',
+            source: 'scoped',
+            config: { label: 'Runner' }
+        })
+
+        await manager.updatePluginConfig('com.example.runner', { label: 'Runner updated' }, false)
+        const state = JSON.parse(readFileSync(join(testDir, 'plugins.json'), 'utf8')) as { enabled: Record<string, { scopedConfig: Record<string, { config: Record<string, unknown> }> }> }
+        expect(state.enabled['com.example.runner']?.scopedConfig['hub:com.example.runner']?.config).toEqual({ label: 'Hub' })
+        expect(state.enabled['com.example.runner']?.scopedConfig['runner:runner-1:com.example.runner']?.config).toEqual({ label: 'Runner updated' })
+    })
+
+    it('reports Runner secret status and missing-secret diagnostics without leaking values', async () => {
+        writeFileSync(runnerEntry, 'export function activate() {}')
+        writeManifest(pluginRoot, { permissions: { secrets: ['RUNNER_TOKEN'] } })
+        writeState(testDir)
+        const managerWithSecret = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: { RUNNER_TOKEN: 'super-secret-value' } })
+        await managerWithSecret.start()
+
+        const detail = managerWithSecret.getPlugin('com.example.runner')
+        expect(detail?.permissions.secrets[0]).toMatchObject({
+            name: 'RUNNER_TOKEN',
+            present: true,
+            required: true,
+            target: { scope: 'runner:runner-1' },
+            configScope: 'runner:runner-1:com.example.runner'
+        })
+        expect(JSON.stringify(detail)).not.toContain('super-secret-value')
+        await managerWithSecret.dispose()
+
+        const managerMissingSecret = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await managerMissingSecret.start()
+        expect(managerMissingSecret.getDiagnostics()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                pluginId: 'com.example.runner',
+                code: 'plugin-secret-missing',
+                target: expect.objectContaining({ scope: 'runner:runner-1' }),
+                configScope: 'runner:runner-1:com.example.runner'
+            })
+        ]))
+        expect(JSON.stringify(managerMissingSecret.getDiagnostics())).not.toContain('super-secret-value')
     })
 
     it('ignores Hub-runtime-only plugins in the Runner process', async () => {
