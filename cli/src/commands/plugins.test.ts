@@ -116,6 +116,38 @@ describe('hapi plugins command', () => {
         expect(state.enabled['com.example.plugin']?.config).toEqual({ url: 'https://example.test' })
     })
 
+    it('preserves scoped config when using legacy local config and enable commands', async () => {
+        writeFileSync(join(pluginRoot, 'hub.js'), 'export function activate() {}')
+        writeManifest(pluginRoot)
+        writeFileSync(join(hapiHome, 'plugins.json'), JSON.stringify({
+            enabled: {
+                'com.example.plugin': {
+                    enabled: false,
+                    config: { label: 'legacy' },
+                    configUpdatedAt: 1,
+                    scopedConfig: {
+                        'hub:com.example.plugin': { config: { label: 'Hub' }, updatedAt: 2 },
+                        'runner:runner-1:com.example.plugin': { config: { label: 'Runner' }, updatedAt: 3 }
+                    },
+                    install: { sourceType: 'user-home', version: '0.1.0' }
+                }
+            }
+        }, null, 2))
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await handlePluginsCommand(['config', 'set', 'com.example.plugin', 'label', '"legacy-updated"'])
+        await handlePluginsCommand(['enable', 'com.example.plugin', '--yes'])
+        await handlePluginsCommand(['disable', 'com.example.plugin', '--yes'])
+
+        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as {
+            enabled: Record<string, { config?: Record<string, unknown>; scopedConfig?: Record<string, { config: Record<string, unknown>; updatedAt?: number }>; install?: unknown }>
+        }
+        expect(state.enabled['com.example.plugin']?.config).toEqual({ label: 'legacy-updated' })
+        expect(state.enabled['com.example.plugin']?.scopedConfig?.['hub:com.example.plugin']).toEqual({ config: { label: 'Hub' }, updatedAt: 2 })
+        expect(state.enabled['com.example.plugin']?.scopedConfig?.['runner:runner-1:com.example.plugin']).toEqual({ config: { label: 'Runner' }, updatedAt: 3 })
+        expect(state.enabled['com.example.plugin']?.install).toEqual({ sourceType: 'user-home', version: '0.1.0' })
+    })
+
     it('deletes user-home plugin files and state as JSON', async () => {
         writeFileSync(join(pluginRoot, 'hub.js'), 'export function activate() {}')
         writeManifest(pluginRoot)
@@ -150,7 +182,9 @@ describe('hapi plugins command', () => {
             plugins: []
         }))
         vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugin: vi.fn(),
             getRemotePlugins: vi.fn(),
+            updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins: vi.fn(),
             installRemoteLocalPlugin,
             installRemotePackagePlugin: vi.fn()
@@ -186,7 +220,9 @@ describe('hapi plugins command', () => {
             plugins: []
         }))
         vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugin: vi.fn(),
             getRemotePlugins: vi.fn(),
+            updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins: vi.fn(),
             installRemoteLocalPlugin: vi.fn(),
             installRemotePackagePlugin
@@ -207,11 +243,49 @@ describe('hapi plugins command', () => {
         }), 120000, 'hub')
     })
 
+    it('gets and sets remote scoped config with --target', async () => {
+        process.env.CLI_API_TOKEN = 'test-token'
+        const getRemotePlugin = vi.fn(async () => ({
+            plugin: {
+                id: 'com.example.plugin',
+                config: { label: 'old' },
+                configScope: 'runner:runner-1:com.example.plugin',
+                configMetadata: {
+                    scope: 'runner:runner-1:com.example.plugin',
+                    pluginId: 'com.example.plugin',
+                    runtime: 'runner',
+                    target: { scope: 'runner:runner-1', runtime: 'runner', machineId: 'runner-1', active: true },
+                    config: { label: 'old' },
+                    source: 'scoped'
+                }
+            }
+        }))
+        const updateRemotePluginConfig = vi.fn(async () => ({ ok: true, results: [], plugins: [] }))
+        vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugin,
+            getRemotePlugins: vi.fn(),
+            updateRemotePluginConfig,
+            reloadRemotePlugins: vi.fn(),
+            installRemoteLocalPlugin: vi.fn(),
+            installRemotePackagePlugin: vi.fn()
+        }))
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await handlePluginsCommand(['config', 'get', 'com.example.plugin', '--target', 'runner:runner-1', '--json'])
+        await handlePluginsCommand(['config', 'set', 'com.example.plugin', 'label', '"new"', '--target', 'runner:runner-1', '--json'])
+
+        expect(getRemotePlugin).toHaveBeenCalledWith('test-token', 'com.example.plugin', 5000, 'runner:runner-1')
+        expect(updateRemotePluginConfig).toHaveBeenCalledWith('test-token', 'com.example.plugin', { config: { label: 'new' } }, 5000, 'runner:runner-1')
+        expect(logs.join('\n')).not.toContain('secret-value')
+    })
+
     it('passes --target to remote reload without treating the target value as a plugin id', async () => {
         process.env.CLI_API_TOKEN = 'test-token'
         const reloadRemotePlugins = vi.fn(async () => ({ ok: true, results: [], plugins: [] }))
         vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugin: vi.fn(),
             getRemotePlugins: vi.fn(),
+            updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins,
             installRemoteLocalPlugin: vi.fn(),
             installRemotePackagePlugin: vi.fn()

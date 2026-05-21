@@ -29,6 +29,35 @@ export function parseRunnerPluginTargetScope(scope: PluginTargetScope): string |
     return typeof scope === 'string' && scope.startsWith('runner:') ? scope.slice('runner:'.length) : null
 }
 
+const PluginConfigScopePluginIdSchema = z.string()
+    .min(1)
+    .max(128)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'plugin id must contain only alphanumeric characters, dots, underscores, or dashes')
+
+const PluginConfigScopeAgentIdSchema = z.string()
+    .min(1)
+    .max(256)
+    .regex(/^[A-Za-z0-9][A-Za-z0-9._:-]*$/, 'agent id must contain only alphanumeric characters, dots, underscores, dashes, or colons')
+
+export const PluginConfigScopeSchema = z.union([
+    z.string().regex(/^hub:[A-Za-z0-9][A-Za-z0-9._-]*$/, 'scope must be hub:<pluginId>, runner:<machineId>:<pluginId>, or agent:<machineId>:<agentId>:<pluginId>'),
+    z.string().regex(/^runner:[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/, 'scope must be hub:<pluginId>, runner:<machineId>:<pluginId>, or agent:<machineId>:<agentId>:<pluginId>'),
+    z.string().regex(/^agent:[A-Za-z0-9][A-Za-z0-9._-]*:[A-Za-z0-9][A-Za-z0-9._:-]*:[A-Za-z0-9][A-Za-z0-9._-]*$/, 'scope must be hub:<pluginId>, runner:<machineId>:<pluginId>, or agent:<machineId>:<agentId>:<pluginId>')
+])
+export type PluginConfigScope = z.infer<typeof PluginConfigScopeSchema>
+
+export function hubPluginConfigScope(pluginId: string): PluginConfigScope {
+    return `hub:${PluginConfigScopePluginIdSchema.parse(pluginId)}` as PluginConfigScope
+}
+
+export function runnerPluginConfigScope(machineId: string, pluginId: string): PluginConfigScope {
+    return `runner:${PluginTargetMachineIdSchema.parse(machineId)}:${PluginConfigScopePluginIdSchema.parse(pluginId)}` as PluginConfigScope
+}
+
+export function agentPluginConfigScope(machineId: string, agentId: string, pluginId: string): PluginConfigScope {
+    return `agent:${PluginTargetMachineIdSchema.parse(machineId)}:${PluginConfigScopeAgentIdSchema.parse(agentId)}:${PluginConfigScopePluginIdSchema.parse(pluginId)}` as PluginConfigScope
+}
+
 export const PluginTargetSummarySchema = z.object({
     scope: PluginTargetScopeSchema,
     runtime: PluginRuntimeNameSchema,
@@ -43,7 +72,12 @@ export type PluginTargetSummary = z.infer<typeof PluginTargetSummarySchema>
 
 export const PluginSecretStatusSchema = z.object({
     name: z.string().min(1),
-    present: z.boolean()
+    present: z.boolean(),
+    required: z.boolean().optional(),
+    description: z.string().optional(),
+    lastChecked: z.number().optional(),
+    target: PluginTargetSummarySchema.optional(),
+    configScope: PluginConfigScopeSchema.optional()
 }).strict()
 export type PluginSecretStatus = z.infer<typeof PluginSecretStatusSchema>
 
@@ -60,9 +94,22 @@ export const PluginRuntimeSummarySchema = z.object({
 export type PluginRuntimeSummary = z.infer<typeof PluginRuntimeSummarySchema>
 
 export const PluginDiagnosticViewSchema = PluginDiagnosticSchema.extend({
-    pluginId: z.string().optional()
+    pluginId: z.string().optional(),
+    target: PluginTargetSummarySchema.optional(),
+    configScope: PluginConfigScopeSchema.optional()
 }).strict()
 export type PluginDiagnosticView = z.infer<typeof PluginDiagnosticViewSchema>
+
+export const PluginScopedConfigMetadataSchema = z.object({
+    scope: PluginConfigScopeSchema,
+    pluginId: z.string().min(1),
+    runtime: PluginRuntimeNameSchema,
+    target: PluginTargetSummarySchema,
+    config: z.record(z.string(), z.unknown()).default({}),
+    updatedAt: z.number().optional(),
+    source: z.enum(['scoped', 'legacy-default', 'empty']).optional()
+}).strict()
+export type PluginScopedConfigMetadata = z.infer<typeof PluginScopedConfigMetadataSchema>
 
 export const PluginListItemSchema = z.object({
     id: z.string().min(1),
@@ -78,6 +125,7 @@ export const PluginListItemSchema = z.object({
     runtimes: PluginRuntimeSummarySchema,
     diagnostics: z.array(PluginDiagnosticViewSchema),
     target: PluginTargetSummarySchema.optional(),
+    configScope: PluginConfigScopeSchema.optional(),
     updatedAt: z.number().optional(),
     install: PluginInstallMetadataSchema.optional()
 }).strict()
@@ -86,6 +134,7 @@ export type PluginListItem = z.infer<typeof PluginListItemSchema>
 export const PluginDetailSchema = PluginListItemSchema.extend({
     manifest: PluginManifestLiteSchema.optional(),
     config: z.record(z.string(), z.unknown()).optional(),
+    configMetadata: PluginScopedConfigMetadataSchema.optional(),
     permissions: z.object({
         network: z.array(z.string()),
         secrets: z.array(PluginSecretStatusSchema)

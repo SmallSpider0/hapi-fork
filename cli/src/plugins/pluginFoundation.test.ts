@@ -8,6 +8,7 @@ import {
     AgentCapabilityProviderResultSchema,
     AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
+    PluginConfigScopeSchema,
     PluginManifestLiteSchema,
     PluginTargetScopeSchema,
     RunnerCommandResolverProposalSchema,
@@ -351,6 +352,10 @@ describe('plugin multi-runtime schemas', () => {
         expect(PluginTargetScopeSchema.safeParse('runner:runner-1').success).toBe(true)
         expect(PluginTargetScopeSchema.safeParse('runner:bad/id').success).toBe(false)
         expect(PluginTargetScopeSchema.safeParse('workspace').success).toBe(false)
+        expect(PluginConfigScopeSchema.safeParse('hub:com.example.plugin').success).toBe(true)
+        expect(PluginConfigScopeSchema.safeParse('runner:runner-1:com.example.plugin').success).toBe(true)
+        expect(PluginConfigScopeSchema.safeParse('agent:runner-1:vendor:agent:com.example.plugin').success).toBe(true)
+        expect(PluginConfigScopeSchema.safeParse('runner:bad/id:com.example.plugin').success).toBe(false)
     })
 
     it('accepts Runner runtime and contribution declarations', () => {

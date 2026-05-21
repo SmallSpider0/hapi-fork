@@ -1,6 +1,15 @@
 import { configuration } from '@/configuration'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
-import type { PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallResult, PluginListResponse, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import type {
+    PluginConfigUpdateRequest,
+    PluginDetailResponse,
+    PluginInstallLocalRequest,
+    PluginInstallPackageRequest,
+    PluginInstallResult,
+    PluginListResponse,
+    PluginReloadResult,
+    PluginTargetScope
+} from '@hapi/protocol/plugins/admin'
 
 async function readError(response: Response): Promise<string> {
     const body = await response.text().catch(() => '')
@@ -48,6 +57,23 @@ export async function getRemotePlugins(accessToken: string, timeoutMs = 5000, ta
     return await fetchJson<PluginListResponse>(withTargetQuery('/api/plugins', target), {
         method: 'GET',
         headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+    }, timeoutMs)
+}
+
+export async function getRemotePlugin(accessToken: string, pluginId: string, timeoutMs = 5000, target?: PluginTargetScope): Promise<PluginDetailResponse> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginDetailResponse>(withTargetQuery(`/api/plugins/${encodeURIComponent(pluginId)}`, target), {
+        method: 'GET',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+    }, timeoutMs)
+}
+
+export async function updateRemotePluginConfig(accessToken: string, pluginId: string, body: PluginConfigUpdateRequest, timeoutMs = 5000, target?: PluginTargetScope): Promise<PluginReloadResult> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginReloadResult>(withTargetQuery(`/api/plugins/${encodeURIComponent(pluginId)}/config`, target), {
+        method: 'PATCH',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body)
     }, timeoutMs)
 }
 
