@@ -10,6 +10,7 @@ import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
+import { AgentHistoryImportRequestSchema, AgentHistoryImportResponseSchema } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
     PluginDeleteResultSchema,
@@ -332,7 +333,8 @@ export class ApiMachineClient {
                 status: state?.status ?? 'running',
                 pid: state?.pid ?? process.pid,
                 pluginInventory: manager.getInventory(),
-                agentDescriptors: manager.getAgentDescriptors()
+                agentDescriptors: manager.getAgentDescriptors(),
+                agentCapabilities: manager.getAgentCapabilities()
             }))
         }
 
@@ -393,6 +395,12 @@ export class ApiMachineClient {
             const result = await manager.deletePlugin(request.pluginId, request.reload !== false)
             await publishInventory()
             return PluginDeleteResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerAgentHistoryImport, async (params: unknown) => {
+            const request = AgentHistoryImportRequestSchema.parse(params)
+            const result = await manager.importAgentHistory(request)
+            return AgentHistoryImportResponseSchema.parse(result)
         })
     }
 

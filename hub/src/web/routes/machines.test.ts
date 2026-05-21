@@ -94,6 +94,36 @@ describe('machines routes', () => {
         })
     })
 
+    it('imports plugin agent native history through the machine namespace guard', async () => {
+        const machine = createMachine()
+        const calls: Array<{ machineId: string; agentId: string; nativeSessionId: string }> = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            importRunnerAgentHistory: async (machineId: string, payload: { agentId: string; nativeSessionId: string }) => {
+                calls.push({ machineId, agentId: payload.agentId, nativeSessionId: payload.nativeSessionId })
+                return { messages: [{ role: 'user' as const, content: 'hello' }] }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/agents/vendor%3Aexample-agent/history/import', {
+            method: 'POST',
+            body: JSON.stringify({ nativeSessionId: 'native-session-1' }),
+            headers: { 'content-type': 'application/json' }
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({ messages: [{ role: 'user', content: 'hello' }] })
+        expect(calls).toEqual([{ machineId: 'machine-1', agentId: 'vendor:example-agent', nativeSessionId: 'native-session-1' }])
+    })
+
     it('returns 400 when /opencode-models is called without cwd', async () => {
         const machine = createMachine()
         const engine = {

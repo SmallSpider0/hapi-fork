@@ -12,9 +12,11 @@ import type {
     OpencodeModelsResponse,
     OpencodeModelSummary,
     PathExistsResponse,
+    AgentHistoryImportResponse,
     SlashCommandsResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
+import { AgentHistoryImportResponseSchema } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
 import {
     PluginDeleteResultSchema,
@@ -294,6 +296,14 @@ export class RpcGateway {
     async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {
         const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsDelete, { pluginId, reload })
         return PluginDeleteResultSchema.parse(result)
+    }
+
+    async importRunnerAgentHistory(
+        machineId: string,
+        payload: { agentId: string; nativeSessionId: string; providerId?: string }
+    ): Promise<AgentHistoryImportResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerAgentHistoryImport, payload, MODEL_LIST_RPC_TIMEOUT_MS)
+        return AgentHistoryImportResponseSchema.parse(result)
     }
 
     async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {

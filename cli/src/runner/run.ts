@@ -777,7 +777,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       httpPort: controlPort,
       startedAt: Date.now(),
       pluginInventory: runnerPluginManager.getInventory(),
-      agentDescriptors: runnerPluginManager.getAgentDescriptors()
+      agentDescriptors: runnerPluginManager.getAgentDescriptors(),
+      agentCapabilities: runnerPluginManager.getAgentCapabilities()
     };
 
     // Create API client

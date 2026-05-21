@@ -38,6 +38,7 @@ export type RunnerPluginContext = {
         registerCommandResolver(resolver: RunnerCommandResolverContribution): Disposable
         registerSpawnHook(hook: RunnerSpawnHookContribution): Disposable
         registerAgentAdapter(adapter: RunnerAgentAdapterContribution): Disposable
+        registerAgentCapabilityProvider(provider: RunnerAgentCapabilityProviderContribution): Disposable
     }
 }
 
@@ -53,8 +54,26 @@ export type RunnerAgentAdapterContribution = {
     dispose?: () => void | Promise<void>
 }
 
+export type RunnerAgentCapabilityProviderContext = {
+    machineId: string
+    agentId: string
+}
+
+export type RunnerAgentHistoryImportContext = RunnerAgentCapabilityProviderContext & {
+    nativeSessionId: string
+}
+
+export type RunnerAgentCapabilityProviderContribution = {
+    id: string
+    agentId: string
+    priority?: number
+    provide?: (context: RunnerAgentCapabilityProviderContext) => unknown | Promise<unknown>
+    importHistory?: (context: RunnerAgentHistoryImportContext) => unknown | Promise<unknown>
+    dispose?: () => void | Promise<void>
+}
+
 export type RegisteredRuntimeContribution<T = unknown> = {
-    type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter'
+    type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider'
     pluginId: string
     id: string
     priority: number
@@ -114,7 +133,8 @@ export class RunnerPluginRegistry {
                 registerEnvironmentProvider: (provider: unknown): Disposable => register('environmentProvider', provider),
                 registerCommandResolver: (resolver: unknown): Disposable => register('commandResolver', resolver),
                 registerSpawnHook: (hook: unknown): Disposable => register('spawnHook', hook),
-                registerAgentAdapter: (adapter: unknown): Disposable => register('agentAdapter', adapter)
+                registerAgentAdapter: (adapter: unknown): Disposable => register('agentAdapter', adapter),
+                registerAgentCapabilityProvider: (provider: unknown): Disposable => register('agentCapabilityProvider', provider)
             }
         }
 
@@ -165,6 +185,10 @@ export class RunnerPluginRegistry {
 
     getAgentAdapters(): RegisteredRuntimeContribution<RunnerAgentAdapterContribution>[] {
         return this.getContributionsByType('agentAdapter')
+    }
+
+    getAgentCapabilityProviders(): RegisteredRuntimeContribution<RunnerAgentCapabilityProviderContribution>[] {
+        return this.getContributionsByType('agentCapabilityProvider')
     }
 
     async disposeFrom(startIndex: number): Promise<void> {
@@ -240,10 +264,10 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
     if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
         throw new Error(`${type} contribution must have a non-empty id.`)
     }
-    if (type === 'agentAdapter') {
+    if (type === 'agentAdapter' || type === 'agentCapabilityProvider') {
         const parsedId = AgentIdSchema.safeParse(candidate.id)
         if (!parsedId.success) {
-            throw new Error(`agentAdapter contribution id must be a valid agent id.`)
+            throw new Error(`${type} contribution id must be a valid id.`)
         }
     } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate.id)) {
         throw new Error(`${type} contribution id must contain only alphanumeric characters, dots, underscores, or dashes.`)
@@ -282,6 +306,21 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
         }
         if (typeof candidate.createBackend !== 'function') {
             throw new Error('agentAdapter createBackend must be a function.')
+        }
+    }
+    if (type === 'agentCapabilityProvider') {
+        const agentId = AgentIdSchema.safeParse(candidate.agentId)
+        if (!agentId.success) {
+            throw new Error('agentCapabilityProvider agentId must be a valid agent id.')
+        }
+        if (candidate.provide !== undefined && typeof candidate.provide !== 'function') {
+            throw new Error('agentCapabilityProvider provide must be a function.')
+        }
+        if (candidate.importHistory !== undefined && typeof candidate.importHistory !== 'function') {
+            throw new Error('agentCapabilityProvider importHistory must be a function.')
+        }
+        if (candidate.provide === undefined && candidate.importHistory === undefined) {
+            throw new Error('agentCapabilityProvider must define provide or importHistory.')
         }
     }
     return contribution as T

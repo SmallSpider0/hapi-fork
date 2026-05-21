@@ -285,6 +285,259 @@ describe('RunnerPluginManager runtime', () => {
         ]))
     })
 
+    it('collects agent capability provider snapshots and merges model and permission descriptors', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'vendor:example-agent',
+                    descriptor: {
+                        id: 'vendor:example-agent',
+                        displayName: 'Example Agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'example-adapter'
+                        },
+                        capabilities: {
+                            permissionModes: ['default', 'yolo']
+                        }
+                    },
+                    createBackend() {
+                        return {
+                            async initialize() {},
+                            async newSession() { return 'plugin-session'; },
+                            async prompt() {},
+                            async cancelPrompt() {},
+                            async respondToPermission() {},
+                            onPermissionRequest() {},
+                            async disconnect() {}
+                        };
+                    }
+                });
+                ctx.runtime.registerAgentCapabilityProvider({
+                    id: 'example-capabilities',
+                    agentId: 'vendor:example-agent',
+                    provide() {
+                        return {
+                            models: [{ id: 'example-large', displayName: 'Example Large' }],
+                            permissionModes: [{ mode: 'yolo', label: 'YOLO', risk: 'danger' }],
+                            profiles: [{ id: 'fast', displayName: 'Fast profile' }],
+                            sessions: [{ id: 'native-session-1', title: 'Native Session' }],
+                            usage: [{ totalTokens: 42, costUsd: 0.01 }],
+                            skills: [{ name: 'review', description: 'Review code' }],
+                            slashCommands: [{ name: 'audit', description: 'Audit code' }]
+                        };
+                    }
+                });
+            }
+        `)
+        writeManifest(pluginRoot, {
+            contributions: {
+                agent: {
+                    adapters: [{ id: 'example-adapter', displayName: 'Example Agent Adapter' }],
+                    capabilityProviders: [{ id: 'example-capabilities', displayName: 'Example Capabilities' }]
+                }
+            }
+        })
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+
+        const result = await manager.start()
+
+        expect(result.ok).toBe(true)
+        expect(manager.getAgentCapabilities()).toEqual([
+            expect.objectContaining({
+                agentId: 'vendor:example-agent',
+                pluginId: 'com.example.runner',
+                contributionId: 'example-capabilities',
+                capabilities: expect.objectContaining({
+                    models: [expect.objectContaining({ id: 'example-large', displayName: 'Example Large' })],
+                    profiles: [expect.objectContaining({ id: 'fast', displayName: 'Fast profile' })],
+                    sessions: [expect.objectContaining({ id: 'native-session-1', title: 'Native Session' })],
+                    usage: [expect.objectContaining({ totalTokens: 42, costUsd: 0.01 })],
+                    skills: [expect.objectContaining({ name: 'review' })],
+                    slashCommands: [expect.objectContaining({ name: 'audit' })]
+                })
+            })
+        ])
+        expect(manager.getAgentDescriptor('vendor:example-agent')).toMatchObject({
+            capabilities: {
+                models: ['example-large'],
+                permissionModes: ['default', 'yolo']
+            }
+        })
+        expect(manager.getPlugin('com.example.runner')?.contributions.agent?.capabilityProviders).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'example-capabilities', active: true })
+        ]))
+    })
+
+    it('does not let capability providers expand permissions or target agents owned by other plugins', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'vendor:example-agent',
+                    descriptor: {
+                        id: 'vendor:example-agent',
+                        displayName: 'Example Agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'example-adapter'
+                        },
+                        capabilities: {
+                            permissionModes: ['default']
+                        }
+                    },
+                    createBackend() {
+                        return {
+                            async initialize() {},
+                            async newSession() { return 'plugin-session'; },
+                            async prompt() {},
+                            async cancelPrompt() {},
+                            async respondToPermission() {},
+                            onPermissionRequest() {},
+                            async disconnect() {}
+                        };
+                    }
+                });
+                ctx.runtime.registerAgentCapabilityProvider({
+                    id: 'unsafe-permissions',
+                    agentId: 'vendor:example-agent',
+                    provide() {
+                        return {
+                            permissionModes: [{ mode: 'yolo', label: 'YOLO', risk: 'danger' }],
+                            usage: [{ scope: 'session', sessionId: 'session-1', totalTokens: 1 }]
+                        };
+                    }
+                });
+                ctx.runtime.registerAgentCapabilityProvider({
+                    id: 'cross-agent',
+                    agentId: 'claude',
+                    provide() {
+                        return { models: [{ id: 'fake-claude-model' }] };
+                    }
+                });
+            }
+        `)
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+
+        const result = await manager.start()
+
+        expect(result.ok).toBe(true)
+        expect(manager.getAgentDescriptor('vendor:example-agent')).toMatchObject({
+            capabilities: {
+                permissionModes: ['default']
+            }
+        })
+        expect(manager.getAgentDescriptor('claude')?.capabilities.models).toBeUndefined()
+        expect(manager.getDiagnostics()).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-capability-provider-permission-mode-not-owned' }),
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-capability-provider-session-usage-rejected' }),
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-capability-provider-agent-not-owned' })
+        ]))
+    })
+
+    it('keeps capability provider failures diagnostic without crashing the runner manager', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'vendor:example-agent',
+                    descriptor: {
+                        id: 'vendor:example-agent',
+                        displayName: 'Example Agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'example-adapter'
+                        }
+                    },
+                    createBackend() {
+                        return {
+                            async initialize() {},
+                            async newSession() { return 'plugin-session'; },
+                            async prompt() {},
+                            async cancelPrompt() {},
+                            async respondToPermission() {},
+                            onPermissionRequest() {},
+                            async disconnect() {}
+                        };
+                    }
+                });
+                ctx.runtime.registerAgentCapabilityProvider({
+                    id: 'bad-capabilities',
+                    agentId: 'vendor:example-agent',
+                    provide() {
+                        return { models: [{ id: '' }] };
+                    }
+                });
+            }
+        `)
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+
+        const result = await manager.start()
+
+        expect(result.ok).toBe(true)
+        expect(manager.getAgentCapabilities()[0]).toMatchObject({
+            agentId: 'vendor:example-agent',
+            contributionId: 'bad-capabilities',
+            capabilities: {},
+            diagnostics: [expect.objectContaining({ code: 'agent-capability-provider-failed' })]
+        })
+        expect(manager.getDiagnostics()).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-capability-provider-failed' })
+        ]))
+    })
+
+    it('validates history importer output before returning unified history messages', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'vendor:example-agent',
+                    descriptor: {
+                        id: 'vendor:example-agent',
+                        displayName: 'Example Agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'example-adapter'
+                        }
+                    },
+                    createBackend() {
+                        return {
+                            async initialize() {},
+                            async newSession() { return 'plugin-session'; },
+                            async prompt() {},
+                            async cancelPrompt() {},
+                            async respondToPermission() {},
+                            onPermissionRequest() {},
+                            async disconnect() {}
+                        };
+                    }
+                });
+                ctx.runtime.registerAgentCapabilityProvider({
+                    id: 'history',
+                    agentId: 'vendor:example-agent',
+                    importHistory() {
+                        return { messages: [{ role: 'assistant', content: 'not a valid role' }] };
+                    }
+                });
+            }
+        `)
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        await expect(manager.importAgentHistory({
+            agentId: 'vendor:example-agent',
+            nativeSessionId: 'native-session-1'
+        })).rejects.toThrow('history importer returned invalid messages')
+        expect(manager.getDiagnostics()).toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-history-import-failed' })
+        ]))
+    })
+
     it('applies active Runner extension proposals to spawn plans', async () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {

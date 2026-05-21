@@ -14,6 +14,9 @@ import type {
     RunnerPluginUnsupportedInstallResult
 } from '@hapi/protocol/plugins'
 import {
+    AgentCapabilityProviderResultSchema,
+    AgentCapabilityProviderSnapshotSchema,
+    AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
     assertPluginConfigSafeForPersistence,
     builtinAgentDescriptors,
@@ -29,7 +32,7 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import type { PluginStateFile } from '@hapi/protocol/plugins'
-import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerAgentAdapterContribution, type RunnerPluginModule } from './runnerPluginRegistry'
+import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerAgentAdapterContribution, type RunnerAgentCapabilityProviderContribution, type RunnerPluginModule } from './runnerPluginRegistry'
 import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
 import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
 import type { AgentBackendFactory } from '@/agent/types'
@@ -42,7 +45,7 @@ import {
     type RunnerEnvironmentProviderContribution,
     type RunnerSpawnHookContribution
 } from './runnerExtensionPipeline'
-import type { AgentDescriptor, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
+import type { AgentCapabilityProviderResult, AgentCapabilityProviderSnapshot, AgentHistoryImportResult, AgentDescriptor, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
 
 export interface RunnerPluginManagerOptions {
     hapiHome: string
@@ -60,12 +63,13 @@ type ActiveRunnerPluginInstance = {
 }
 
 type ReloadReason = 'startup' | 'manual' | 'state-change'
-type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter'>
+type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter' | 'agentCapabilityProvider'>
 const BUILTIN_AGENT_IDS = new Set(builtinAgentDescriptors().map((descriptor) => descriptor.id))
+const DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS = 1000
 
-function agentAdapterSort(
-    left: RegisteredRunnerContribution<RunnerAgentAdapterContribution>,
-    right: RegisteredRunnerContribution<RunnerAgentAdapterContribution>
+function runtimeContributionSort<T>(
+    left: RegisteredRunnerContribution<T>,
+    right: RegisteredRunnerContribution<T>
 ): number {
     return left.priority - right.priority
         || left.pluginId.localeCompare(right.pluginId)
@@ -83,6 +87,27 @@ function errorMessage(error: unknown): string {
         return error.message
     }
     return String(error)
+}
+
+function describeZodError(error: { issues: Array<{ path: PropertyKey[]; message: string }> }): string {
+    return error.issues
+        .map((issue) => {
+            const path = issue.path.length > 0 ? `${issue.path.join('.')}: ` : ''
+            return `${path}${issue.message}`
+        })
+        .join('; ')
+}
+
+function withTimeout<T>(work: Promise<T> | T, timeoutMs: number, label: string): Promise<T> {
+    let timeout: NodeJS.Timeout | null = null
+    return Promise.race([
+        Promise.resolve(work),
+        new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+        })
+    ]).finally(() => {
+        if (timeout) clearTimeout(timeout)
+    })
 }
 
 function getActivate(value: unknown): RunnerPluginModule['activate'] | null {
@@ -177,6 +202,7 @@ export class RunnerPluginManager {
     private readonly activePlugins = new Map<string, ActiveRunnerPluginInstance>()
     private records: DiscoveredPluginRecord[] = []
     private managerDiagnostics: PluginDiagnosticView[] = []
+    private capabilitySnapshots: AgentCapabilityProviderSnapshot[] = []
     private reloadQueue: Promise<InternalReloadResult> = Promise.resolve({ records: [], items: [] })
     private disposed = false
     private lastInventoryUpdatedAt = Date.now()
@@ -235,6 +261,23 @@ export class RunnerPluginManager {
                 firstById.set(descriptor.id, descriptor)
             }
         }
+        for (const snapshot of this.capabilitySnapshots) {
+            const descriptor = firstById.get(snapshot.agentId)
+            if (!descriptor) {
+                continue
+            }
+            const modelIds = [
+                ...(descriptor.capabilities.models ?? []),
+                ...(snapshot.capabilities.models ?? []).map((model) => model.id)
+            ]
+            firstById.set(snapshot.agentId, AgentDescriptorSchema.parse({
+                ...descriptor,
+                capabilities: {
+                    ...descriptor.capabilities,
+                    models: Array.from(new Set(modelIds))
+                }
+            }))
+        }
         return Array.from(firstById.values())
     }
 
@@ -245,6 +288,47 @@ export class RunnerPluginManager {
     getAgentAdapterFactory(agentId: string): AgentBackendFactory | null {
         const match = this.collectAgentAdapters().find((entry) => entry.contribution.descriptor.id === agentId)
         return match?.contribution.createBackend ?? null
+    }
+
+    getAgentCapabilities(): AgentCapabilityProviderSnapshot[] {
+        return this.capabilitySnapshots.map((snapshot) => AgentCapabilityProviderSnapshotSchema.parse(snapshot))
+    }
+
+    async importAgentHistory(args: { agentId: string; nativeSessionId: string; providerId?: string }): Promise<AgentHistoryImportResult> {
+        const providers = this.collectAgentCapabilityProviders()
+            .filter((entry) => entry.contribution.agentId === args.agentId)
+            .filter((entry) => this.getPluginOwnedAgentDescriptor(entry.contribution.agentId, entry.pluginId))
+            .filter((entry) => !args.providerId || entry.id === args.providerId)
+            .filter((entry) => typeof entry.contribution.importHistory === 'function')
+        if (providers.length === 0) {
+            throw new Error(`No history importer is active for agent ${args.agentId}.`)
+        }
+
+        const provider = providers[0]
+        try {
+            const raw = await withTimeout(
+                provider.contribution.importHistory!({
+                    machineId: this.options.machineId,
+                    agentId: args.agentId,
+                    nativeSessionId: args.nativeSessionId
+                }),
+                DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS,
+                `${provider.pluginId}:${provider.id} history importer`
+            )
+            const parsed = AgentHistoryImportResultSchema.safeParse(raw)
+            if (!parsed.success) {
+                throw new Error(`history importer returned invalid messages: ${describeZodError(parsed.error)}`)
+            }
+            return parsed.data
+        } catch (error) {
+            this.recordCapabilityDiagnostics([{
+                pluginId: provider.pluginId,
+                severity: 'warning',
+                code: 'agent-history-import-failed',
+                message: `[runner-plugin:${this.options.machineId}:${provider.pluginId}] ${provider.id} history importer failed: ${errorMessage(error)}`
+            }])
+            throw error
+        }
     }
 
     async resolveSpawnPlan(args: {
@@ -557,6 +641,9 @@ export class RunnerPluginManager {
             }
         }
 
+        const capabilityResult = await this.collectAgentCapabilitySnapshots()
+        managerDiagnostics.push(...capabilityResult.diagnostics)
+        this.capabilitySnapshots = capabilityResult.snapshots
         this.records = records
         this.managerDiagnostics = managerDiagnostics
         this.lastInventoryUpdatedAt = Date.now()
@@ -710,6 +797,173 @@ export class RunnerPluginManager {
         }
     }
 
+    private recordCapabilityDiagnostics(diagnostics: PluginDiagnosticView[]): void {
+        for (const diagnostic of diagnostics) {
+            this.managerDiagnostics.push({
+                severity: diagnostic.severity,
+                code: diagnostic.code,
+                message: diagnostic.message,
+                ...(diagnostic.pluginId ? { pluginId: diagnostic.pluginId } : {}),
+                ...(diagnostic.path ? { path: diagnostic.path } : {})
+            })
+        }
+        if (this.managerDiagnostics.length > 500) {
+            this.managerDiagnostics = this.managerDiagnostics.slice(-500)
+        }
+        if (diagnostics.length > 0) {
+            this.lastInventoryUpdatedAt = Date.now()
+        }
+    }
+
+    private async collectAgentCapabilitySnapshots(): Promise<{
+        snapshots: AgentCapabilityProviderSnapshot[]
+        diagnostics: PluginDiagnosticView[]
+    }> {
+        const snapshots: AgentCapabilityProviderSnapshot[] = []
+        const diagnostics: PluginDiagnosticView[] = []
+
+        for (const entry of this.collectAgentCapabilityProviders()) {
+            const label = `${entry.pluginId}:${entry.id}`
+            const ownedDescriptor = this.getPluginOwnedAgentDescriptor(entry.contribution.agentId, entry.pluginId)
+            if (!ownedDescriptor) {
+                diagnostics.push({
+                    pluginId: entry.pluginId,
+                    severity: 'warning',
+                    code: 'agent-capability-provider-agent-not-owned',
+                    message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${label} targets agent ${entry.contribution.agentId}, but providers can only target agent adapters from the same plugin.`
+                })
+                continue
+            }
+
+            if (!entry.contribution.provide) {
+                continue
+            }
+
+            const updatedAt = Date.now()
+            try {
+                const raw = await withTimeout(
+                    entry.contribution.provide({
+                        machineId: this.options.machineId,
+                        agentId: entry.contribution.agentId
+                    }),
+                    DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS,
+                    `${label} capability provider`
+                )
+                const parsed = AgentCapabilityProviderResultSchema.safeParse(raw)
+                if (!parsed.success) {
+                    throw new Error(`capability provider returned invalid descriptors: ${describeZodError(parsed.error)}`)
+                }
+
+                const sanitized = this.sanitizeCapabilityProviderResult(entry, parsed.data, ownedDescriptor, diagnostics)
+                const providerDiagnostics = sanitized.diagnostics ?? []
+                snapshots.push(AgentCapabilityProviderSnapshotSchema.parse({
+                    agentId: entry.contribution.agentId,
+                    pluginId: entry.pluginId,
+                    contributionId: entry.id,
+                    updatedAt,
+                    capabilities: sanitized,
+                    diagnostics: providerDiagnostics
+                }))
+                diagnostics.push(...providerDiagnostics.map((diagnostic) => ({
+                    pluginId: entry.pluginId,
+                    severity: diagnostic.severity,
+                    code: diagnostic.code,
+                    message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${diagnostic.message}`,
+                    ...(diagnostic.path ? { path: diagnostic.path } : {})
+                })))
+            } catch (error) {
+                const diagnostic = {
+                    pluginId: entry.pluginId,
+                    severity: 'warning' as const,
+                    code: 'agent-capability-provider-failed',
+                    message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${label} capability provider failed: ${errorMessage(error)}`
+                }
+                diagnostics.push(diagnostic)
+                snapshots.push(AgentCapabilityProviderSnapshotSchema.parse({
+                    agentId: entry.contribution.agentId,
+                    pluginId: entry.pluginId,
+                    contributionId: entry.id,
+                    updatedAt,
+                    capabilities: {},
+                    diagnostics: [{ severity: diagnostic.severity, code: diagnostic.code, message: diagnostic.message }]
+                }))
+            }
+        }
+
+        return { snapshots, diagnostics }
+    }
+
+    private getPluginOwnedAgentDescriptor(agentId: string, pluginId: string): AgentDescriptor | null {
+        const adapter = this.collectAgentAdapters().find((entry) =>
+            entry.pluginId === pluginId && entry.contribution.descriptor.id === agentId
+        )
+        return adapter ? AgentDescriptorSchema.parse({
+            ...adapter.contribution.descriptor,
+            source: 'plugin',
+            pluginId,
+            available: true
+        }) : null
+    }
+
+    private sanitizeCapabilityProviderResult(
+        entry: RegisteredRunnerContribution<RunnerAgentCapabilityProviderContribution>,
+        result: AgentCapabilityProviderResult,
+        ownerDescriptor: AgentDescriptor,
+        diagnostics: PluginDiagnosticView[]
+    ): AgentCapabilityProviderResult {
+        const providerDiagnostics = [...(result.diagnostics ?? [])]
+        const addDiagnostic = (code: string, message: string) => {
+            const diagnostic = {
+                severity: 'warning' as const,
+                code,
+                message
+            }
+            providerDiagnostics.push(diagnostic)
+            diagnostics.push({
+                pluginId: entry.pluginId,
+                ...diagnostic,
+                message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${message}`
+            })
+        }
+
+        const allowedModes = new Set(ownerDescriptor.capabilities.permissionModes)
+        const permissionModes = (result.permissionModes ?? []).filter((permissionMode) => {
+            if (!allowedModes.has(permissionMode.mode)) {
+                addDiagnostic(
+                    'agent-capability-provider-permission-mode-not-owned',
+                    `${entry.id} declared permission mode ${permissionMode.mode}, but the agent adapter descriptor does not allow it.`
+                )
+                return false
+            }
+            if ((permissionMode.mode === 'yolo' || permissionMode.mode === 'bypassPermissions') && permissionMode.risk !== 'danger') {
+                addDiagnostic(
+                    'agent-capability-provider-permission-mode-risk-missing',
+                    `${entry.id} declared dangerous permission mode ${permissionMode.mode} without risk: danger.`
+                )
+                return false
+            }
+            return true
+        })
+
+        const usage = (result.usage ?? []).filter((usageEntry) => {
+            if (usageEntry.scope === 'session' || usageEntry.sessionId) {
+                addDiagnostic(
+                    'agent-capability-provider-session-usage-rejected',
+                    `${entry.id} returned session-scoped usage without a core session authorization context.`
+                )
+                return false
+            }
+            return true
+        })
+
+        return AgentCapabilityProviderResultSchema.parse({
+            ...result,
+            ...(permissionModes.length > 0 ? { permissionModes } : { permissionModes: undefined }),
+            ...(usage.length > 0 ? { usage } : { usage: undefined }),
+            diagnostics: providerDiagnostics
+        })
+    }
+
     private collectEnvironmentProviders(): RegisteredRunnerContribution<RunnerEnvironmentProviderContribution>[] {
         return this.collectRegistryContributions((registry) => registry.getEnvironmentProviders())
     }
@@ -725,7 +979,12 @@ export class RunnerPluginManager {
     private collectAgentAdapters(): RegisteredRunnerContribution<RunnerAgentAdapterContribution>[] {
         return this.collectRegistryContributions((registry) => registry.getAgentAdapters())
             .filter((entry) => !BUILTIN_AGENT_IDS.has(entry.contribution.descriptor.id))
-            .sort(agentAdapterSort)
+            .sort(runtimeContributionSort)
+    }
+
+    private collectAgentCapabilityProviders(): RegisteredRunnerContribution<RunnerAgentCapabilityProviderContribution>[] {
+        return this.collectRegistryContributions((registry) => registry.getAgentCapabilityProviders())
+            .sort(runtimeContributionSort)
     }
 
     private collectRegistryContributions<T>(
@@ -822,7 +1081,23 @@ export class RunnerPluginManager {
                 active: true
             }))
         } : undefined
+        const activeAgentContributions = activeInstance ? {
+            adapters: activeInstance.registry.getAgentAdapters().map((entry) => ({
+                id: entry.id,
+                pluginId: entry.pluginId,
+                priority: entry.priority,
+                active: true
+            })),
+            capabilityProviders: activeInstance.registry.getAgentCapabilityProviders().map((entry) => ({
+                id: entry.id,
+                agentId: entry.contribution.agentId,
+                pluginId: entry.pluginId,
+                priority: entry.priority,
+                active: true
+            }))
+        } : undefined
         const manifestRunnerContributions = record.manifest?.contributions?.runner
+        const manifestAgentContributions = record.manifest?.contributions?.agent
         return {
             ...item,
             manifest: record.manifest,
@@ -855,7 +1130,21 @@ export class RunnerPluginManager {
                         } : {})
                     }
                 } : {}),
-                ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
+                ...(manifestAgentContributions || activeAgentContributions ? {
+                    agent: {
+                        ...(manifestAgentContributions ?? {}),
+                        ...(activeAgentContributions ? {
+                            adapters: [
+                                ...(manifestAgentContributions?.adapters ?? []),
+                                ...activeAgentContributions.adapters
+                            ],
+                            capabilityProviders: [
+                                ...(manifestAgentContributions?.capabilityProviders ?? []),
+                                ...activeAgentContributions.capabilityProviders
+                            ]
+                        } : {})
+                    }
+                } : {}),
                 ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
             },
             runtimeEntryPaths: record.runtimeEntryPaths

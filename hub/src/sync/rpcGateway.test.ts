@@ -100,4 +100,23 @@ describe('RpcGateway runner plugin RPC methods', () => {
         expect(result.machineId).toBe('machine-1')
         expect(seen).toEqual([{ method: 'machine-1:runner.plugins.list', params: {} }])
     })
+
+    it('uses machine-scoped agent history import method names', async () => {
+        const seen: Array<{ method: string; params: unknown }> = []
+        const { gateway } = createGateway((payload) => {
+            seen.push({ method: payload.method, params: JSON.parse(payload.params) as unknown })
+            return { messages: [{ role: 'user', content: 'hello' }] }
+        })
+
+        const result = await gateway.importRunnerAgentHistory('machine-1', {
+            agentId: 'vendor:example-agent',
+            nativeSessionId: 'native-session-1'
+        })
+
+        expect(result).toEqual({ messages: [{ role: 'user', content: 'hello' }] })
+        expect(seen).toEqual([{
+            method: 'machine-1:runner.agent.history.import',
+            params: { agentId: 'vendor:example-agent', nativeSessionId: 'native-session-1' }
+        }])
+    })
 })

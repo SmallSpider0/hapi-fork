@@ -8,7 +8,7 @@
  */
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
-import type { SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import type { AgentHistoryImportResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { PluginDeleteResult, PluginDetailResponse, PluginReloadResult, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -484,6 +484,13 @@ export class SyncEngine {
             effort,
             permissionMode
         )
+    }
+
+    async importRunnerAgentHistory(
+        machineId: string,
+        payload: { agentId: string; nativeSessionId: string; providerId?: string }
+    ): Promise<AgentHistoryImportResponse> {
+        return await this.rpcGateway.importRunnerAgentHistory(machineId, payload)
     }
 
     private resolveFlavor(session: Session): AgentFlavor {
