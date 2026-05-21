@@ -97,17 +97,22 @@ describe('hapi plugins command', () => {
         expect(JSON.stringify(state)).not.toContain('secret-value')
     })
 
-    it('installs the built-in example plugin as JSON', async () => {
+    it('deletes user-home plugin files and state as JSON', async () => {
+        writeFileSync(join(pluginRoot, 'hub.js'), 'export function activate() {}')
+        writeManifest(pluginRoot)
+        writeFileSync(join(hapiHome, 'plugins.json'), JSON.stringify({
+            enabled: { 'com.example.plugin': { enabled: true, config: { label: 'v1' } } }
+        }, null, 2))
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 
-        await handlePluginsCommand(['install-example', '--json'])
+        await handlePluginsCommand(['delete', 'com.example.plugin', '--yes', '--json'])
 
-        const payload = JSON.parse(logs.join('\n')) as { pluginId: string; action: string; targetPath: string }
-        expect(payload.pluginId).toBe('com.example.hapi.notification-logger')
-        expect(payload.action).toBe('installed')
-        expect(existsSync(join(hapiHome, 'plugins', 'com.example.hapi.notification-logger', 'hapi.plugin.json'))).toBe(true)
-        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as { enabled: Record<string, { enabled: boolean }> }
-        expect(state.enabled['com.example.hapi.notification-logger']?.enabled).toBe(true)
+        const payload = JSON.parse(logs.join('\n')) as { pluginId: string; deleted: boolean; rootPath: string }
+        expect(payload.pluginId).toBe('com.example.plugin')
+        expect(payload.deleted).toBe(true)
+        expect(existsSync(pluginRoot)).toBe(false)
+        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as { enabled: Record<string, unknown> }
+        expect(state.enabled['com.example.plugin']).toBeUndefined()
     })
 
     it('installs local plugin directories without importing runtime code', async () => {

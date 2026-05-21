@@ -31,11 +31,12 @@ import type { AgentFlavor } from '@hapi/protocol'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
 import type {
     PluginConfigUpdateRequest,
+    PluginDeleteResult,
     PluginDetailResponse,
     PluginEnableRequest,
-    PluginInstallExampleRequest,
     PluginInstallLocalRequest,
     PluginInstallResult,
+    PluginLocalDirectoryListResponse,
     PluginListResponse,
     PluginReloadResult
 } from '@hapi/protocol/plugins/admin'
@@ -213,17 +214,23 @@ export class ApiClient {
         return await this.request<PluginReloadResult>(`/api/plugins/${encodeURIComponent(pluginId)}/reload`, { method: 'POST' })
     }
 
-    async installExamplePlugin(options: PluginInstallExampleRequest = {}): Promise<PluginInstallResult> {
-        return await this.request<PluginInstallResult>('/api/plugins/install-example', {
-            method: 'POST',
-            body: JSON.stringify(options)
-        })
-    }
-
     async installLocalPlugin(body: PluginInstallLocalRequest): Promise<PluginInstallResult> {
         return await this.request<PluginInstallResult>('/api/plugins/install-local', {
             method: 'POST',
             body: JSON.stringify(body)
+        })
+    }
+
+    async listHubPluginDirectory(path?: string): Promise<PluginLocalDirectoryListResponse> {
+        return await this.request<PluginLocalDirectoryListResponse>('/api/plugins/local-directory', {
+            method: 'POST',
+            body: JSON.stringify(path ? { path } : {})
+        })
+    }
+
+    async deletePlugin(pluginId: string): Promise<PluginDeleteResult> {
+        return await this.request<PluginDeleteResult>(`/api/plugins/${encodeURIComponent(pluginId)}`, {
+            method: 'DELETE'
         })
     }
 

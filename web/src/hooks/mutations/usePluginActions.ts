@@ -1,9 +1,9 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { PluginInstallExampleRequest, PluginInstallLocalRequest, PluginInstallResult, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginDeleteResult, PluginInstallLocalRequest, PluginInstallResult, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import { queryKeys } from '@/lib/query-keys'
 
-type PluginActionMutationResult = PluginReloadResult | PluginInstallResult
+type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginDeleteResult
 
 export function usePluginActions(api: ApiClient | null): {
     enablePlugin: (id: string, config?: Record<string, unknown>) => Promise<PluginReloadResult>
@@ -11,8 +11,8 @@ export function usePluginActions(api: ApiClient | null): {
     reloadPlugin: (id: string) => Promise<PluginReloadResult>
     reloadPlugins: () => Promise<PluginReloadResult>
     saveConfig: (id: string, config: Record<string, unknown>) => Promise<PluginReloadResult>
-    installExamplePlugin: (options?: PluginInstallExampleRequest) => Promise<PluginInstallResult>
     installLocalPlugin: (body: PluginInstallLocalRequest) => Promise<PluginInstallResult>
+    deletePlugin: (id: string) => Promise<PluginDeleteResult>
     isPending: boolean
 } {
     const queryClient = useQueryClient()
@@ -24,17 +24,15 @@ export function usePluginActions(api: ApiClient | null): {
         }
     }
     const mutation = useMutation<PluginActionMutationResult, Error, {
-        type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-example' | 'install-local'
+        type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'delete'
         id?: string
         config?: Record<string, unknown>
-        installExample?: PluginInstallExampleRequest
         installLocal?: PluginInstallLocalRequest
     }>({
         mutationFn: async (action: {
-            type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-example' | 'install-local'
+            type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'delete'
             id?: string
             config?: Record<string, unknown>
-            installExample?: PluginInstallExampleRequest
             installLocal?: PluginInstallLocalRequest
         }) => {
             if (!api) throw new Error('API unavailable')
@@ -42,8 +40,8 @@ export function usePluginActions(api: ApiClient | null): {
             if (action.type === 'disable' && action.id) return await api.disablePlugin(action.id)
             if (action.type === 'reload' && action.id) return await api.reloadPlugin(action.id)
             if (action.type === 'config' && action.id && action.config) return await api.updatePluginConfig(action.id, action.config)
-            if (action.type === 'install-example') return await api.installExamplePlugin(action.installExample ?? {})
             if (action.type === 'install-local' && action.installLocal) return await api.installLocalPlugin(action.installLocal)
+            if (action.type === 'delete' && action.id) return await api.deletePlugin(action.id)
             return await api.reloadPlugins()
         },
         onSuccess: (result, action) => {
@@ -58,8 +56,8 @@ export function usePluginActions(api: ApiClient | null): {
         reloadPlugin: async (id) => await mutation.mutateAsync({ type: 'reload', id }) as PluginReloadResult,
         reloadPlugins: async () => await mutation.mutateAsync({ type: 'reload-all' }) as PluginReloadResult,
         saveConfig: async (id, config) => await mutation.mutateAsync({ type: 'config', id, config }) as PluginReloadResult,
-        installExamplePlugin: async (options) => await mutation.mutateAsync({ type: 'install-example', installExample: options }) as PluginInstallResult,
         installLocalPlugin: async (body) => await mutation.mutateAsync({ type: 'install-local', installLocal: body }) as PluginInstallResult,
+        deletePlugin: async (id) => await mutation.mutateAsync({ type: 'delete', id }) as PluginDeleteResult,
         isPending: mutation.isPending,
     }
 }
