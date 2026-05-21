@@ -100,6 +100,28 @@ function FolderOpenIcon(props: { className?: string }) {
     )
 }
 
+function PluginsIcon(props: { className?: string }) {
+    return (
+        <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="20"
+            height="20"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            className={props.className}
+        >
+            <rect x="4" y="4" width="6" height="6" rx="1.5" />
+            <rect x="14" y="4" width="6" height="6" rx="1.5" />
+            <rect x="4" y="14" width="6" height="6" rx="1.5" />
+            <rect x="14" y="14" width="6" height="6" rx="1.5" />
+        </svg>
+    )
+}
+
 function SettingsIcon(props: { className?: string }) {
     return (
         <svg
@@ -152,6 +174,7 @@ function SessionsPage() {
     const sessionMatch = matchRoute({ to: '/sessions/$sessionId', fuzzy: true })
     const selectedSessionId = sessionMatch && sessionMatch.sessionId !== 'new' ? sessionMatch.sessionId : null
     const isSessionsIndex = pathname === '/sessions' || pathname === '/sessions/'
+    const isPluginsRoute = pathname === '/settings/plugins' || pathname.startsWith('/settings/plugins/')
     const sidebar = useSidebarResize()
     const handleNewSessionInDirectory = useCallback((args: { machineId: string | null; directory: string }) => {
         navigate({
@@ -184,9 +207,19 @@ function SessionsPage() {
                             </button>
                             <button
                                 type="button"
+                                onClick={() => navigate({ to: '/settings/plugins' })}
+                                className={`p-1.5 rounded-full transition-colors hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] ${isPluginsRoute ? 'text-[var(--app-link)] bg-[var(--app-subtle-bg)]' : 'text-[var(--app-hint)]'}`}
+                                title={t('settings.plugins.title')}
+                                aria-label={t('settings.plugins.title')}
+                            >
+                                <PluginsIcon className="h-5 w-5" />
+                            </button>
+                            <button
+                                type="button"
                                 onClick={() => navigate({ to: '/settings' })}
                                 className="p-1.5 rounded-full text-[var(--app-hint)] hover:text-[var(--app-fg)] hover:bg-[var(--app-subtle-bg)] transition-colors"
                                 title={t('settings.title')}
+                                aria-label={t('settings.title')}
                             >
                                 <SettingsIcon className="h-5 w-5" />
                             </button>

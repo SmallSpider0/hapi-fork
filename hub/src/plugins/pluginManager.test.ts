@@ -204,18 +204,24 @@ describe('HubPluginManager', () => {
         await manager.dispose()
     })
 
-    it('installs and activates the built-in notification logger example', async () => {
+    it('deletes user-home plugin files and removes saved state', async () => {
+        writePlugin(pluginRoot, 'export function activate(ctx) { ctx.notifications.registerChannel({ async dispose() {} }) }')
+        writeManifest(pluginRoot, manifest())
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: { 'com.example.plugin': { enabled: true, config: { label: 'v1' } } }
+        })
+
         const manager = new HubPluginManager({ hapiHome, watch: false })
         await manager.start()
-        const result = await manager.installExamplePlugin({ enable: true, reload: true })
-        await manager.getNotificationChannel().sendReady(createSession())
+        expect(manager.listPlugins()[0]?.active).toBe(true)
+        const result = await manager.deletePlugin('com.example.plugin')
         await manager.dispose()
 
-        expect(result.action).toBe('installed')
-        expect(result.plugin?.id).toBe('com.example.hapi.notification-logger')
-        expect(result.plugin?.active).toBe(true)
-        const exampleLog = join(hapiHome, 'logs', 'example-plugin-notifications.jsonl')
-        expect(readJsonl(exampleLog)[0]?.event).toMatchObject({ type: 'ready', session: { id: 'session-1' } })
+        expect(result.deleted).toBe(true)
+        expect(result.plugins.some((entry) => entry.id === 'com.example.plugin')).toBe(false)
+        expect(existsSync(pluginRoot)).toBe(false)
+        const state = JSON.parse(readFileSync(join(hapiHome, 'plugins.json'), 'utf8')) as { enabled: Record<string, unknown> }
+        expect(state.enabled['com.example.plugin']).toBeUndefined()
     })
 
     it('installs local plugin directories into the user plugin directory', async () => {
@@ -235,7 +241,17 @@ describe('HubPluginManager', () => {
         expect(existsSync(join(hapiHome, 'plugins', 'com.local.installed', 'hapi.plugin.json'))).toBe(true)
     })
 
+    it('lists Hub-local directories for plugin install browsing', async () => {
+        writePlugin(pluginRoot, 'export function activate() {}')
+        writeManifest(pluginRoot, manifest())
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+        await manager.start()
+        const result = await manager.listLocalDirectory(join(hapiHome, 'plugins'))
+        await manager.dispose()
 
+        expect(result.success).toBe(true)
+        expect(result.entries?.find((entry) => entry.name === 'com.example.plugin')?.hasPluginManifest).toBe(true)
+    })
 
     it('reloads changed entry files through explicit reload', async () => {
         writePlugin(pluginRoot, `

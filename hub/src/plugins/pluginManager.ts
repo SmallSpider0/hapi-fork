@@ -1,30 +1,33 @@
 import { watch, type FSWatcher } from 'node:fs'
-import { basename, dirname, join } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
-import { mkdir, readFile, rm, stat, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type {
+    PluginDeleteResult,
     PluginDetail,
     PluginDiagnosticView,
     PluginInstallAction,
-    PluginInstallExampleRequest,
     PluginInstallLocalRequest,
     PluginInstallResult,
     PluginListItem,
+    PluginLocalDirectoryEntry,
+    PluginLocalDirectoryListResponse,
     PluginReloadItem,
     PluginReloadResult
 } from '@hapi/protocol/plugins'
 import {
     applyPluginState,
     discoverPlugins,
+    expandHomePath,
     getPluginStateFile,
-    getUserPluginInstallDir,
+    getUserPluginsDir,
     installPluginFromDirectory,
     readPluginState,
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { createExampleNotificationLoggerFiles } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_MANIFEST_FILE } from '@hapi/protocol/plugins'
 import type { PluginStateFile } from '@hapi/protocol/plugins'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
@@ -121,6 +124,19 @@ async function safePathExists(path: string): Promise<boolean> {
     } catch {
         return false
     }
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+    const rel = relative(parentPath, childPath)
+    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function sortLocalDirectoryEntries<T extends { name: string; type: string }>(entries: T[]): T[] {
+    return entries.sort((left, right) => {
+        if (left.type === 'directory' && right.type !== 'directory') return -1
+        if (left.type !== 'directory' && right.type === 'directory') return 1
+        return left.name.localeCompare(right.name)
+    })
 }
 
 function pluginDisplayId(record: DiscoveredPluginRecord): string {
@@ -320,50 +336,6 @@ export class HubPluginManager {
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
     }
 
-    async installExamplePlugin(options: PluginInstallExampleRequest = {}): Promise<PluginInstallResult> {
-        const example = createExampleNotificationLoggerFiles({
-            logFile: join(this.options.hapiHome, 'logs', 'example-plugin-notifications.jsonl')
-        })
-        const targetPath = getUserPluginInstallDir(this.options.hapiHome, example.id)
-        const targetExists = await safePathExists(targetPath)
-        let action: PluginInstallAction = 'unchanged'
-
-        if (!targetExists || options.overwrite === true) {
-            if (targetExists) {
-                await rm(targetPath, { recursive: true, force: true })
-                action = 'overwritten'
-            } else {
-                action = 'installed'
-            }
-            for (const file of example.files) {
-                const path = join(targetPath, file.relativePath)
-                await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-                await writeFile(path, file.contents, { mode: 0o600 })
-            }
-        }
-
-        if (options.enable !== false) {
-            const state = await this.readWritableState()
-            const previous = state.enabled[example.id]
-            state.enabled[example.id] = {
-                enabled: true,
-                config: {
-                    ...example.defaultConfig,
-                    ...(previous?.config ?? {})
-                }
-            }
-            await writePluginState(getPluginStateFile(this.options.hapiHome), state)
-        }
-
-        return await this.buildInstallResult({
-            action,
-            pluginId: example.id,
-            targetPath,
-            reload: options.reload !== false,
-            reloadReason: options.enable === false ? 'manual' : 'state-change'
-        })
-    }
-
     async installLocalPlugin(sourcePath: string, options: Omit<PluginInstallLocalRequest, 'sourcePath'> = {}): Promise<PluginInstallResult> {
         const install = await installPluginFromDirectory({
             hapiHome: this.options.hapiHome,
@@ -391,6 +363,98 @@ export class HubPluginManager {
             reload: options.reload !== false,
             reloadReason: options.enable === true ? 'state-change' : 'manual'
         })
+    }
+
+    async listLocalDirectory(path?: string): Promise<PluginLocalDirectoryListResponse> {
+        const requestedPath = path?.trim() ? path.trim() : this.options.hapiHome
+        const resolvedPath = resolve(expandHomePath(requestedPath))
+        try {
+            const stats = await lstat(resolvedPath)
+            if (!stats.isDirectory()) {
+                return {
+                    success: false,
+                    path: resolvedPath,
+                    error: `Path is not a directory: ${resolvedPath}`
+                }
+            }
+
+            const [entries, hasPluginManifest] = await Promise.all([
+                readdir(resolvedPath, { withFileTypes: true }),
+                safePathExists(join(resolvedPath, HAPI_PLUGIN_MANIFEST_FILE))
+            ])
+
+            const mapped = await Promise.all(entries.map(async (entry): Promise<PluginLocalDirectoryEntry> => {
+                const entryPath = join(resolvedPath, entry.name)
+                const entryStats = await lstat(entryPath).catch(() => null)
+                const type: PluginLocalDirectoryEntry['type'] = entry.isDirectory()
+                    ? 'directory'
+                    : entry.isFile()
+                        ? 'file'
+                        : 'other'
+                return {
+                    name: entry.name,
+                    type,
+                    ...(entryStats ? { size: entryStats.size, modified: entryStats.mtimeMs } : {}),
+                    ...(type === 'directory' ? { hasPluginManifest: await safePathExists(join(entryPath, HAPI_PLUGIN_MANIFEST_FILE)) } : {})
+                }
+            }))
+
+            return {
+                success: true,
+                path: resolvedPath,
+                parentPath: dirname(resolvedPath),
+                hasPluginManifest,
+                entries: sortLocalDirectoryEntries(mapped)
+            }
+        } catch (error) {
+            return {
+                success: false,
+                path: resolvedPath,
+                error: error instanceof Error ? error.message : String(error)
+            }
+        }
+    }
+
+    async deletePlugin(id: string, shouldReload = true): Promise<PluginDeleteResult> {
+        const record = await this.findDiscoveredRecord(id)
+        if (!record) {
+            throw new Error(`Plugin ${id} was not found.`)
+        }
+        if (record.source !== 'user-home') {
+            throw new Error(`Plugin ${id} cannot be deleted because it is from ${record.source}. Only user-home plugins can be deleted.`)
+        }
+
+        const pluginId = pluginDisplayId(record)
+        const statePluginId = record.status === 'blocked' ? undefined : record.manifest?.id
+        const userPluginsDir = getUserPluginsDir(this.options.hapiHome)
+        const [userPluginsRealPath, rootRealPath] = await Promise.all([
+            realpath(userPluginsDir),
+            realpath(record.rootPath)
+        ])
+        if (!isPathInside(userPluginsRealPath, rootRealPath)) {
+            throw new Error(`Plugin ${pluginId} cannot be deleted because its path is outside the user plugin directory.`)
+        }
+
+        const nextState = statePluginId ? await this.readWritableState() : null
+        if (nextState && statePluginId) {
+            delete nextState.enabled[statePluginId]
+        }
+        if (nextState) {
+            await writePluginState(getPluginStateFile(this.options.hapiHome), nextState)
+        }
+        if (statePluginId) {
+            await this.disposeActive(statePluginId)
+        }
+        await rm(rootRealPath, { recursive: true, force: true })
+        const reloadResult = shouldReload ? await this.reload(pluginId, 'state-change') : undefined
+        return {
+            ok: reloadResult?.ok ?? true,
+            pluginId,
+            rootPath: rootRealPath,
+            deleted: true,
+            ...(reloadResult ? { reload: reloadResult } : {}),
+            plugins: this.listPlugins()
+        }
     }
 
     async dispose(): Promise<void> {

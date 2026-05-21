@@ -2,8 +2,8 @@ import chalk from 'chalk'
 import * as readline from 'node:readline/promises'
 import { stdin as input, stdout as output } from 'node:process'
 import { existsSync } from 'node:fs'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
-import { basename, dirname, join, resolve } from 'node:path'
+import { readFile, realpath, rm } from 'node:fs/promises'
+import { basename, isAbsolute, relative, resolve } from 'node:path'
 import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
@@ -14,15 +14,13 @@ import {
     applyPluginState,
     discoverPlugins,
     getPluginStateFile,
-    getUserPluginInstallDir,
+    getUserPluginsDir,
     installPluginFromDirectory,
     readPluginState,
-    validatePluginRoot,
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { createExampleNotificationLoggerFiles } from '@hapi/protocol/plugins'
-import type { PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile } from '@hapi/protocol/plugins'
+import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile } from '@hapi/protocol/plugins'
 
 function hasFlag(args: string[], flag: string): boolean {
     return args.includes(flag)
@@ -112,6 +110,11 @@ function printTable(plugins: PluginListItem[]): void {
 
 function findRecord(records: DiscoveredPluginRecord[], id: string): DiscoveredPluginRecord | undefined {
     return records.find((record) => pluginId(record) === id || record.manifest?.id === id)
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+    const rel = relative(parentPath, childPath)
+    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
 }
 
 function printDiagnostics(diagnostics: PluginDiagnostic[]): void {
@@ -238,6 +241,27 @@ async function confirmRisk(record: DiscoveredPluginRecord, action: 'enable' | 'd
     }
 }
 
+async function confirmDelete(record: DiscoveredPluginRecord, yes: boolean): Promise<void> {
+    if (yes) {
+        return
+    }
+    if (!process.stdin.isTTY) {
+        throw new Error('Refusing to delete plugin files in non-TTY mode without --yes.')
+    }
+    console.log(chalk.red('This will permanently delete the local plugin directory.'))
+    console.log(chalk.gray(`Plugin: ${record.manifest?.name ?? pluginId(record)} (${pluginId(record)})`))
+    console.log(chalk.gray(`Root: ${record.rootPath}`))
+    const rl = readline.createInterface({ input, output })
+    try {
+        const answer = await rl.question('Type delete to continue: ')
+        if (answer.trim() !== 'delete') {
+            throw new Error('Cancelled.')
+        }
+    } finally {
+        rl.close()
+    }
+}
+
 async function readWritableState(): Promise<PluginStateFile> {
     const result = await readPluginState(getPluginStateFile(configuration.happyHomeDir))
     if (result.parseError) {
@@ -282,49 +306,6 @@ async function reloadRemoteOptional(pluginId: string | undefined, requested: boo
     await initializeApiUrl()
     await initializeToken()
     return await reloadRemotePlugins(configuration.cliApiToken, pluginId)
-}
-
-async function writeExamplePlugin(overwrite: boolean): Promise<{
-    action: PluginInstallAction
-    pluginId: string
-    targetPath: string
-    record: DiscoveredPluginRecord
-    defaultConfig: Record<string, unknown>
-}> {
-    const example = createExampleNotificationLoggerFiles({
-        logFile: join(configuration.happyHomeDir, 'logs', 'example-plugin-notifications.jsonl')
-    })
-    const targetPath = getUserPluginInstallDir(configuration.happyHomeDir, example.id)
-    const targetExists = existsSync(targetPath)
-    let action: PluginInstallAction = 'unchanged'
-
-    if (!targetExists || overwrite) {
-        if (targetExists) {
-            await rm(targetPath, { recursive: true, force: true })
-            action = 'overwritten'
-        } else {
-            action = 'installed'
-        }
-        for (const file of example.files) {
-            const path = join(targetPath, file.relativePath)
-            await mkdir(dirname(path), { recursive: true, mode: 0o700 })
-            await writeFile(path, file.contents, { mode: 0o600 })
-        }
-    }
-
-    const record = await validatePluginRoot(targetPath, 'user-home')
-    if (!record.manifest || record.status !== 'validated') {
-        const details = record.diagnostics.map((entry) => `${entry.code}: ${entry.message}`).join('; ')
-        throw new Error(`Example plugin could not be installed: ${details || targetPath}`)
-    }
-
-    return {
-        action,
-        pluginId: example.id,
-        targetPath,
-        record,
-        defaultConfig: example.defaultConfig
-    }
 }
 
 async function enableInstalledPlugin(record: DiscoveredPluginRecord, config?: Record<string, unknown>): Promise<void> {
@@ -480,50 +461,6 @@ async function runConfig(args: string[]): Promise<void> {
     await maybeReload(record.manifest.id, hasFlag(args, '--reload'), hasFlag(args, '--json'), 'Plugin config saved locally.')
 }
 
-async function runInstallExample(args: string[]): Promise<void> {
-    const json = hasFlag(args, '--json')
-    const enable = !hasFlag(args, '--no-enable')
-    const reload = hasFlag(args, '--reload')
-    const installed = await writeExamplePlugin(hasFlag(args, '--overwrite'))
-    if (enable) {
-        await enableInstalledPlugin(installed.record, installed.defaultConfig)
-    }
-
-    let reloadResult: PluginReloadResult | undefined
-    try {
-        reloadResult = await reloadRemoteOptional(installed.pluginId, reload)
-    } catch (error) {
-        if (!json) {
-            console.log(chalk.yellow(`Example plugin installed locally, but Hub reload was not applied: ${error instanceof Error ? error.message : String(error)}`))
-            console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
-        }
-    }
-
-    const payload = await buildLocalInstallResult({
-        action: installed.action,
-        pluginId: installed.pluginId,
-        targetPath: installed.targetPath,
-        record: installed.record,
-        reload: reloadResult
-    })
-    if (json) {
-        console.log(JSON.stringify(payload, null, 2))
-        return
-    }
-
-    const actionLabel = installed.action === 'unchanged' ? 'already installed' : installed.action
-    console.log(chalk.green(`Example Notification Logger ${actionLabel}.`))
-    console.log(chalk.gray(`Target: ${installed.targetPath}`))
-    if (enable) {
-        console.log(chalk.gray(`Log file: ${String(installed.defaultConfig.logFile)}`))
-    }
-    if (!reload) {
-        console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
-    } else if (reloadResult) {
-        console.log(chalk.green(reloadResult.ok ? 'Hub reload applied.' : 'Hub reload completed with issues.'))
-    }
-}
-
 async function runInstallLocal(args: string[]): Promise<void> {
     const sourcePath = args.find((arg) => !arg.startsWith('-'))
     if (!sourcePath) throw new Error('Usage: hapi plugins install-local <path> [--enable] [--reload] [--overwrite] [--json] [--yes]')
@@ -565,6 +502,67 @@ async function runInstallLocal(args: string[]): Promise<void> {
     console.log(chalk.green(`Plugin ${install.action}: ${pluginIdValue}`))
     console.log(chalk.gray(`Source: ${install.sourcePath}`))
     console.log(chalk.gray(`Target: ${install.targetPath}`))
+    if (!hasFlag(args, '--reload')) {
+        console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
+    } else if (reloadResult) {
+        console.log(chalk.green(reloadResult.ok ? 'Hub reload applied.' : 'Hub reload completed with issues.'))
+    }
+}
+
+async function runDelete(args: string[]): Promise<void> {
+    const id = args.find((arg) => !arg.startsWith('-'))
+    if (!id) throw new Error('Usage: hapi plugins delete <id> [--reload] [--json] [--yes]')
+    const json = hasFlag(args, '--json')
+    const { records } = await loadLocalRecords()
+    const record = findRecord(records, id)
+    if (!record) throw new Error(`Plugin not found: ${id}`)
+    if (record.source !== 'user-home') {
+        throw new Error(`Plugin ${id} cannot be deleted because it is from ${record.source}. Only user-home plugins can be deleted.`)
+    }
+    await confirmDelete(record, hasFlag(args, '--yes') || hasFlag(args, '-y'))
+
+    const pluginIdValue = record.manifest?.id ?? pluginId(record)
+    const [userPluginsRealPath, rootRealPath] = await Promise.all([
+        realpath(getUserPluginsDir(configuration.happyHomeDir)),
+        realpath(record.rootPath)
+    ])
+    if (!isPathInside(userPluginsRealPath, rootRealPath)) {
+        throw new Error(`Plugin ${pluginIdValue} cannot be deleted because its path is outside the user plugin directory.`)
+    }
+
+    const state = await readWritableState()
+    if (record.manifest) {
+        delete state.enabled[record.manifest.id]
+    }
+    await writePluginState(getPluginStateFile(configuration.happyHomeDir), state)
+    await rm(rootRealPath, { recursive: true, force: true })
+
+    let reloadResult: PluginReloadResult | undefined
+    try {
+        reloadResult = await reloadRemoteOptional(pluginIdValue, hasFlag(args, '--reload'))
+    } catch (error) {
+        if (!json) {
+            console.log(chalk.yellow(`Plugin deleted locally, but Hub reload was not applied: ${error instanceof Error ? error.message : String(error)}`))
+            console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
+        }
+    }
+
+    const plugins = (await loadLocalRecords()).records.map(toLocalListItem)
+    const payload: PluginDeleteResult = {
+        ok: reloadResult?.ok ?? true,
+        pluginId: pluginIdValue,
+        rootPath: rootRealPath,
+        deleted: true,
+        ...(reloadResult ? { reload: reloadResult } : {}),
+        plugins
+    }
+    if (json) {
+        console.log(JSON.stringify(payload, null, 2))
+        return
+    }
+
+    console.log(chalk.green(`Plugin deleted: ${pluginIdValue}`))
+    console.log(chalk.gray(`Removed: ${rootRealPath}`))
     if (!hasFlag(args, '--reload')) {
         console.log(chalk.gray('Run hapi plugins reload or restart hapi hub to apply.'))
     } else if (reloadResult) {
@@ -630,8 +628,8 @@ ${chalk.bold('Usage:')}
   hapi plugins disable <id> [--reload] [--yes]
   hapi plugins config get <id> [--json]
   hapi plugins config set <id> <key> <value> [--reload]
-  hapi plugins install-example [--reload] [--overwrite] [--no-enable] [--json]
   hapi plugins install-local <path> [--enable] [--reload] [--overwrite] [--json] [--yes]
+  hapi plugins delete <id> [--reload] [--json] [--yes]
   hapi plugins reload [id] [--json]
   hapi plugins doctor [id] [--json]
 `)
@@ -649,8 +647,8 @@ export async function handlePluginsCommand(args: string[]): Promise<void> {
     if (subcommand === 'enable') return await runEnable(rest)
     if (subcommand === 'disable') return await runDisable(rest)
     if (subcommand === 'config') return await runConfig(rest)
-    if (subcommand === 'install-example') return await runInstallExample(rest)
     if (subcommand === 'install-local' || subcommand === 'install') return await runInstallLocal(rest)
+    if (subcommand === 'delete' || subcommand === 'remove' || subcommand === 'uninstall') return await runDelete(rest)
     if (subcommand === 'reload') return await runReload(rest)
     if (subcommand === 'doctor') return await runDoctor(rest)
     throw new Error(`Unknown plugins subcommand: ${subcommand}`)

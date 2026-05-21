@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
-import type { PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
 import { createPluginsRoutes } from './plugins'
@@ -46,6 +46,17 @@ function installResult(action: PluginInstallResult['action'] = 'installed'): Plu
         diagnostics: [],
         plugins: [plugin],
         reload: reloadResult('activated')
+    }
+}
+
+function deleteResult(): PluginDeleteResult {
+    return {
+        ok: true,
+        pluginId: plugin.id,
+        rootPath: plugin.rootPath,
+        deleted: true,
+        plugins: [],
+        reload: reloadResult('deactivated')
     }
 }
 
@@ -95,8 +106,9 @@ describe('plugin admin routes', () => {
             enablePlugin: async (id: string) => { calls.push(`enable:${id}`); return reloadResult('activated') },
             disablePlugin: async (id: string) => { calls.push(`disable:${id}`); return reloadResult('deactivated') },
             reload: async (id?: string) => { calls.push(`reload:${id ?? '*'}`); return reloadResult('unchanged') },
-            installExamplePlugin: async () => { calls.push('install-example'); return installResult('installed') },
-            installLocalPlugin: async (sourcePath: string) => { calls.push(`install-local:${sourcePath}`); return installResult('installed') }
+            installLocalPlugin: async (sourcePath: string) => { calls.push(`install-local:${sourcePath}`); return installResult('installed') },
+            listLocalDirectory: async (path?: string) => { calls.push(`local-directory:${path ?? ''}`); return { success: true, path: path ?? '/tmp', entries: [] } },
+            deletePlugin: async (id: string) => { calls.push(`delete:${id}`); return deleteResult() }
         } as never)
         const auth = await token()
         const headers = { authorization: `Bearer ${auth}`, 'content-type': 'application/json' }
@@ -113,8 +125,10 @@ describe('plugin admin routes', () => {
         expect((await app.request('/api/plugins/com.example.plugin/disable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin/reload', { method: 'POST', headers })).status).toBe(200)
         expect((await app.request('/api/plugins/reload', { method: 'POST', headers })).status).toBe(200)
-        expect((await app.request('/api/plugins/install-example', { method: 'POST', headers, body: JSON.stringify({ enable: true }) })).status).toBe(200)
         expect((await app.request('/api/plugins/install-local', { method: 'POST', headers, body: JSON.stringify({ sourcePath: '/tmp/plugin' }) })).status).toBe(200)
+        expect((await app.request('/api/plugins/local-directory', { method: 'POST', headers, body: JSON.stringify({ path: '/tmp' }) })).status).toBe(200)
+        expect((await app.request('/api/plugins/com.example.plugin', { method: 'DELETE', headers })).status).toBe(200)
+        expect((await app.request('/api/plugins/install-example', { method: 'POST', headers, body: JSON.stringify({ enable: true }) })).status).toBe(404)
         const invalidInstall = await app.request('/api/plugins/install-local', {
             method: 'POST',
             headers,
@@ -127,8 +141,9 @@ describe('plugin admin routes', () => {
             'disable:com.example.plugin',
             'reload:com.example.plugin',
             'reload:*',
-            'install-example',
-            'install-local:/tmp/plugin'
+            'install-local:/tmp/plugin',
+            'local-directory:/tmp',
+            'delete:com.example.plugin'
         ])
     })
 

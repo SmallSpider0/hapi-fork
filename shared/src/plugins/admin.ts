@@ -108,13 +108,6 @@ export type PluginReloadResult = z.infer<typeof PluginReloadResultSchema>
 export const PluginInstallActionSchema = z.enum(['installed', 'overwritten', 'unchanged'])
 export type PluginInstallAction = z.infer<typeof PluginInstallActionSchema>
 
-export const PluginInstallExampleRequestSchema = z.object({
-    enable: z.boolean().optional(),
-    reload: z.boolean().optional(),
-    overwrite: z.boolean().optional()
-}).strict()
-export type PluginInstallExampleRequest = z.infer<typeof PluginInstallExampleRequestSchema>
-
 export const PluginInstallLocalRequestSchema = z.object({
     sourcePath: z.string().min(1),
     enable: z.boolean().optional(),
@@ -135,6 +128,40 @@ export const PluginInstallResultSchema = z.object({
     plugins: z.array(PluginListItemSchema)
 }).strict()
 export type PluginInstallResult = z.infer<typeof PluginInstallResultSchema>
+
+export const PluginDeleteResultSchema = z.object({
+    ok: z.boolean(),
+    pluginId: z.string().min(1),
+    rootPath: z.string().min(1),
+    deleted: z.boolean(),
+    reload: PluginReloadResultSchema.optional(),
+    plugins: z.array(PluginListItemSchema)
+}).strict()
+export type PluginDeleteResult = z.infer<typeof PluginDeleteResultSchema>
+
+export const PluginLocalDirectoryListRequestSchema = z.object({
+    path: z.string().optional()
+}).strict()
+export type PluginLocalDirectoryListRequest = z.infer<typeof PluginLocalDirectoryListRequestSchema>
+
+export const PluginLocalDirectoryEntrySchema = z.object({
+    name: z.string().min(1),
+    type: z.enum(['file', 'directory', 'other']),
+    size: z.number().optional(),
+    modified: z.number().optional(),
+    hasPluginManifest: z.boolean().optional()
+}).strict()
+export type PluginLocalDirectoryEntry = z.infer<typeof PluginLocalDirectoryEntrySchema>
+
+export const PluginLocalDirectoryListResponseSchema = z.object({
+    success: z.boolean(),
+    path: z.string().optional(),
+    parentPath: z.string().optional(),
+    hasPluginManifest: z.boolean().optional(),
+    entries: z.array(PluginLocalDirectoryEntrySchema).optional(),
+    error: z.string().optional()
+}).strict()
+export type PluginLocalDirectoryListResponse = z.infer<typeof PluginLocalDirectoryListResponseSchema>
 
 export const PluginEnableRequestSchema = z.object({
     config: z.record(z.string(), z.unknown()).optional(),

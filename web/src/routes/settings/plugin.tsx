@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react'
-import { useParams } from '@tanstack/react-router'
+import { useNavigate, useParams } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugin } from '@/hooks/queries/usePlugin'
@@ -177,6 +177,7 @@ export default function PluginPage() {
     const { pluginId } = useParams({ from: '/settings/plugins/$pluginId' })
     const { api } = useAppContext()
     const goBack = useAppGoBack()
+    const navigate = useNavigate()
     const { t } = useTranslation()
     const { plugin, isLoading, error } = usePlugin(api, pluginId)
     const actions = usePluginActions(api)
@@ -185,6 +186,7 @@ export default function PluginPage() {
     const [result, setResult] = useState<ResultState>(null)
     const [configError, setConfigError] = useState<string | null>(null)
     const [enableDialogOpen, setEnableDialogOpen] = useState(false)
+    const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
     useEffect(() => {
         const next = formatConfig(plugin?.config ?? {})
@@ -196,6 +198,7 @@ export default function PluginPage() {
     const dirtyConfig = configText !== initialConfigText
     const issueCount = useMemo(() => plugin?.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length ?? 0, [plugin])
     const canEnablePlugin = plugin ? !['invalid', 'incompatible', 'blocked'].includes(plugin.status) : false
+    const canDeletePlugin = plugin?.source === 'user-home'
 
     const showReloadResult = (title: string, reloadResult: PluginReloadResult) => {
         setResult({
@@ -228,6 +231,12 @@ export default function PluginPage() {
     const reload = async () => {
         if (!plugin) return
         await runAction(t('settings.plugins.action.reload'), async () => await actions.reloadPlugin(plugin.id))
+    }
+
+    const deletePlugin = async () => {
+        if (!plugin) return
+        await actions.deletePlugin(plugin.id)
+        navigate({ to: '/settings/plugins', replace: true })
     }
 
     const saveConfig = async () => {
@@ -306,8 +315,10 @@ export default function PluginPage() {
                                         <Button type="button" disabled={actions.isPending || !canEnablePlugin} onClick={() => setEnableDialogOpen(true)}>{t('settings.plugins.action.enable')}</Button>
                                     )}
                                     <Button type="button" variant="outline" disabled={actions.isPending} onClick={() => void reload()}>{plugin.status === 'reload-failed' ? t('settings.plugins.action.retryReload') : t('settings.plugins.action.reload')}</Button>
+                                    <Button type="button" variant="destructive" disabled={actions.isPending || !canDeletePlugin} onClick={() => setDeleteDialogOpen(true)}>{t('settings.plugins.action.delete')}</Button>
                                 </div>
                                 {!plugin.enabled && !canEnablePlugin ? <div className="mt-2 text-sm text-[var(--app-hint)]">{t('settings.plugins.action.cannotEnableStatus', { status: t(`settings.plugins.status.${plugin.status}`) })}</div> : null}
+                                {!canDeletePlugin ? <div className="mt-2 text-sm text-[var(--app-hint)]">{t('settings.plugins.action.cannotDeleteSource', { source: sourceLabel(t, plugin.source) })}</div> : null}
                             </SectionCard>
 
                             <SectionCard title={t('settings.plugins.detail.overview')}>
@@ -395,6 +406,17 @@ export default function PluginPage() {
                                 confirmingLabel={t('settings.plugins.confirm.enable.confirming')}
                                 onConfirm={enable}
                                 isPending={actions.isPending}
+                            />
+                            <ConfirmDialog
+                                isOpen={deleteDialogOpen}
+                                onClose={() => setDeleteDialogOpen(false)}
+                                title={t('settings.plugins.confirm.delete.title')}
+                                description={t('settings.plugins.confirm.delete.description', { id: plugin.id, path: plugin.rootPath })}
+                                confirmLabel={t('settings.plugins.confirm.delete.confirm')}
+                                confirmingLabel={t('settings.plugins.confirm.delete.confirming')}
+                                onConfirm={deletePlugin}
+                                isPending={actions.isPending}
+                                destructive
                             />
                         </>
                     ) : null}

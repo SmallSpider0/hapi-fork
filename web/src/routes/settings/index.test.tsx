@@ -167,18 +167,9 @@ describe('SettingsPage', () => {
     })
 
 
-    it('renders the Plugins entry', () => {
+    it('does not render the Plugins entry inside Settings', () => {
         renderWithProviders(<SettingsPage />)
-        expect(screen.getAllByText('Plugins').length).toBeGreaterThanOrEqual(1)
-        expect(screen.getAllByText('Manage plugins').length).toBeGreaterThanOrEqual(1)
-    })
-
-    it('uses correct i18n keys for Plugins entry', () => {
-        const spyT = renderWithSpyT(<SettingsPage />)
-        const calledKeys = spyT.mock.calls.map((call) => call[0])
-        expect(calledKeys).toContain('settings.plugins.title')
-        expect(calledKeys).toContain('settings.plugins.manage')
-        expect(calledKeys).toContain('settings.plugins.subtitle')
+        expect(screen.queryByText('Manage plugins')).toBeNull()
     })
 
     it('renders the Appearance setting', () => {

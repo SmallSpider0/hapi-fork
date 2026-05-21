@@ -1,13 +1,15 @@
 import { Hono, type Context } from 'hono'
 import {
     PluginConfigUpdateRequestSchema,
+    PluginDeleteResultSchema,
     PluginDisableRequestSchema,
     PluginEnableRequestSchema,
     PluginDetailResponseSchema,
     PluginDiagnosticsResponseSchema,
-    PluginInstallExampleRequestSchema,
     PluginInstallLocalRequestSchema,
     PluginInstallResultSchema,
+    PluginLocalDirectoryListRequestSchema,
+    PluginLocalDirectoryListResponseSchema,
     PluginListResponseSchema,
     PluginReloadResultSchema
 } from '@hapi/protocol/plugins/admin'
@@ -28,6 +30,9 @@ function errorStatus(error: unknown): 400 | 404 | 409 | 500 {
     }
     if (message.includes('plugins.json') || message.includes('must not store declared secret')) {
         return 409
+    }
+    if (message.includes('cannot be deleted')) {
+        return 400
     }
     return 500
 }
@@ -74,24 +79,6 @@ export function createPluginsRoutes(getPluginManager: () => HubPluginManager | n
         return c.json(PluginReloadResultSchema.parse(result))
     })
 
-    app.post('/plugins/install-example', async (c) => {
-        const manager = requirePluginManager(c, getPluginManager)
-        if (manager instanceof Response) {
-            return manager
-        }
-        const json = await c.req.json().catch(() => ({}))
-        const parsed = PluginInstallExampleRequestSchema.safeParse(json ?? {})
-        if (!parsed.success) {
-            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
-        }
-        try {
-            const result = await manager.installExamplePlugin(parsed.data)
-            return c.json(PluginInstallResultSchema.parse(result))
-        } catch (error) {
-            return c.json({ error: errorMessage(error) }, errorStatus(error))
-        }
-    })
-
     app.post('/plugins/install-local', async (c) => {
         const manager = requirePluginManager(c, getPluginManager)
         if (manager instanceof Response) {
@@ -108,6 +95,20 @@ export function createPluginsRoutes(getPluginManager: () => HubPluginManager | n
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
         }
+    })
+
+    app.post('/plugins/local-directory', async (c) => {
+        const manager = requirePluginManager(c, getPluginManager)
+        if (manager instanceof Response) {
+            return manager
+        }
+        const json = await c.req.json().catch(() => ({}))
+        const parsed = PluginLocalDirectoryListRequestSchema.safeParse(json ?? {})
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
+        }
+        const result = await manager.listLocalDirectory(parsed.data.path)
+        return c.json(PluginLocalDirectoryListResponseSchema.parse(result))
     })
 
     app.get('/plugins/:id', (c) => {
@@ -162,6 +163,19 @@ export function createPluginsRoutes(getPluginManager: () => HubPluginManager | n
         try {
             const result = await manager.disablePlugin(c.req.param('id'), parsed.data.reload !== false)
             return c.json(PluginReloadResultSchema.parse(result))
+        } catch (error) {
+            return c.json({ error: errorMessage(error) }, errorStatus(error))
+        }
+    })
+
+    app.delete('/plugins/:id', async (c) => {
+        const manager = requirePluginManager(c, getPluginManager)
+        if (manager instanceof Response) {
+            return manager
+        }
+        try {
+            const result = await manager.deletePlugin(c.req.param('id'))
+            return c.json(PluginDeleteResultSchema.parse(result))
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
         }
