@@ -73,6 +73,18 @@ function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
 }
 
+function pluginTargetLabel(plugin: PluginListItem): string {
+    if (!plugin.target) return 'Local'
+    if (plugin.target.scope === 'hub') return 'Hub'
+    if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
+    return plugin.target.scope
+}
+
+function pluginRuntimeLabel(plugin: PluginListItem): string {
+    const runtimes = Object.keys(plugin.runtimes)
+    return runtimes.length > 0 ? runtimes.join(' + ') : 'No runtime'
+}
+
 function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }) {
     return <Badge variant={props.variant ?? 'default'} className="gap-1 font-medium">{props.icon}{props.label}</Badge>
 }
@@ -148,6 +160,8 @@ function PluginCard(props: {
                 </div>
                 {plugin.description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{plugin.description}</div> : null}
                 <div className="flex flex-wrap gap-1.5">
+                    <Chip label={pluginTargetLabel(plugin)} variant={plugin.target?.active === false ? 'warning' : 'default'} />
+                    <Chip label={pluginRuntimeLabel(plugin)} />
                     <Chip icon={<PowerIcon />} label={plugin.enabled ? t('settings.plugins.state.enabled') : t('settings.plugins.state.disabled')} variant={plugin.enabled ? 'success' : 'default'} />
                     <Chip icon={<ActivityIcon />} label={plugin.active ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')} variant={plugin.active ? 'success' : 'default'} />
                     <Chip icon={<FolderIcon />} label={sourceLabel(t, plugin.source)} />
@@ -508,10 +522,10 @@ export default function PluginsPage() {
                     <div className="space-y-2">
                         {filtered.map((plugin) => (
                             <PluginCard
-                                key={`${plugin.id}-${plugin.manifestPath}`}
+                                key={`${plugin.target?.scope ?? 'local'}-${plugin.id}-${plugin.manifestPath}`}
                                 plugin={plugin}
                                 t={t}
-                                onClick={() => navigate({ to: '/settings/plugins/$pluginId', params: { pluginId: plugin.id } })}
+                                onClick={() => navigate({ to: '/settings/plugins/$pluginId', params: { pluginId: plugin.id }, search: plugin.target?.scope ? { target: plugin.target.scope } : {} })}
                             />
                         ))}
                     </div>

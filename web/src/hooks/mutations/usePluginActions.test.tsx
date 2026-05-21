@@ -68,14 +68,14 @@ describe('usePluginActions', () => {
         })
 
         await waitFor(() => {
-            expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugins })
+            expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugins() })
         })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.pluginDiagnostics })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.example.plugin') })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.installed.plugin') })
-        expect(api.enablePlugin).toHaveBeenCalledWith('com.example.plugin', undefined)
+        expect(api.enablePlugin).toHaveBeenCalledWith('com.example.plugin', undefined, undefined)
         expect(api.installLocalPlugin).toHaveBeenCalledWith({ sourcePath: '/tmp/plugin', enable: true, reload: true })
-        expect(api.deletePlugin).toHaveBeenCalledWith('com.example.plugin')
+        expect(api.deletePlugin).toHaveBeenCalledWith('com.example.plugin', undefined)
     })
 
     it('surfaces API errors so plugin pages can show error results', async () => {

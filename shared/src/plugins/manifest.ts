@@ -3,6 +3,9 @@ import { z } from 'zod'
 export const HAPI_PLUGIN_MANIFEST_FILE = 'hapi.plugin.json'
 export const HAPI_PLUGIN_API_VERSION = '0.1'
 
+export const PluginRuntimeNameSchema = z.enum(['hub', 'runner'])
+export type PluginRuntimeName = z.infer<typeof PluginRuntimeNameSchema>
+
 const PluginIdSchema = z.string()
     .min(1)
     .max(128)
@@ -16,13 +19,40 @@ const ContributionIdSchema = z.string()
     .max(128)
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must start with an alphanumeric character and contain only alphanumeric characters, dots, underscores, or dashes')
 
-const HubRuntimeSchema = z.object({
+const RuntimeEntrySchema = z.object({
     entry: z.string().min(1)
 }).strict()
+
+const HubRuntimeSchema = RuntimeEntrySchema
+const RunnerRuntimeSchema = RuntimeEntrySchema
 
 const HubNotificationChannelContributionSchema = z.object({
     id: ContributionIdSchema,
     displayName: z.string().min(1)
+}).strict()
+
+const GenericContributionDescriptorSchema = z.object({
+    id: ContributionIdSchema,
+    displayName: z.string().min(1).optional(),
+    description: z.string().optional()
+}).passthrough()
+
+const RunnerContributionSchema = z.object({
+    environmentProviders: z.array(GenericContributionDescriptorSchema).optional(),
+    commandResolvers: z.array(GenericContributionDescriptorSchema).optional(),
+    spawnHooks: z.array(GenericContributionDescriptorSchema).optional()
+}).strict()
+
+const AgentContributionSchema = z.object({
+    adapters: z.array(GenericContributionDescriptorSchema).optional(),
+    capabilityProviders: z.array(GenericContributionDescriptorSchema).optional()
+}).strict()
+
+const WebContributionSchema = z.object({
+    settingsPanels: z.array(GenericContributionDescriptorSchema).optional(),
+    newSessionFields: z.array(GenericContributionDescriptorSchema).optional(),
+    actions: z.array(GenericContributionDescriptorSchema).optional(),
+    badges: z.array(GenericContributionDescriptorSchema).optional()
 }).strict()
 
 const PluginManifestLiteBaseSchema = z.object({
@@ -32,12 +62,16 @@ const PluginManifestLiteBaseSchema = z.object({
     pluginApiVersion: z.string().min(1),
     description: z.string().optional(),
     runtimes: z.object({
-        hub: HubRuntimeSchema.optional()
+        hub: HubRuntimeSchema.optional(),
+        runner: RunnerRuntimeSchema.optional()
     }).strict().optional(),
     contributions: z.object({
         hub: z.object({
             notificationChannels: z.array(HubNotificationChannelContributionSchema).optional()
-        }).strict().optional()
+        }).strict().optional(),
+        runner: RunnerContributionSchema.optional(),
+        agent: AgentContributionSchema.optional(),
+        web: WebContributionSchema.optional()
     }).strict().optional(),
     config: z.object({
         schema: z.string().min(1).optional()

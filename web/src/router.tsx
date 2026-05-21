@@ -734,6 +734,12 @@ const settingsPluginsRoute = createRoute({
 const settingsPluginRoute = createRoute({
     getParentRoute: () => rootRoute,
     path: '/settings/plugins/$pluginId',
+    validateSearch: (search: Record<string, unknown>): { target?: string } => {
+        if (typeof search.target === 'string' && search.target) {
+            return { target: search.target }
+        }
+        return {}
+    },
     component: PluginPage,
 })
 

@@ -1,10 +1,16 @@
 import { configuration } from '@/configuration'
 import { buildHubRequestHeaders } from './hubExtraHeaders'
-import type { PluginListResponse, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginListResponse, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 async function readError(response: Response): Promise<string> {
     const body = await response.text().catch(() => '')
     return body || `${response.status} ${response.statusText}`
+}
+
+function withTargetQuery(path: string, target?: PluginTargetScope): string {
+    if (!target) return path
+    const separator = path.includes('?') ? '&' : '?'
+    return `${path}${separator}target=${encodeURIComponent(target)}`
 }
 
 function buildUrl(path: string): string {
@@ -37,18 +43,18 @@ export async function getPluginAdminJwt(accessToken: string, timeoutMs = 5000): 
     return response.token
 }
 
-export async function getRemotePlugins(accessToken: string, timeoutMs = 5000): Promise<PluginListResponse> {
+export async function getRemotePlugins(accessToken: string, timeoutMs = 5000, target?: PluginTargetScope): Promise<PluginListResponse> {
     const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
-    return await fetchJson<PluginListResponse>('/api/plugins', {
+    return await fetchJson<PluginListResponse>(withTargetQuery('/api/plugins', target), {
         method: 'GET',
         headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
     }, timeoutMs)
 }
 
-export async function reloadRemotePlugins(accessToken: string, pluginId?: string, timeoutMs = 5000): Promise<PluginReloadResult> {
+export async function reloadRemotePlugins(accessToken: string, pluginId?: string, timeoutMs = 5000, target?: PluginTargetScope): Promise<PluginReloadResult> {
     const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
     const path = pluginId ? `/api/plugins/${encodeURIComponent(pluginId)}/reload` : '/api/plugins/reload'
-    return await fetchJson<PluginReloadResult>(path, {
+    return await fetchJson<PluginReloadResult>(withTargetQuery(path, target), {
         method: 'POST',
         headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
     }, timeoutMs)

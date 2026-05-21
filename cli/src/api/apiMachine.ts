@@ -11,6 +11,22 @@ import { configuration } from '@/configuration'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
+import {
+    PluginDeleteResultSchema,
+    PluginDetailResponseSchema,
+    PluginReloadResultSchema,
+    RunnerPluginInventorySchema,
+    RunnerPluginsConfigUpdateRequestSchema,
+    RunnerPluginsDeleteRequestSchema,
+    RunnerPluginsDisableRequestSchema,
+    RunnerPluginsEnableRequestSchema,
+    RunnerPluginsInspectRequestSchema,
+    RunnerPluginsInstallCommitRequestSchema,
+    RunnerPluginsInstallPrepareRequestSchema,
+    RunnerPluginsListRequestSchema,
+    RunnerPluginsReloadRequestSchema,
+    RunnerPluginUnsupportedInstallResultSchema
+} from '@hapi/protocol/plugins/admin'
 import type { RunnerState, Machine, MachineMetadata } from './types'
 import { RunnerStateSchema, MachineMetadataSchema } from './types'
 import { backoff } from '@/utils/time'
@@ -23,6 +39,7 @@ import {
     type ListOpencodeModelsForCwdResponse
 } from '../modules/common/opencodeModels'
 import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
+import type { RunnerPluginManager } from '@/runner/plugins/runnerPluginManager'
 import { applyVersionedAck } from './versionedUpdate'
 import { buildSocketIoExtraHeaderOptions } from './hubExtraHeaders'
 
@@ -304,6 +321,77 @@ export class ApiMachineClient {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.StopRunner, () => {
             setTimeout(() => requestShutdown(), 100)
             return { message: 'Runner stop request acknowledged' }
+        })
+    }
+
+
+    registerRunnerPluginHandlers(manager: RunnerPluginManager): void {
+        const publishInventory = async (): Promise<void> => {
+            await this.updateRunnerState((state: RunnerState | null) => ({
+                ...(state ?? {}),
+                status: state?.status ?? 'running',
+                pid: state?.pid ?? process.pid,
+                pluginInventory: manager.getInventory()
+            }))
+        }
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsList, async (params: unknown) => {
+            RunnerPluginsListRequestSchema.parse(params ?? {})
+            return RunnerPluginInventorySchema.parse(manager.getInventory())
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInspect, async (params: unknown) => {
+            const request = RunnerPluginsInspectRequestSchema.parse(params)
+            const plugin = manager.getPlugin(request.pluginId)
+            if (!plugin) {
+                throw new Error(`Plugin ${request.pluginId} was not found.`)
+            }
+            return PluginDetailResponseSchema.parse({ plugin })
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsEnable, async (params: unknown) => {
+            const request = RunnerPluginsEnableRequestSchema.parse(params)
+            const result = await manager.enablePlugin(request.pluginId, request.config, request.reload !== false)
+            await publishInventory()
+            return PluginReloadResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsDisable, async (params: unknown) => {
+            const request = RunnerPluginsDisableRequestSchema.parse(params)
+            const result = await manager.disablePlugin(request.pluginId, request.reload !== false)
+            await publishInventory()
+            return PluginReloadResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsConfigUpdate, async (params: unknown) => {
+            const request = RunnerPluginsConfigUpdateRequestSchema.parse(params)
+            const result = await manager.updatePluginConfig(request.pluginId, request.config)
+            await publishInventory()
+            return PluginReloadResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsReload, async (params: unknown) => {
+            const request = RunnerPluginsReloadRequestSchema.parse(params ?? {})
+            const result = await manager.reload(request.pluginId)
+            await publishInventory()
+            return PluginReloadResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInstallPrepare, (params: unknown) => {
+            RunnerPluginsInstallPrepareRequestSchema.parse(params ?? {})
+            return RunnerPluginUnsupportedInstallResultSchema.parse(manager.installPrepareUnsupported())
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInstallCommit, (params: unknown) => {
+            RunnerPluginsInstallCommitRequestSchema.parse(params ?? {})
+            return RunnerPluginUnsupportedInstallResultSchema.parse(manager.installCommitUnsupported())
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsDelete, async (params: unknown) => {
+            const request = RunnerPluginsDeleteRequestSchema.parse(params)
+            const result = await manager.deletePlugin(request.pluginId, request.reload !== false)
+            await publishInventory()
+            return PluginDeleteResultSchema.parse(result)
         })
     }
 

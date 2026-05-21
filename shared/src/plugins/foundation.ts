@@ -8,7 +8,8 @@ import {
     HAPI_PLUGIN_MANIFEST_FILE,
     PluginManifestLiteSchema,
     RawPluginManifestLiteSchema,
-    type PluginManifestLite
+    type PluginManifestLite,
+    type PluginRuntimeName
 } from './manifest'
 import { PluginStateFileSchema, type PluginStateFile } from './state'
 import type { PluginDiagnostic, PluginDiagnosticSeverity, PluginStatus } from './types'
@@ -23,7 +24,7 @@ export interface PluginSearchRoot {
 }
 
 export interface PluginRuntimeEntryPath {
-    runtime: 'hub'
+    runtime: PluginRuntimeName
     entry: string
     resolvedPath: string
     realPath: string
@@ -185,18 +186,19 @@ async function candidatePluginRoots(searchRoot: PluginSearchRoot): Promise<strin
     }
 }
 
-async function validateHubEntryPath(pluginRoot: string, entry: string, manifestPath: string): Promise<{
+async function validateRuntimeEntryPath(runtime: PluginRuntimeName, pluginRoot: string, entry: string, manifestPath: string): Promise<{
     entryPath?: PluginRuntimeEntryPath
     diagnostics: PluginDiagnostic[]
 }> {
+    const runtimeLabel = runtime === 'hub' ? 'Hub' : 'Runner'
     if (isAbsolute(entry)) {
-        return { diagnostics: [diagnostic('entry-path-absolute', 'Hub runtime entry must be a relative path.', 'error', manifestPath)] }
+        return { diagnostics: [diagnostic('entry-path-absolute', `${runtimeLabel} runtime entry must be a relative path.`, 'error', manifestPath)] }
     }
 
     const rootResolved = resolve(pluginRoot)
     const entryResolved = resolve(rootResolved, entry)
     if (!isPathInside(rootResolved, entryResolved)) {
-        return { diagnostics: [diagnostic('entry-path-escape', 'Hub runtime entry must stay under the plugin root.', 'error', manifestPath)] }
+        return { diagnostics: [diagnostic('entry-path-escape', `${runtimeLabel} runtime entry must stay under the plugin root.`, 'error', manifestPath)] }
     }
 
     try {
@@ -206,12 +208,12 @@ async function validateHubEntryPath(pluginRoot: string, entry: string, manifestP
         ])
 
         if (!isPathInside(rootRealPath, entryRealPath)) {
-            return { diagnostics: [diagnostic('entry-symlink-escape', 'Hub runtime entry realpath must stay under the plugin root.', 'error', manifestPath)] }
+            return { diagnostics: [diagnostic('entry-symlink-escape', `${runtimeLabel} runtime entry realpath must stay under the plugin root.`, 'error', manifestPath)] }
         }
 
         return {
             entryPath: {
-                runtime: 'hub',
+                runtime,
                 entry,
                 resolvedPath: entryResolved,
                 realPath: entryRealPath
@@ -222,13 +224,14 @@ async function validateHubEntryPath(pluginRoot: string, entry: string, manifestP
         return {
             diagnostics: [diagnostic(
                 'entry-path-missing',
-                `Hub runtime entry could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
+                `${runtimeLabel} runtime entry could not be resolved: ${error instanceof Error ? error.message : String(error)}`,
                 'error',
                 manifestPath
             )]
         }
     }
 }
+
 
 export async function validatePluginRoot(pluginRoot: string, source: PluginSource = 'user-home'): Promise<DiscoveredPluginRecord> {
     const rootPath = resolve(expandHomePath(pluginRoot))
@@ -307,12 +310,16 @@ export async function validatePluginRoot(pluginRoot: string, source: PluginSourc
 
     const runtimeEntryPaths: PluginRuntimeEntryPath[] = []
     const diagnostics: PluginDiagnostic[] = []
-    const hubEntry = parsed.data.runtimes?.hub?.entry
-    if (hubEntry) {
-        const hubEntryResult = await validateHubEntryPath(rootPath, hubEntry, manifestPath)
-        diagnostics.push(...hubEntryResult.diagnostics)
-        if (hubEntryResult.entryPath) {
-            runtimeEntryPaths.push(hubEntryResult.entryPath)
+    const runtimeEntries: Array<{ runtime: PluginRuntimeName; entry?: string }> = [
+        { runtime: 'hub', entry: parsed.data.runtimes?.hub?.entry },
+        { runtime: 'runner', entry: parsed.data.runtimes?.runner?.entry }
+    ]
+    for (const runtimeEntry of runtimeEntries) {
+        if (!runtimeEntry.entry) continue
+        const entryResult = await validateRuntimeEntryPath(runtimeEntry.runtime, rootPath, runtimeEntry.entry, manifestPath)
+        diagnostics.push(...entryResult.diagnostics)
+        if (entryResult.entryPath) {
+            runtimeEntryPaths.push(entryResult.entryPath)
         }
     }
 

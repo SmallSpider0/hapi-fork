@@ -9,6 +9,7 @@
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { SlashCommandsResponse } from '@hapi/protocol/apiTypes'
+import type { PluginDeleteResult, PluginDetailResponse, PluginReloadResult, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -903,6 +904,43 @@ export class SyncEngine {
 
     async listCodexModelsForMachine(machineId: string): Promise<RpcListCodexModelsResponse> {
         return await this.rpcGateway.listCodexModelsForMachine(machineId)
+    }
+
+
+    async listRunnerPlugins(machineId: string): Promise<RunnerPluginInventory> {
+        return await this.rpcGateway.listRunnerPlugins(machineId)
+    }
+
+    async inspectRunnerPlugin(machineId: string, pluginId: string): Promise<PluginDetailResponse> {
+        return await this.rpcGateway.inspectRunnerPlugin(machineId, pluginId)
+    }
+
+    async enableRunnerPlugin(machineId: string, pluginId: string, config?: Record<string, unknown>, reload = true): Promise<PluginReloadResult> {
+        return await this.rpcGateway.enableRunnerPlugin(machineId, pluginId, config, reload)
+    }
+
+    async disableRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginReloadResult> {
+        return await this.rpcGateway.disableRunnerPlugin(machineId, pluginId, reload)
+    }
+
+    async updateRunnerPluginConfig(machineId: string, pluginId: string, config: Record<string, unknown>): Promise<PluginReloadResult> {
+        return await this.rpcGateway.updateRunnerPluginConfig(machineId, pluginId, config)
+    }
+
+    async reloadRunnerPlugins(machineId: string, pluginId?: string): Promise<PluginReloadResult> {
+        return await this.rpcGateway.reloadRunnerPlugins(machineId, pluginId)
+    }
+
+    async prepareRunnerPluginInstall(machineId: string, payload: unknown = {}): Promise<RunnerPluginUnsupportedInstallResult> {
+        return await this.rpcGateway.prepareRunnerPluginInstall(machineId, payload)
+    }
+
+    async commitRunnerPluginInstall(machineId: string, payload: unknown = {}): Promise<RunnerPluginUnsupportedInstallResult> {
+        return await this.rpcGateway.commitRunnerPluginInstall(machineId, payload)
+    }
+
+    async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {
+        return await this.rpcGateway.deleteRunnerPlugin(machineId, pluginId, reload)
     }
 
     async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {

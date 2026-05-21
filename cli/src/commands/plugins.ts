@@ -20,8 +20,8 @@ import {
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { assertPluginConfigSafeForPersistence, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
-import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile } from '@hapi/protocol/plugins'
+import { assertPluginConfigSafeForPersistence, PluginTargetScopeSchema, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
 
 function hasFlag(args: string[], flag: string): boolean {
     return args.includes(flag)
@@ -30,6 +30,27 @@ function hasFlag(args: string[], flag: string): boolean {
 function valueAfter(args: string[], flag: string): string | undefined {
     const index = args.indexOf(flag)
     return index >= 0 ? args[index + 1] : undefined
+}
+
+function positionalArgs(args: string[], flagsWithValues: string[] = []): string[] {
+    const values: string[] = []
+    for (let index = 0; index < args.length; index += 1) {
+        const arg = args[index]
+        if (flagsWithValues.includes(arg)) {
+            index += 1
+            continue
+        }
+        if (!arg.startsWith('-')) {
+            values.push(arg)
+        }
+    }
+    return values
+}
+
+function parseTargetArg(args: string[]): PluginTargetScope | undefined {
+    const raw = valueAfter(args, '--target')
+    if (!raw) return undefined
+    return PluginTargetScopeSchema.parse(raw)
 }
 
 function pluginId(record: DiscoveredPluginRecord): string {
@@ -63,13 +84,15 @@ function toLocalListItem(record: DiscoveredPluginRecord): PluginListItem {
         rootPath: record.rootPath,
         manifestPath: record.manifestPath,
         runtimes: {
-            ...(record.manifest?.runtimes?.hub ? { hub: { entry: record.manifest.runtimes.hub.entry, active: false } } : {})
+            ...(record.manifest?.runtimes?.hub ? { hub: { entry: record.manifest.runtimes.hub.entry, active: false } } : {}),
+            ...(record.manifest?.runtimes?.runner ? { runner: { entry: record.manifest.runtimes.runner.entry, active: false } } : {})
         },
+        target: { scope: 'hub', runtime: 'hub', active: false, stale: true, displayName: 'Local Hub files' },
         diagnostics: record.diagnostics.map((diagnostic) => ({ ...diagnostic, pluginId: id }))
     }
 }
 
-async function tryRemoteList(): Promise<PluginListResponse | null> {
+async function tryRemoteList(target?: PluginTargetScope): Promise<PluginListResponse | null> {
     try {
         await initializeApiUrl()
         if (!configuration.cliApiToken) {
@@ -81,15 +104,28 @@ async function tryRemoteList(): Promise<PluginListResponse | null> {
         if (!configuration.cliApiToken) {
             return null
         }
-        return await getRemotePlugins(configuration.cliApiToken, 2000)
+        return await getRemotePlugins(configuration.cliApiToken, 2000, target)
     } catch {
         return null
     }
 }
 
+function targetLabel(plugin: PluginListItem): string {
+    if (!plugin.target) return 'local'
+    if (plugin.target.scope === 'hub') return 'hub'
+    return plugin.target.machineId ? `runner:${plugin.target.machineId}` : plugin.target.scope
+}
+
+function runtimeLabel(plugin: PluginListItem): string {
+    const runtimes = Object.keys(plugin.runtimes)
+    return runtimes.length ? runtimes.join(',') : '-'
+}
+
 function printTable(plugins: PluginListItem[]): void {
     const rows = plugins.map((plugin) => ({
         id: plugin.id,
+        target: targetLabel(plugin),
+        runtime: runtimeLabel(plugin),
         status: plugin.status,
         enabled: plugin.enabled ? 'yes' : 'no',
         active: plugin.active ? 'yes' : 'no',
@@ -98,14 +134,16 @@ function printTable(plugins: PluginListItem[]): void {
     }))
     const widths = {
         id: Math.max(2, ...rows.map((row) => row.id.length)),
+        target: Math.max(6, ...rows.map((row) => row.target.length)),
+        runtime: Math.max(7, ...rows.map((row) => row.runtime.length)),
         status: Math.max(6, ...rows.map((row) => row.status.length)),
         enabled: 7,
         active: 6,
         source: Math.max(6, ...rows.map((row) => row.source.length))
     }
-    console.log(`${'ID'.padEnd(widths.id)}  ${'STATUS'.padEnd(widths.status)}  ENABLED  ACTIVE  ${'SOURCE'.padEnd(widths.source)}  NAME`)
+    console.log(`${'ID'.padEnd(widths.id)}  ${'TARGET'.padEnd(widths.target)}  ${'RUNTIME'.padEnd(widths.runtime)}  ${'STATUS'.padEnd(widths.status)}  ENABLED  ACTIVE  ${'SOURCE'.padEnd(widths.source)}  NAME`)
     for (const row of rows) {
-        console.log(`${row.id.padEnd(widths.id)}  ${row.status.padEnd(widths.status)}  ${row.enabled.padEnd(widths.enabled)}  ${row.active.padEnd(widths.active)}  ${row.source.padEnd(widths.source)}  ${row.name}`)
+        console.log(`${row.id.padEnd(widths.id)}  ${row.target.padEnd(widths.target)}  ${row.runtime.padEnd(widths.runtime)}  ${row.status.padEnd(widths.status)}  ${row.enabled.padEnd(widths.enabled)}  ${row.active.padEnd(widths.active)}  ${row.source.padEnd(widths.source)}  ${row.name}`)
     }
 }
 
@@ -292,7 +330,8 @@ async function buildLocalInstallResult(args: {
 
 async function runList(args: string[]): Promise<void> {
     const json = hasFlag(args, '--json')
-    const remote = await tryRemoteList()
+    const target = parseTargetArg(args)
+    const remote = await tryRemoteList(target)
     const payload = remote ?? { plugins: (await loadLocalRecords()).records.map(toLocalListItem) }
     if (json) {
         console.log(JSON.stringify(payload, null, 2))
@@ -516,10 +555,10 @@ async function runDelete(args: string[]): Promise<void> {
 }
 
 async function runReload(args: string[]): Promise<void> {
-    const id = args.find((arg) => !arg.startsWith('-'))
+    const id = positionalArgs(args, ['--target'])[0]
     await initializeApiUrl()
     await initializeToken()
-    const result: PluginReloadResult = await reloadRemotePlugins(configuration.cliApiToken, id)
+    const result: PluginReloadResult = await reloadRemotePlugins(configuration.cliApiToken, id, 5000, parseTargetArg(args))
     if (hasFlag(args, '--json')) {
         console.log(JSON.stringify(result, null, 2))
         return
@@ -567,7 +606,7 @@ function showHelp(): void {
 ${chalk.bold('hapi plugins')} - Local plugin management
 
 ${chalk.bold('Usage:')}
-  hapi plugins list [--json]
+  hapi plugins list [--target hub|runner:<machineId>|all-runners] [--json]
   hapi plugins inspect <id> [--json]
   hapi plugins enable <id> [--config <json-or-@file>] [--reload] [--yes]
   hapi plugins disable <id> [--reload] [--yes]
