@@ -166,6 +166,21 @@ describe('SettingsPage', () => {
         expect(calledKeys).toContain('settings.about.protocolVersion')
     })
 
+
+    it('renders the Plugins entry', () => {
+        renderWithProviders(<SettingsPage />)
+        expect(screen.getAllByText('Plugins').length).toBeGreaterThanOrEqual(1)
+        expect(screen.getAllByText('Manage plugins').length).toBeGreaterThanOrEqual(1)
+    })
+
+    it('uses correct i18n keys for Plugins entry', () => {
+        const spyT = renderWithSpyT(<SettingsPage />)
+        const calledKeys = spyT.mock.calls.map((call) => call[0])
+        expect(calledKeys).toContain('settings.plugins.title')
+        expect(calledKeys).toContain('settings.plugins.manage')
+        expect(calledKeys).toContain('settings.plugins.subtitle')
+    })
+
     it('renders the Appearance setting', () => {
         renderWithProviders(<SettingsPage />)
         expect(screen.getAllByText('Appearance').length).toBeGreaterThanOrEqual(1)
