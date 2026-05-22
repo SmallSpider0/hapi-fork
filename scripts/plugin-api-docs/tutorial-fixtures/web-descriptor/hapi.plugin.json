@@ -1,0 +1,65 @@
+{
+    "id": "com.example.tutorial.web-descriptor",
+    "name": "Tutorial Web Descriptor",
+    "version": "0.1.0",
+    "pluginApiVersion": "0.1",
+    "description": "A descriptor-only tutorial plugin rendered by the Web UI without executing plugin JavaScript.",
+    "contributions": {
+        "web": {
+            "settingsPanels": [
+                {
+                    "id": "tutorial-web-panel",
+                    "title": "Tutorial Web Descriptor",
+                    "description": "Descriptor-only settings panel.",
+                    "components": [
+                        {
+                            "kind": "text",
+                            "text": "This plugin has no runtime entry. Web renders this validated descriptor only.",
+                            "tone": "info"
+                        },
+                        {
+                            "kind": "badge",
+                            "label": "Descriptor only",
+                            "variant": "success"
+                        },
+                        {
+                            "kind": "schemaForm",
+                            "title": "Descriptor config",
+                            "fields": [
+                                {
+                                    "key": "note",
+                                    "label": "Note",
+                                    "type": "text",
+                                    "defaultValue": "hello from descriptor"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "newSessionFields": [
+                {
+                    "id": "tutorial-session-note",
+                    "key": "tutorialNote",
+                    "label": "Tutorial note",
+                    "type": "text",
+                    "defaultValue": "descriptor-field"
+                }
+            ],
+            "actions": [
+                {
+                    "id": "reload-self",
+                    "label": "Reload plugin",
+                    "actionId": "plugin.reload"
+                }
+            ],
+            "badges": [
+                {
+                    "id": "tutorial-descriptor",
+                    "label": "Tutorial",
+                    "variant": "success"
+                }
+            ]
+        }
+    }
+}

@@ -1,76 +1,32 @@
 import { logger as runnerLogger } from '@/ui/logger'
-import { AgentDescriptorSchema, AgentIdSchema, type AgentDescriptor, type PluginDiagnostic } from '@hapi/protocol/plugins'
-import type { AgentBackendFactory } from '@/agent/types'
+import { AgentDescriptorSchema, AgentIdSchema, type PluginDiagnostic } from '@hapi/protocol/plugins'
 import type {
+    Disposable,
+    PluginConfigReader,
+    PluginLogger,
+    PluginSecretReader,
+    RunnerAgentAdapterContribution,
+    RunnerAgentCapabilityProviderContribution,
     RunnerCommandResolverContribution,
     RunnerEnvironmentProviderContribution,
+    RunnerPluginContext,
+    RunnerPluginModule,
     RunnerSpawnHookContribution
-} from './runnerExtensionPipeline'
+} from '@hapi/protocol/plugins'
 
-export type Disposable = {
-    dispose(): void | Promise<void>
-}
-
-export type PluginLogger = {
-    debug(message: string, ...args: unknown[]): void
-    info(message: string, ...args: unknown[]): void
-    warn(message: string, ...args: unknown[]): void
-    error(message: string, ...args: unknown[]): void
-}
-
-export type PluginConfigReader = {
-    get<T = unknown>(key: string): T | undefined
-    all(): Record<string, unknown>
-}
-
-export type PluginSecretReader = {
-    get(name: string): string | undefined
-}
-
-export type RunnerPluginContext = {
-    pluginId: string
-    machineId: string
-    logger: PluginLogger
-    config: PluginConfigReader
-    secrets: PluginSecretReader
-    runtime: {
-        registerEnvironmentProvider(provider: RunnerEnvironmentProviderContribution): Disposable
-        registerCommandResolver(resolver: RunnerCommandResolverContribution): Disposable
-        registerSpawnHook(hook: RunnerSpawnHookContribution): Disposable
-        registerAgentAdapter(adapter: RunnerAgentAdapterContribution): Disposable
-        registerAgentCapabilityProvider(provider: RunnerAgentCapabilityProviderContribution): Disposable
-    }
-}
-
-export type RunnerPluginModule = {
-    activate(ctx: RunnerPluginContext): void | Promise<void>
-}
-
-export type RunnerAgentAdapterContribution = {
-    id: string
-    priority?: number
-    descriptor: AgentDescriptor
-    createBackend: AgentBackendFactory
-    dispose?: () => void | Promise<void>
-}
-
-export type RunnerAgentCapabilityProviderContext = {
-    machineId: string
-    agentId: string
-}
-
-export type RunnerAgentHistoryImportContext = RunnerAgentCapabilityProviderContext & {
-    nativeSessionId: string
-}
-
-export type RunnerAgentCapabilityProviderContribution = {
-    id: string
-    agentId: string
-    priority?: number
-    provide?: (context: RunnerAgentCapabilityProviderContext) => unknown | Promise<unknown>
-    importHistory?: (context: RunnerAgentHistoryImportContext) => unknown | Promise<unknown>
-    dispose?: () => void | Promise<void>
-}
+export type {
+    Disposable,
+    PluginConfigReader,
+    PluginLogger,
+    PluginSecretReader,
+    RunnerAgentAdapterContribution,
+    RunnerAgentCapabilityProviderContribution,
+    RunnerCommandResolverContribution,
+    RunnerEnvironmentProviderContribution,
+    RunnerPluginContext,
+    RunnerPluginModule,
+    RunnerSpawnHookContribution
+} from '@hapi/protocol/plugins'
 
 export type RegisteredRuntimeContribution<T = unknown> = {
     type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider'

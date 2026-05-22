@@ -8,10 +8,13 @@ import {
     RunnerSpawnContextSchema,
     RunnerSpawnHookProposalSchema,
     type RunnerCommandResolverProposal,
+    type RunnerCommandResolverContribution,
     type RunnerEnvironmentProposal,
+    type RunnerEnvironmentProviderContribution,
     type RunnerExtensionAuditEvent,
     type RunnerResolvedSpawnPlan,
     type RunnerSpawnContext,
+    type RunnerSpawnHookContribution,
     type RunnerSpawnHookProposal
 } from '@hapi/protocol/plugins'
 
@@ -26,25 +29,11 @@ const ALLOWED_HAPI_SUBCOMMANDS = new Set(['claude', 'codex', 'cursor', 'gemini',
 
 type MaybePromise<T> = T | Promise<T>
 
-export type RunnerEnvironmentProviderContribution = {
-    id: string
-    priority?: number
-    provide?: (context: RunnerSpawnContext) => MaybePromise<unknown>
-}
-
-export type RunnerCommandResolverContribution = {
-    id: string
-    priority?: number
-    resolve?: (context: RunnerSpawnContext) => MaybePromise<unknown>
-}
-
-export type RunnerSpawnHookContribution = {
-    id: string
-    priority?: number
-    beforeSpawn?: (context: RunnerSpawnContext) => MaybePromise<unknown>
-    afterSpawn?: (context: RunnerSpawnContext & { pid: number }) => MaybePromise<void>
-    onExit?: (context: RunnerSpawnContext & { pid: number; exitCode: number | null; signal: NodeJS.Signals | null }) => MaybePromise<void>
-}
+export type {
+    RunnerCommandResolverContribution,
+    RunnerEnvironmentProviderContribution,
+    RunnerSpawnHookContribution
+} from '@hapi/protocol/plugins'
 
 export type RegisteredRunnerContribution<T> = {
     pluginId: string
