@@ -95,9 +95,9 @@ async function loadLocalRecords(): Promise<{ records: DiscoveredPluginRecord[]; 
     const stateResult = await readPluginState(getPluginStateFile(configuration.happyHomeDir))
     const bundledPluginDirs = [
         await prepareBundledCorePlugins(configuration.happyHomeDir),
-        ...(process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
-            ? []
-            : [await prepareBundledExamplePlugins(configuration.happyHomeDir)])
+        ...(process.env.HAPI_ENABLE_BUNDLED_EXAMPLES === '1' && process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS !== '1'
+            ? [await prepareBundledExamplePlugins(configuration.happyHomeDir)]
+            : [])
     ]
     const discovered = await discoverPlugins({
         hapiHome: configuration.happyHomeDir,

@@ -17,8 +17,16 @@ function writeManifest(root: string, overrides: Record<string, unknown> = {}) {
     }, null, 2))
 }
 
-async function importPlugins(hapiHome: string, options: { disableBundledExamples?: boolean } = { disableBundledExamples: true }): Promise<PluginsModule> {
+async function importPlugins(
+    hapiHome: string,
+    options: { disableBundledExamples?: boolean; enableBundledExamples?: boolean } = { disableBundledExamples: true }
+): Promise<PluginsModule> {
     process.env.HAPI_HOME = hapiHome
+    if (options.enableBundledExamples === true) {
+        process.env.HAPI_ENABLE_BUNDLED_EXAMPLES = '1'
+    } else {
+        delete process.env.HAPI_ENABLE_BUNDLED_EXAMPLES
+    }
     if (options.disableBundledExamples !== false) {
         process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS = '1'
     } else {
@@ -50,6 +58,7 @@ describe('hapi plugins command', () => {
         vi.restoreAllMocks()
         delete process.env.HAPI_HOME
         delete process.env.CLI_API_TOKEN
+        delete process.env.HAPI_ENABLE_BUNDLED_EXAMPLES
         delete process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS
         vi.doUnmock('@/api/pluginAdmin')
         rmSync(testDir, { recursive: true, force: true })
@@ -68,9 +77,22 @@ describe('hapi plugins command', () => {
         ]))
     })
 
-    it('lists bundled example plugins by default', async () => {
+    it('does not list bundled example plugins by default', async () => {
         rmSync(pluginRoot, { recursive: true, force: true })
         const { handlePluginsCommand } = await importPlugins(hapiHome, { disableBundledExamples: false })
+
+        await handlePluginsCommand(['list', '--json'])
+
+        const payload = JSON.parse(logs.join('\n')) as { plugins: Array<{ id: string; source: string; enabled: boolean }> }
+        expect(payload.plugins.map((plugin) => plugin.id)).not.toContain('com.hapi.examples.notification-logger')
+    })
+
+    it('lists bundled example plugins only when explicitly enabled', async () => {
+        rmSync(pluginRoot, { recursive: true, force: true })
+        const { handlePluginsCommand } = await importPlugins(hapiHome, {
+            disableBundledExamples: false,
+            enableBundledExamples: true
+        })
 
         await handlePluginsCommand(['list', '--json'])
 
@@ -102,24 +124,28 @@ describe('hapi plugins command', () => {
 
     it('inspects bundled semantic contribution descriptors', async () => {
         rmSync(pluginRoot, { recursive: true, force: true })
-        const { handlePluginsCommand } = await importPlugins(hapiHome, { disableBundledExamples: false })
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
 
-        await handlePluginsCommand(['inspect', 'com.hapi.examples.voice-provider-stub', '--json'])
+        await handlePluginsCommand(['inspect', 'com.hapi.core.serverchan-notifier', '--json'])
 
         const payload = JSON.parse(logs.join('\n')) as {
             plugin: {
                 contributions: {
-                    voice?: { providers?: Array<{ id: string; supportStatus?: string; limitations?: string[] }> }
+                    notificationChannels?: Array<{ id: string; displayName?: string }>
                 }
+                permissions: { network: string[]; secrets: Array<{ name: string; present: boolean }> }
             }
         }
-        expect(payload.plugin.contributions.voice?.providers).toEqual([
+        expect(payload.plugin.contributions.notificationChannels).toEqual([
             expect.objectContaining({
-                id: 'example-voice-provider',
-                supportStatus: 'unsupported',
-                limitations: ['No voice provider runtime extension point is available yet.']
+                id: 'serverchan',
+                displayName: 'ServerChan Notifier'
             })
         ])
+        expect(payload.plugin.permissions).toEqual(expect.objectContaining({
+            network: ['https://sctapi.ftqq.com'],
+            secrets: [expect.objectContaining({ name: 'SERVERCHAN_SENDKEY', present: false })]
+        }))
     })
 
     it('enables and disables plugins with atomic plugins.json writes', async () => {

@@ -20,7 +20,8 @@ export async function runPluginAgentSession(opts: {
         machineId,
         envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
         env: process.env,
-        includeBundledExamples: true
+        includeBundledCore: true,
+        includeBundledExamples: process.env.HAPI_ENABLE_BUNDLED_EXAMPLES === '1'
     })
 
     await manager.start()

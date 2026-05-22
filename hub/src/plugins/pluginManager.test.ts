@@ -5,7 +5,13 @@ import { join } from 'node:path'
 import type { Session } from '../sync/syncEngine'
 import { HubPluginManager } from './pluginManager'
 import { writePluginState } from '@hapi/protocol/plugins/foundation'
-import { HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID, bundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
+import {
+    HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
+    HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
+    HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+    HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+    bundledCorePlugins
+} from '@hapi/protocol/plugins/bundledCore'
 import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -297,15 +303,11 @@ describe('HubPluginManager', () => {
             active: false,
             install: { sourceType: 'bundled' }
         })
-        expect(manager.getPlugin('com.hapi.examples.voice-provider-stub')?.contributions.voice?.providers).toEqual([
-            expect.objectContaining({ id: 'example-voice-provider', supportStatus: 'unsupported' })
-        ])
-        expect(manager.getPlugin('com.hapi.examples.deployment-pack-stub')?.contributions.deployment?.packs).toEqual([
-            expect.objectContaining({ id: 'example-docker-pack', supportStatus: 'stub' })
-        ])
-        expect(manager.getPlugin('com.hapi.examples.mcp-bridge-stub')?.contributions.integration?.protocolBridges).toEqual([
-            expect.objectContaining({ id: 'example-mcp-bridge', protocol: 'mcp', supportStatus: 'unsupported' })
-        ])
+        expect(plugins.map((plugin) => plugin.id)).not.toEqual(expect.arrayContaining([
+            'com.hapi.examples.voice-provider-stub',
+            'com.hapi.examples.deployment-pack-stub',
+            'com.hapi.examples.mcp-bridge-stub'
+        ]))
     })
 
     it('discovers default-enabled bundled core web plugins for the Hub manager', async () => {
@@ -321,6 +323,24 @@ describe('HubPluginManager', () => {
             active: true,
             install: { sourceType: 'bundled' }
         })
+        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)).toMatchObject({
+            source: 'bundled',
+            enabled: false,
+            active: false,
+            install: { sourceType: 'bundled' }
+        })
+        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID)).toMatchObject({
+            source: 'bundled',
+            enabled: false,
+            active: false,
+            runtimes: { runner: { entry: 'dist/runner.js', active: false } }
+        })
+        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID)).toMatchObject({
+            source: 'bundled',
+            enabled: false,
+            active: false,
+            runtimes: { runner: { entry: 'dist/runner.js', active: false } }
+        })
         expect(webContributions).toEqual([
             expect.objectContaining({
                 pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
@@ -329,23 +349,48 @@ describe('HubPluginManager', () => {
                 })
             })
         ])
-        expect(manager.collectCapabilities()).toEqual([
+        expect(manager.collectCapabilities()).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
                 capabilityId: 'schedule-send',
                 kind: 'chat.composer.messageAction',
                 status: 'ready'
+            }),
+            expect.objectContaining({
+                pluginId: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+                capabilityId: 'serverchan-notifier',
+                kind: 'notification.channel',
+                status: 'disabled'
+            }),
+            expect.objectContaining({
+                pluginId: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
+                capabilityId: 'runner-env-profiles',
+                kind: 'runner.spawnExtension',
+                status: 'disabled'
+            }),
+            expect.objectContaining({
+                pluginId: HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
+                capabilityId: 'runner-spawn-guard',
+                kind: 'runner.spawnExtension',
+                status: 'disabled'
             })
-        ])
-        expect(manager.collectContributionStates()).toEqual([
+        ]))
+        expect(manager.collectContributionStates()).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
                 contributionType: 'messageAction',
                 contributionId: 'schedule-send',
                 registered: true,
                 active: true
+            }),
+            expect.objectContaining({
+                pluginId: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+                contributionType: 'notificationChannel',
+                contributionId: 'serverchan',
+                registered: false,
+                active: false
             })
-        ])
+        ]))
 
         await manager.disablePlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
         expect(manager.getPlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({

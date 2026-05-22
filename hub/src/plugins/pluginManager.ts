@@ -39,7 +39,7 @@ import {
     writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, hubPluginConfigScope, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, hubPluginConfigScope, pluginManifestRequiresHubInstall, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
@@ -966,11 +966,12 @@ export class HubPluginManager {
             ...(this.options.includeBundledCore === true ? [await prepareBundledCorePlugins(this.options.hapiHome)] : []),
             ...(this.options.includeBundledExamples && !bundledDisabled ? [await prepareBundledExamplePlugins(this.options.hapiHome)] : [])
         ]
-        return await discoverPlugins({
+        const records = await discoverPlugins({
             hapiHome: this.options.hapiHome,
             envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS,
             bundledPluginDirs
         })
+        return records.filter((record) => !record.manifest || record.source !== 'bundled' || pluginManifestRequiresHubInstall(record.manifest))
     }
 
     private defaultEnabledPluginIds(): string[] {
