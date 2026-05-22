@@ -27,22 +27,6 @@ function PuzzleIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19.4 13.5a1.9 1.9 0 1 0 0-3.8H17V7.3A2.3 2.3 0 0 0 14.7 5h-2.4a1.9 1.9 0 1 0-3.8 0H6.3A2.3 2.3 0 0 0 4 7.3v2.2a1.9 1.9 0 1 1 0 3.8v2.4A2.3 2.3 0 0 0 6.3 18h2.2a1.9 1.9 0 1 0 3.8 0h2.4a2.3 2.3 0 0 0 2.3-2.3v-2.2z" /></svg>
 }
 
-function CheckIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-}
-
-function PowerIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" /></svg>
-}
-
-function ActivityIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
-}
-
-function FolderIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2z" /></svg>
-}
-
 function AlertIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
 }
@@ -62,20 +46,27 @@ function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
 }
 
-function pluginTargetLabel(plugin: PluginListItem): string {
-    if (!plugin.target) return 'Local'
+function pluginTargetLabel(t: (key: string) => string, plugin: PluginListItem): string {
+    if (!plugin.target) return t('settings.plugins.target.local')
     if (plugin.target.scope === 'hub') return 'Hub'
     if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
     return plugin.target.scope
 }
 
-function pluginRuntimeLabel(plugin: PluginListItem): string {
-    const runtimes = Object.keys(plugin.runtimes)
-    return runtimes.length > 0 ? runtimes.join(' + ') : 'No runtime'
-}
-
 function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }) {
     return <Badge variant={props.variant ?? 'default'} className="gap-1 font-medium">{props.icon}{props.label}</Badge>
+}
+
+function pluginMeta(t: (key: string, params?: Record<string, string | number>) => string, plugin: PluginListItem, issueCount: number): string {
+    const parts = [
+        plugin.version ?? t('settings.plugins.unknown'),
+        sourceLabel(t, plugin.source),
+        pluginTargetLabel(t, plugin)
+    ]
+    if (issueCount > 0) {
+        parts.push(t('settings.plugins.list.diagnostics', { count: issueCount }))
+    }
+    return parts.join(' · ')
 }
 
 function formatReloadLines(t: (key: string, params?: Record<string, string | number>) => string, result?: PluginReloadResult): string[] {
@@ -91,7 +82,7 @@ function formatInstallResult(t: (key: string, params?: Record<string, string | n
         tone: result.ok ? 'success' : 'warning',
         lines: [
             t('settings.plugins.install.resultAction', { action: t(`settings.plugins.install.action.${result.action}`), id: result.pluginId ?? t('settings.plugins.unknown') }),
-            t('settings.plugins.install.resultTarget', { path: result.targetPath ?? (result.targetResults ? `${result.targetResults.length} targets` : t('settings.plugins.unknown')) }),
+            t('settings.plugins.install.resultTarget', { path: result.targetPath ?? (result.targetResults ? t('settings.plugins.install.targetCount', { count: result.targetResults.length }) : t('settings.plugins.unknown')) }),
             ...formatReloadLines(t, result.reload)
         ]
     }
@@ -143,19 +134,12 @@ function PluginCard(props: {
                 <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
                         <div className="truncate font-medium">{plugin.name ?? plugin.id}</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{t('settings.plugins.list.meta', { id: plugin.id, version: plugin.version ?? t('settings.plugins.unknown'), source: sourceLabel(t, plugin.source) })}</div>
+                        <div className="truncate text-xs text-[var(--app-hint)]">{pluginMeta(t, plugin, issueCount)}</div>
                     </div>
                     <Badge variant={statusVariant(plugin.status)}>{t(`settings.plugins.status.${plugin.status}`)}</Badge>
                 </div>
                 {plugin.description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{plugin.description}</div> : null}
-                <div className="flex flex-wrap gap-1.5">
-                    <Chip label={pluginTargetLabel(plugin)} variant={plugin.target?.active === false ? 'warning' : 'default'} />
-                    <Chip label={pluginRuntimeLabel(plugin)} />
-                    <Chip icon={<PowerIcon />} label={plugin.enabled ? t('settings.plugins.state.enabled') : t('settings.plugins.state.disabled')} variant={plugin.enabled ? 'success' : 'default'} />
-                    <Chip icon={<ActivityIcon />} label={plugin.active ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')} variant={plugin.active ? 'success' : 'default'} />
-                    <Chip icon={<FolderIcon />} label={sourceLabel(t, plugin.source)} />
-                    <Chip icon={issueCount > 0 ? <AlertIcon /> : <CheckIcon />} label={issueCount > 0 ? t('settings.plugins.list.diagnostics', { count: issueCount }) : t('settings.plugins.list.noDiagnostics')} variant={issueCount > 0 ? 'warning' : 'success'} />
-                </div>
+                {issueCount > 0 ? <div><Chip icon={<AlertIcon />} label={t('settings.plugins.list.diagnostics', { count: issueCount })} variant="warning" /></div> : null}
             </div>
         </button>
     )
@@ -166,15 +150,11 @@ function EmptyState(props: {
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
     const title = props.filtered ? props.t('settings.plugins.empty.filteredTitle') : props.t('settings.plugins.empty.title')
-    const description = props.filtered ? props.t('settings.plugins.empty.filteredDescription') : props.t('settings.plugins.empty.description')
     return (
         <Card className="border border-dashed border-[var(--app-border)] bg-[var(--app-bg)]">
-            <CardContent className="flex flex-col items-center gap-3 p-8 text-center">
-                <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-[var(--app-secondary-bg)] text-[var(--app-link)]"><PuzzleIcon /></div>
-                <div>
-                    <div className="font-semibold">{title}</div>
-                    <div className="mt-1 max-w-sm text-sm text-[var(--app-hint)]">{description}</div>
-                </div>
+            <CardContent className="flex items-center justify-center gap-3 p-6 text-center">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--app-secondary-bg)] text-[var(--app-link)]"><PuzzleIcon /></div>
+                <div className="font-semibold">{title}</div>
             </CardContent>
         </Card>
     )
@@ -203,7 +183,7 @@ function packageFormat(filename: string): 'tgz' | 'zip' | undefined {
     return undefined
 }
 
-function targetOptions(targets: PluginTargetInventory[]): Array<{ value: PluginTargetScope; label: string }> {
+function targetOptions(t: (key: string) => string, targets: PluginTargetInventory[]): Array<{ value: PluginTargetScope; label: string }> {
     const options = new Map<PluginTargetScope, string>()
     options.set('hub', 'Hub')
     for (const target of targets) {
@@ -212,7 +192,7 @@ function targetOptions(targets: PluginTargetInventory[]): Array<{ value: PluginT
             : 'Hub')
     }
     if ([...options.keys()].some((scope) => scope.startsWith('runner:'))) {
-        options.set('all-runners', 'All runners')
+        options.set('all-runners', t('settings.plugins.target.allRunners'))
     }
     return Array.from(options.entries()).map(([value, label]) => ({ value, label }))
 }
@@ -231,7 +211,7 @@ export default function PluginsPage() {
     const [installTarget, setInstallTarget] = useState<PluginTargetScope>('hub')
     const [packageFile, setPackageFile] = useState<File | null>(null)
 
-    const installTargetOptions = useMemo(() => targetOptions(targets), [targets])
+    const installTargetOptions = useMemo(() => targetOptions(t, targets), [t, targets])
     useEffect(() => {
         if (!installTargetOptions.some((option) => option.value === installTarget)) {
             setInstallTarget('hub')
@@ -296,7 +276,6 @@ export default function PluginsPage() {
                     <Button type="button" variant="secondary" size="sm" onClick={goBack} className="h-8 w-8 rounded-full p-0"><BackIcon /></Button>
                     <div className="min-w-0 flex-1">
                         <div className="font-semibold">{t('settings.plugins.title')}</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{t('settings.plugins.subtitle')}</div>
                     </div>
                     <Button type="button" variant="outline" size="sm" onClick={() => void refetch()}>{t('settings.plugins.refresh')}</Button>
                     <Button type="button" size="sm" disabled={actions.isPending} onClick={() => void reloadAll()}>{t('settings.plugins.reloadAll')}</Button>
@@ -307,7 +286,6 @@ export default function PluginsPage() {
                     <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
                         <CardContent className="space-y-2 p-3">
                             <div className="flex flex-wrap items-center gap-2">
-                                <div className="shrink-0 text-sm font-semibold">{t('settings.plugins.install.title')}</div>
                                 <label htmlFor="plugin-install-target" className="sr-only">{t('settings.plugins.install.target')}</label>
                                 <select
                                     id="plugin-install-target"
@@ -331,15 +309,17 @@ export default function PluginsPage() {
                                     onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)}
                                     className="sr-only"
                                 />
-                                <span className="min-w-0 flex-1 truncate text-sm text-[var(--app-hint)]" title={packageFile?.name ?? undefined}>
-                                    {packageFile?.name ?? t('settings.plugins.install.noPackageSelected')}
-                                </span>
+                                <Button type="button" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
                             </div>
                             <div className="flex flex-wrap items-center gap-3">
-                                <Button type="button" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
                                 <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableAfterInstall} onChange={(event) => setEnableAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
                                 <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={overwriteLocal} onChange={(event) => setOverwriteLocal(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
                             </div>
+                            {packageFile ? (
+                                <div className="w-full min-w-0 truncate text-xs text-[var(--app-hint)]" title={packageFile.name}>
+                                    {t('settings.plugins.install.selectedPackage', { filename: packageFile.name })}
+                                </div>
+                            ) : null}
                         </CardContent>
                     </Card>
 
