@@ -27,6 +27,9 @@ export const BUILTIN_MODEL_OPTIONS: Record<string, { value: string; label: strin
         { value: 'auto', label: 'Default' },
     ],
     cursor: [],
+    kimi: [
+        { value: 'auto', label: 'Default' },
+    ],
     gemini: [
         { value: 'auto', label: 'Default' },
         ...modelPresetOptions(GEMINI_MODEL_PRESETS, GEMINI_MODEL_LABELS),

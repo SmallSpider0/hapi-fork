@@ -25,9 +25,12 @@ function getAgentRunCompletedAt(event: Record<string, unknown>): number | null {
 
 function setEarliestStartedAt(block: ToolCallBlock, startedAt: number | null): void {
     if (startedAt === null) return
-    block.tool.startedAt = block.tool.startedAt === null
+    const nextStartedAt = block.tool.startedAt === null
         ? startedAt
         : Math.min(block.tool.startedAt, startedAt)
+    if (nextStartedAt !== block.tool.startedAt) {
+        block.tool = { ...block.tool, startedAt: nextStartedAt }
+    }
 }
 
 function getAgentRunCardId(event: Record<string, unknown>, fallback: string): string {
@@ -191,7 +194,7 @@ function normalizeTraceMessage(
             ...base,
             id: traceId,
             role: 'agent',
-            content: [{ type: 'reasoning', text: data.message, uuid: traceId, parentUUID: null }]
+            content: [{ type: 'reasoning', text: data.message, uuid: traceId, streamId: traceId, parentUUID: null }]
         } as TracedMessage]
     }
 
@@ -270,6 +273,7 @@ export function reduceTimeline(
     const agentRunCardByAgentId = new Map<string, string>()
     const agentRunTraceMessagesByCardId = new Map<string, TracedMessage[]>()
     const pendingAgentRunCardByFingerprint = new Map<string, string>()
+    const reasoningBlocksByStreamId = new Map<string, AgentReasoningBlock>()
     let hasReadyEvent = false
 
     const ensureAgentRunBlock = (
@@ -318,9 +322,12 @@ export function reduceTimeline(
 
     const patchAgentRunInput = (block: ToolCallBlock, patch: Record<string, unknown>): void => {
         const current = isObject(block.tool.input) ? block.tool.input : {}
-        block.tool.input = {
-            ...current,
-            ...patch
+        block.tool = {
+            ...block.tool,
+            input: {
+                ...current,
+                ...patch
+            }
         }
     }
 
@@ -529,8 +536,9 @@ export function reduceTimeline(
                         statusText: getEventString(event, 'statusText') ?? getEventString(event, 'status_text') ?? 'Starting',
                         ...getAgentRunDisplayPatch(event)
                     })
-                    block.tool.state = mapAgentRunStatusToToolState(status)
-                    if (block.tool.state === 'running') {
+                    const nextState = mapAgentRunStatusToToolState(status)
+                    block.tool = { ...block.tool, state: nextState }
+                    if (nextState === 'running') {
                         setEarliestStartedAt(block, startedAt)
                     }
                     continue
@@ -552,20 +560,20 @@ export function reduceTimeline(
                         statusText: getEventString(event, 'statusText') ?? getEventString(event, 'status_text') ?? status,
                         ...getAgentRunDisplayPatch(event)
                     })
-                    block.tool.state = nextState
-                    if (block.tool.state === 'running') {
+                    block.tool = { ...block.tool, state: nextState }
+                    if (nextState === 'running') {
                         setEarliestStartedAt(block, startedAt ?? msg.createdAt)
                     }
-                    if (block.tool.state === 'completed' || block.tool.state === 'error') {
+                    if (nextState === 'completed' || nextState === 'error') {
                         setEarliestStartedAt(block, startedAt)
-                        block.tool.completedAt = getAgentRunCompletedAt(event) ?? msg.createdAt
+                        block.tool = { ...block.tool, completedAt: getAgentRunCompletedAt(event) ?? msg.createdAt }
                     }
                     if ('result' in event) {
-                        block.tool.result = event.result
+                        block.tool = { ...block.tool, result: event.result }
                     } else if ('error' in event) {
-                        block.tool.result = event.error
+                        block.tool = { ...block.tool, result: event.error }
                     } else if ('spawnResult' in event) {
-                        block.tool.result = event.spawnResult
+                        block.tool = { ...block.tool, result: event.spawnResult }
                     }
                     continue
                 }
@@ -746,7 +754,20 @@ export function reduceTimeline(
                 }
 
                 if (c.type === 'reasoning') {
-                    blocks.push({
+                    const streamId = asString(c.streamId)
+                    if (streamId) {
+                        const existing = reasoningBlocksByStreamId.get(streamId)
+                        if (existing) {
+                            existing.text = c.text
+                            existing.usage = msg.usage
+                            existing.model = msg.model
+                            existing.meta = msg.meta
+                            existing.invokedAt = msg.invokedAt
+                            continue
+                        }
+                    }
+
+                    const block: AgentReasoningBlock = {
                         kind: 'agent-reasoning',
                         id: `${msg.id}:${idx}`,
                         localId: msg.localId,
@@ -756,7 +777,11 @@ export function reduceTimeline(
                         model: msg.model,
                         text: c.text,
                         meta: msg.meta
-                    })
+                    }
+                    blocks.push(block)
+                    if (streamId) {
+                        reasoningBlocksByStreamId.set(streamId, block)
+                    }
                     continue
                 }
 
@@ -822,8 +847,7 @@ export function reduceTimeline(
                     })
 
                     if (block.tool.state === 'pending') {
-                        block.tool.state = 'running'
-                        block.tool.startedAt = msg.createdAt
+                        block.tool = { ...block.tool, state: 'running', startedAt: msg.createdAt }
                     }
 
                     if (isSubagentToolName(c.name) && !context.consumedGroupIds.has(msg.id)) {
@@ -891,9 +915,12 @@ export function reduceTimeline(
                         permission
                     })
 
-                    block.tool.result = c.content
-                    block.tool.completedAt = msg.createdAt
-                    block.tool.state = c.is_error ? 'error' : 'completed'
+                    block.tool = {
+                        ...block.tool,
+                        result: c.content,
+                        completedAt: msg.createdAt,
+                        state: c.is_error ? 'error' : 'completed'
+                    }
                     continue
                 }
 

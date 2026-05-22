@@ -4,28 +4,30 @@ import { buildHapiMcpBridge } from '@/codex/utils/buildHapiMcpBridge';
 import { convertAgentMessage } from '@/agent/messageConverter';
 import type { AgentMessage, McpServerStdio, PromptContent } from '@/agent/types';
 import { RemoteLauncherBase, type RemoteLauncherDisplayContext, type RemoteLauncherExitReason } from '@/modules/common/remote/RemoteLauncherBase';
-import { OpencodeDisplay } from '@/ui/ink/OpencodeDisplay';
-import type { OpencodeSession } from './session';
+import { KimiDisplay } from '@/ui/ink/KimiDisplay';
+import type { KimiSession } from './session';
 import type { PermissionMode } from './types';
-import { RPC_METHODS } from '@hapi/protocol/rpcMethods';
-import { createOpencodeBackend } from './utils/opencodeBackend';
-import { OpencodePermissionHandler } from './utils/permissionHandler';
-import { TITLE_INSTRUCTION } from './utils/systemPrompt';
+import { createKimiBackend } from './utils/kimiBackend';
+import { KimiPermissionHandler } from './utils/permissionHandler';
+import { resolveKimiRuntimeConfig } from './utils/config';
 
-class OpencodeRemoteLauncher extends RemoteLauncherBase {
-    private readonly session: OpencodeSession;
-    private backend: ReturnType<typeof createOpencodeBackend> | null = null;
-    private permissionHandler: OpencodePermissionHandler | null = null;
+class KimiRemoteLauncher extends RemoteLauncherBase {
+    private readonly session: KimiSession;
+    private readonly model?: string;
+    private backend: ReturnType<typeof createKimiBackend> | null = null;
+    private permissionHandler: KimiPermissionHandler | null = null;
     private happyServer: { stop: () => void } | null = null;
     private abortController = new AbortController();
+    private displayModel: string | null = null;
     private displayPermissionMode: PermissionMode | null = null;
-    private instructionsSent = false;
     private currentBackendModel: string | null = null;
     private setModelSupported: boolean | undefined = undefined;
+    private lastDisplayedToolCall = new Map<string, string>();
 
-    constructor(session: OpencodeSession) {
+    constructor(session: KimiSession, opts: { model?: string }) {
         super(process.env.DEBUG ? session.logPath : undefined);
         this.session = session;
+        this.model = opts.model;
     }
 
     public async launch(): Promise<RemoteLauncherExitReason> {
@@ -36,7 +38,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
     }
 
     protected createDisplay(context: RemoteLauncherDisplayContext): React.ReactElement {
-        return React.createElement(OpencodeDisplay, context);
+        return React.createElement(KimiDisplay, context);
     }
 
     protected async runMainLoop(): Promise<void> {
@@ -46,13 +48,19 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         const { server: happyServer, mcpServers } = await buildHapiMcpBridge(session.client);
         this.happyServer = happyServer;
 
-        const backend = createOpencodeBackend({
-            cwd: session.path
+        const runtimeConfig = resolveKimiRuntimeConfig({ model: this.model });
+        this.displayModel = runtimeConfig.model;
+        messageBuffer.addMessage(`[MODEL:${runtimeConfig.model}]`, 'system');
+
+        const backend = createKimiBackend({
+            model: runtimeConfig.model,
+            cwd: session.path,
+            permissionMode: session.getPermissionMode() as string | undefined
         });
         this.backend = backend;
 
         backend.onStderrError((error) => {
-            logger.debug('[opencode-remote] stderr error', error);
+            logger.debug('[kimi-remote] stderr error', error);
             session.sendSessionEvent({ type: 'message', message: error.message });
             messageBuffer.addMessage(error.message, 'status');
         });
@@ -60,60 +68,41 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         await backend.initialize();
 
         const resumeSessionId = session.sessionId;
-        const mcpServerList = toAcpMcpServers(mcpServers);
+        const acpMcpServers = toAcpMcpServers(mcpServers);
         let acpSessionId: string;
         if (resumeSessionId) {
             try {
                 acpSessionId = await backend.loadSession({
                     sessionId: resumeSessionId,
                     cwd: session.path,
-                    mcpServers: mcpServerList
+                    mcpServers: acpMcpServers
                 });
             } catch (error) {
-                logger.warn('[opencode-remote] resume failed, starting new session', error);
+                logger.warn('[kimi-remote] resume failed, starting new session', error);
                 session.sendSessionEvent({
                     type: 'message',
-                    message: 'OpenCode resume failed; starting a new session.'
+                    message: 'Kimi resume failed; starting a new session.'
                 });
                 acpSessionId = await backend.newSession({
                     cwd: session.path,
-                    mcpServers: mcpServerList
+                    mcpServers: acpMcpServers
                 });
             }
         } else {
             acpSessionId = await backend.newSession({
                 cwd: session.path,
-                mcpServers: mcpServerList
+                mcpServers: acpMcpServers
             });
         }
         session.onSessionFound(acpSessionId);
 
-        // Seed currentBackendModel from the ACP session metadata so the first
-        // batch — whose model the hub mirrors from the just-discovered session —
-        // does not trigger a redundant setModel on the very first turn.
-        const initialMetadata = backend.getSessionModelsMetadata?.(acpSessionId);
-        this.currentBackendModel = initialMetadata?.currentModelId ?? null;
-
-        // Expose the cached models metadata via per-session RPC so the hub can
-        // forward it to the web UI's model selector without round-tripping ACP.
-        session.client.rpcHandlerManager.registerHandler(RPC_METHODS.ListOpencodeModels, async () => {
-            const metadata = backend.getSessionModelsMetadata?.(acpSessionId);
-            if (!metadata) {
-                return { success: true, availableModels: [], currentModelId: null };
-            }
-            return {
-                success: true,
-                availableModels: metadata.availableModels,
-                currentModelId: metadata.currentModelId
-            };
-        });
-
-        this.permissionHandler = new OpencodePermissionHandler(
+        this.permissionHandler = new KimiPermissionHandler(
             session.client,
             backend,
             () => session.getPermissionMode() as PermissionMode | undefined
         );
-        this.applyDisplayMode(session.getPermissionMode() as PermissionMode);
+        this.currentBackendModel = runtimeConfig.model;
+        this.applyDisplayMode(session.getPermissionMode() as PermissionMode, this.currentBackendModel);
 
         this.setupAbortHandlers(session.client.rpcHandlerManager, {
             onAbort: () => this.handleAbort(),
@@ -125,32 +114,21 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         };
 
         while (!this.shouldExit) {
-            const waitSignal = this.abortController.signal;
-            const batch = await session.queue.waitForMessagesAndGetAsString(waitSignal);
+            const batch = await session.queue.waitForMessagesAndGetAsString(this.abortController.signal);
             if (!batch) {
-                if (waitSignal.aborted && !this.shouldExit) {
+                if (this.abortController.signal.aborted && !this.shouldExit) {
                     continue;
                 }
                 break;
             }
 
-            // Inline model change via ACP RPC (session/set_model — see ACP SDK
-            // schema `x-method: session/set_model`). Mirrors the Gemini pattern
-            // from PR #543: if the running OpenCode build does not implement the
-            // RPC, we learn that from the first method-not-found response and stop
-            // attempting it for the rest of this session.
-            //
-            // The very first batch seeds currentBackendModel — the OpenCode CLI was
-            // launched with that model via --model and there is nothing to switch yet.
-            if (batch.mode.model && this.currentBackendModel === null) {
-                this.currentBackendModel = batch.mode.model;
-            } else if (batch.mode.model && batch.mode.model !== this.currentBackendModel) {
+            if (batch.mode.model && batch.mode.model !== this.currentBackendModel) {
                 if (!backend.setModel || this.setModelSupported === false) {
-                    batch.mode.model = this.currentBackendModel ?? undefined;
+                    batch.mode.model = this.currentBackendModel!;
                 } else {
-                    logger.debug(`[opencode-remote] Switching model inline: ${this.currentBackendModel} -> ${batch.mode.model}`);
+                    logger.debug(`[kimi-remote] Switching model inline: ${this.currentBackendModel} -> ${batch.mode.model}`);
                     try {
-                        await backend.setModel(acpSessionId, batch.mode.model, { flavor: 'opencode' });
+                        await backend.setModel(acpSessionId, batch.mode.model);
                         this.currentBackendModel = batch.mode.model;
                         this.setModelSupported = true;
                     } catch (error) {
@@ -158,36 +136,29 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                         const methodNotFound = /method not found/i.test(message);
                         if (methodNotFound && this.setModelSupported === undefined) {
                             this.setModelSupported = false;
-                            logger.warn('[opencode-remote] OpenCode build does not support session/set_model; inline switching disabled for this session');
+                            logger.warn('[kimi-remote] Kimi CLI build does not support set_session_model; inline switching disabled for this session');
                             session.sendSessionEvent({
                                 type: 'message',
-                                message: 'This OpenCode build does not support inline model switching. Restart the session to apply a different model.'
+                                message: 'This Kimi CLI build does not support inline model switching. Restart the session to apply a different model.'
                             });
                         } else {
-                            logger.warn('[opencode-remote] Inline model switch failed', error);
+                            logger.warn('[kimi-remote] Inline model switch failed', error);
                             session.sendSessionEvent({
                                 type: 'message',
-                                message: `Failed to switch model to ${batch.mode.model}. Continuing with ${this.currentBackendModel ?? '(default)'}.`
+                                message: `Failed to switch model to ${batch.mode.model}. Continuing with ${this.currentBackendModel}.`
                             });
                         }
-                        batch.mode.model = this.currentBackendModel ?? undefined;
+                        batch.mode.model = this.currentBackendModel!;
                     }
                 }
             }
 
-            this.applyDisplayMode(batch.mode.permissionMode);
+            this.applyDisplayMode(batch.mode.permissionMode, batch.mode.model);
             messageBuffer.addMessage(batch.message, 'user');
-
-            // Inject title instructions on first prompt
-            let messageText = batch.message;
-            if (!this.instructionsSent) {
-                messageText = `${TITLE_INSTRUCTION}\n\n${batch.message}`;
-                this.instructionsSent = true;
-            }
 
             const promptContent: PromptContent[] = [{
                 type: 'text',
-                text: messageText
+                text: batch.message
             }];
 
             session.onThinkingChange(true);
@@ -197,12 +168,13 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                     this.handleAgentMessage(message);
                 });
             } catch (error) {
-                logger.warn('[opencode-remote] prompt failed', error);
+                const errorMessage = error instanceof Error ? error.message : String(error);
+                logger.warn('[kimi-remote] prompt failed', { message: errorMessage });
                 session.sendSessionEvent({
                     type: 'message',
-                    message: 'OpenCode prompt failed. Check logs for details.'
+                    message: `Kimi prompt failed: ${errorMessage}`
                 });
-                messageBuffer.addMessage('OpenCode prompt failed', 'status');
+                messageBuffer.addMessage(`Kimi prompt failed: ${errorMessage}`, 'status');
             } finally {
                 session.onThinkingChange(false);
                 await this.permissionHandler?.cancelAll('Prompt finished');
@@ -243,14 +215,16 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
                 this.messageBuffer.addMessage(message.text, 'assistant');
                 break;
             case 'reasoning':
-                if (message.live) {
-                    break;
-                }
                 this.messageBuffer.addMessage(`[Thinking] ${message.text.substring(0, 100)}...`, 'system');
                 break;
-            case 'tool_call':
-                this.messageBuffer.addMessage(`Tool call: ${message.name}`, 'tool');
+            case 'tool_call': {
+                const lastName = this.lastDisplayedToolCall.get(message.id);
+                if (lastName !== message.name) {
+                    this.messageBuffer.addMessage(`Tool call: ${message.name}`, 'tool');
+                    this.lastDisplayedToolCall.set(message.id, message.name);
+                }
                 break;
+            }
             case 'tool_result':
                 this.messageBuffer.addMessage('Tool result received', 'result');
                 break;
@@ -270,10 +244,14 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
         }
     }
 
-    private applyDisplayMode(permissionMode: PermissionMode | undefined): void {
+    private applyDisplayMode(permissionMode: PermissionMode | undefined, model?: string): void {
         if (permissionMode && permissionMode !== this.displayPermissionMode) {
             this.displayPermissionMode = permissionMode;
             this.messageBuffer.addMessage(`[MODE:${permissionMode}]`, 'system');
+        }
+        if (model && model !== this.displayModel) {
+            this.displayModel = model;
+            this.messageBuffer.addMessage(`[MODEL:${model}]`, 'system');
         }
     }
 
@@ -283,6 +261,7 @@ class OpencodeRemoteLauncher extends RemoteLauncherBase {
             await backend.cancelPrompt(this.session.sessionId);
         }
         await this.permissionHandler?.cancelAll('User aborted');
+        this.session.sendSessionEvent({ type: 'message', message: 'Session aborted' });
         this.session.queue.reset();
         this.session.onThinkingChange(false);
         this.abortController.abort();
@@ -312,9 +291,10 @@ function toAcpMcpServers(config: Record<string, { command: string; args: string[
     }));
 }
 
-export async function opencodeRemoteLauncher(
-    session: OpencodeSession
+export async function kimiRemoteLauncher(
+    session: KimiSession,
+    opts: { model?: string }
 ): Promise<'switch' | 'exit'> {
-    const launcher = new OpencodeRemoteLauncher(session);
+    const launcher = new KimiRemoteLauncher(session, opts);
     return launcher.launch();
 }

@@ -1005,11 +1005,13 @@ export function buildCliArgs(
       ? 'cursor'
       : agent === 'gemini'
         ? 'gemini'
-        : agent === 'opencode'
-          ? 'opencode'
-          : agent === 'claude'
-            ? 'claude'
-            : 'agent-plugin';
+        : agent === 'kimi'
+          ? 'kimi'
+          : agent === 'opencode'
+            ? 'opencode'
+            : agent === 'claude'
+              ? 'claude'
+              : 'agent-plugin';
   const args = agentCommand === 'agent-plugin'
     ? ['agent-plugin', '--type', AgentIdSchema.parse(agent)]
     : [agentCommand];

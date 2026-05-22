@@ -1,4 +1,5 @@
 import type { AgentMessage, PlanItem } from '@/agent/types';
+import { randomUUID } from 'node:crypto';
 import { asString, isObject } from '@hapi/protocol';
 import { deriveToolNameWithSource, isPlaceholderToolName } from '@/agent/utils';
 import { parseRateLimitText } from '@/agent/rateLimitParser';
@@ -13,6 +14,8 @@ function normalizeStatus(status: unknown): 'pending' | 'in_progress' | 'complete
 }
 
 type DerivedToolName = ReturnType<typeof deriveToolNameWithSource>;
+
+const REASONING_SNAPSHOT_INTERVAL_MS = 250;
 
 /**
  * Extracts _meta.kind from the first diff block in a content array.
@@ -34,6 +37,40 @@ function deriveToolNameFromUpdate(update: Record<string, unknown>): DerivedToolN
         rawInput: update.rawInput,
         metaKind: extractMetaKindFromContent(update.content)
     });
+}
+
+/**
+ * Normalises a kind string to a canonical category. Different ACP agents
+ * (Gemini, OpenCode, Kimi) use different vocabulary for the same semantic
+ * operation; mapping them here keeps the rest of the handler agent-agnostic.
+ */
+function normalizeToolKind(kind: string | null): 'read' | 'execute' | 'search' | 'edit' | 'think' | null {
+    if (!kind) return null;
+    const k = kind.toLowerCase().trim();
+    if (k === 'read' || k === 'read_file' || k === 'file_read' || k === 'view') return 'read';
+    if (k === 'execute' || k === 'shell' || k === 'bash' || k === 'run' || k === 'run_shell' || k === 'run_shell_command' || k === 'cmd' || k === 'terminal') return 'execute';
+    if (k === 'search' || k === 'grep' || k === 'find' || k === 'glob') return 'search';
+    if (k === 'edit' || k === 'write' || k === 'write_file' || k === 'replace' || k === 'file_edit' || k === 'modify') return 'edit';
+    if (k === 'think' || k === 'thought' || k === 'reasoning') return 'think';
+    return null;
+}
+
+/**
+ * Extracts the argument from a title that uses a "Category: argument" pattern.
+ * Many ACP agents (notably Kimi) emit titles like "Shell: free -h" or
+ * "Read: README.md" where the part after the colon is the actual tool argument.
+ *
+ * Only strips the prefix when the label before the colon normalizes to the
+ * same tool kind, so valid commands/paths that contain colons (e.g.
+ * curl http://localhost:3000, git commit -m "feat: add Kimi") are not corrupted.
+ * Returns the raw title when no matching prefix is found.
+ */
+function extractTitleArgument(title: string, kind: string | null): string {
+    const normalizedKind = normalizeToolKind(kind);
+    const match = title.match(/^([A-Za-z][A-Za-z _-]{0,31}):\s+(.+)$/);
+    if (!match) return title;
+    const labelKind = normalizeToolKind(match[1]);
+    return labelKind && labelKind === normalizedKind ? match[2] : title;
 }
 
 /**
@@ -59,23 +96,84 @@ function deriveInputFromKindAndTitle(
     title: string | null,
     locations: unknown
 ): Record<string, unknown> | null {
-    if (kind === 'edit') {
+    const normalizedKind = normalizeToolKind(kind);
+    if (normalizedKind === 'edit') {
         const arr = Array.isArray(locations) ? locations : [];
         const first = arr[0];
         const path = isObject(first) ? asString(first.path) : null;
         return path ? { file_path: path } : null;
     }
     if (!title) return null;
-    switch (kind) {
+    const arg = extractTitleArgument(title, kind);
+    switch (normalizedKind) {
         case 'read':
-            return { file_path: title };
+            return { file_path: arg };
         case 'execute':
-            return { command: title };
+            return { command: arg };
         case 'search':
-            return { pattern: title };
+            return { pattern: arg };
         default:
             return null;
     }
+}
+
+/**
+ * Kimi ACP streams tool arguments as JSON text inside the `content` array
+ * (e.g. `[{type:'content', content:{type:'text', text:'{"command":"df -h"}'}}]`)
+ * instead of using `rawInput`. This helper extracts and parses that JSON.
+ *
+ * Returns the parsed object when the content is a single text block whose text
+ * is valid JSON object / array. Returns null for anything else so callers can
+ * keep their existing fallback.
+ */
+function extractJsonInputFromContent(content: unknown): Record<string, unknown> | unknown[] | null {
+    if (!Array.isArray(content) || content.length !== 1) return null;
+    const block = content[0];
+    if (!isObject(block)) return null;
+    if (block.type !== 'content') return null;
+    const inner = block.content;
+    if (!isObject(inner)) return null;
+    if (inner.type !== 'text') return null;
+    const text = typeof inner.text === 'string' ? inner.text : null;
+    if (!text || text.trim().length === 0) return null;
+    // Defensive: only parse when it looks like JSON (starts with { or [)
+    const trimmed = text.trim();
+    if (!trimmed.startsWith('{') && !trimmed.startsWith('[')) return null;
+    try {
+        const parsed = JSON.parse(trimmed);
+        if (typeof parsed === 'object' && parsed !== null) {
+            return parsed as Record<string, unknown> | unknown[];
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
+ * Detects whether an existing tool input was derived from a placeholder title
+ * that did not yet contain the actual argument. This happens with agents like
+ * Kimi that send an initial tool_call with a generic title ("Shell") and later
+ * update it to a concrete one ("Shell: free -h").
+ *
+ * Returns true when:
+ *   - the update title contains a colon (indicating it carries the real arg)
+ *   - the existing input is a derived object whose value matches the OLD title
+ */
+function isStaleDerivedInput(existingInput: unknown, updateTitle: string | null, kind: string | null): boolean {
+    if (!updateTitle) return false;
+    const arg = extractTitleArgument(updateTitle, kind);
+    // No colon in title — nothing to extract, not stale
+    if (arg === updateTitle) return false;
+    if (!isObject(existingInput)) return false;
+    const values = Object.values(existingInput);
+    for (const value of values) {
+        if (typeof value === 'string' && value.trim() === arg) {
+            // Input already matches the new argument — not stale
+            return false;
+        }
+    }
+    return true;
 }
 
 type HoistedDiff =
@@ -278,6 +376,10 @@ export class AcpMessageHandler {
     // otherwise incur — a 10k-token reasoning trace allocates 10k full-buffer
     // copies if we use `+=`.
     private bufferedReasoning: string[] = [];
+    private reasoningStreamId: string | null = null;
+    private lastReasoningSnapshotAt: number | null = null;
+    private lastReasoningSnapshotText = '';
+    private reasoningSnapshotEmitted = false;
 
     constructor(private readonly onMessage: (message: AgentMessage) => void) {}
 
@@ -299,14 +401,14 @@ export class AcpMessageHandler {
     /**
      * Emits buffered thought chunks as a single reasoning message and clears
      * the buffer. ACP agents (notably OpenCode/Zen) stream thoughts at the
-     * granularity of one chunk per token; emitting each chunk inline would
-     * make the web reducer render one row per token. Coalescing here keeps
-     * the reasoning block intact while preserving its position relative to
-     * adjacent text segments and tool events.
+     * granularity of one chunk per token; raw per-token messages would make
+     * the web reducer render one row per token. We stream throttled full-text
+     * snapshots with a stable id while the buffer is open, then emit one final
+     * message with the same id at the boundary.
      *
-     * Called automatically before every non-thought update inside
-     * `handleUpdate`, and externally at turn boundaries by `drainBuffers`
-     * from AcpSdkBackend.
+     * Called automatically before visible boundaries inside `handleUpdate`
+     * (assistant text, tool lifecycle, plan), and externally at turn
+     * boundaries by `drainBuffers` from AcpSdkBackend.
      *
      * Whitespace-only buffers are dropped: a turn that happens to emit a
      * single whitespace token would otherwise render an empty Reasoning row
@@ -317,11 +419,12 @@ export class AcpMessageHandler {
             return;
         }
         const text = this.bufferedReasoning.join('');
-        this.bufferedReasoning = [];
+        const id = this.reasoningSnapshotEmitted ? this.reasoningStreamId ?? undefined : undefined;
+        this.resetReasoningState();
         if (text.trim().length === 0) {
             return;
         }
-        this.onMessage({ type: 'reasoning', text });
+        this.onMessage(id ? { type: 'reasoning', text, id } : { type: 'reasoning', text });
     }
 
     /**
@@ -375,6 +478,56 @@ export class AcpMessageHandler {
         this.bufferedText += text;
     }
 
+    private appendReasoningChunk(text: string): void {
+        if (!text) {
+            return;
+        }
+        this.bufferedReasoning.push(text);
+        if (!this.reasoningStreamId) {
+            this.reasoningStreamId = randomUUID();
+        }
+        this.emitReasoningSnapshotIfDue();
+    }
+
+    private emitReasoningSnapshotIfDue(): void {
+        if (!this.reasoningStreamId) {
+            return;
+        }
+
+        const now = Date.now();
+        if (this.lastReasoningSnapshotAt === null) {
+            this.lastReasoningSnapshotAt = now;
+            return;
+        }
+        if (now - this.lastReasoningSnapshotAt < REASONING_SNAPSHOT_INTERVAL_MS) {
+            return;
+        }
+
+        const text = this.bufferedReasoning.join('');
+        if (text.trim().length === 0 || text === this.lastReasoningSnapshotText) {
+            this.lastReasoningSnapshotAt = now;
+            return;
+        }
+
+        this.lastReasoningSnapshotAt = now;
+        this.lastReasoningSnapshotText = text;
+        this.reasoningSnapshotEmitted = true;
+        this.onMessage({
+            type: 'reasoning',
+            text,
+            id: this.reasoningStreamId,
+            live: true
+        });
+    }
+
+    private resetReasoningState(): void {
+        this.bufferedReasoning = [];
+        this.reasoningStreamId = null;
+        this.lastReasoningSnapshotAt = null;
+        this.lastReasoningSnapshotText = '';
+        this.reasoningSnapshotEmitted = false;
+    }
+
     handleUpdate(update: unknown): void {
         if (!isObject(update)) return;
         const updateType = asString(update.sessionUpdate);
@@ -394,16 +547,10 @@ export class AcpMessageHandler {
             // should not cause the reasoning to be silently dropped.
             const content = update.content;
             if (isObject(content) && content.type === 'text' && typeof content.text === 'string' && content.text.length > 0) {
-                this.bufferedReasoning.push(content.text);
+                this.appendReasoningChunk(content.text);
             }
             return;
         }
-
-        // Any non-thought update is a reasoning-segment boundary: emit the
-        // accumulated thought now so it arrives before the next event in
-        // the same arrival order that streamed in. Tool calls / plans
-        // additionally flush the text buffer below.
-        this.flushReasoning();
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.agentMessageChunk) {
             const content = update.content;
@@ -423,6 +570,7 @@ export class AcpMessageHandler {
                     if (rateLimit.suppress) {
                         return;
                     }
+                    this.flushReasoning();
                     this.flushText();
                     this.onMessage(rateLimit.message);
                     return;
@@ -435,12 +583,20 @@ export class AcpMessageHandler {
                     }
                     return;
                 }
+                // Visible assistant text is a reasoning-segment boundary:
+                // emit accumulated thoughts first so the rendered turn keeps
+                // Reasoning above the answer. Empty / filtered message chunks
+                // are not boundaries; OpenCode can interleave bookkeeping
+                // updates while streaming thoughts, and flushing on those
+                // would split reasoning back into one row per token.
+                this.flushReasoning();
                 this.appendTextChunk(text);
             }
             return;
         }
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.toolCall) {
+            this.flushReasoning();
             // A new tool invocation closes the preceding text segment.
             // Flushing here preserves the arrival order between text and
             // tool lifecycle events without disturbing cumulative dedup
@@ -451,16 +607,20 @@ export class AcpMessageHandler {
         }
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.toolCallUpdate) {
-            // Do not flush here: a toolCallUpdate is a lifecycle event on
-            // an already-open tool call, not a boundary between text
+            this.flushReasoning();
+            // Do not flush text here: a toolCallUpdate is a lifecycle event
+            // on an already-open tool call, not a boundary between text
             // segments. If the agent streams a new text segment while the
-            // tool is running, flushing here would leak that segment
-            // across the tool_result boundary.
+            // tool is running, flushing text here would leak that segment
+            // across the tool_result boundary. Reasoning is separate and is
+            // flushed above so tool results still appear after the thought
+            // that led to them.
             this.handleToolCallUpdate(update);
             return;
         }
 
         if (updateType === ACP_SESSION_UPDATE_TYPES.plan) {
+            this.flushReasoning();
             this.flushText();
             const items = normalizePlanEntries(update.entries);
             if (items.length > 0) {
@@ -483,11 +643,21 @@ export class AcpMessageHandler {
             metaKind: null
         });
         const name = derivedName.name;
-        // Priority: rawInput > kind+title fallback.
-        // Use `in` to distinguish "rawInput key absent" from "rawInput is {}".
-        const input = 'rawInput' in update
-            ? update.rawInput
-            : deriveInputFromKindAndTitle(asString(update.kind), asString(update.title), update.locations);
+        // Priority: rawInput > kind+title fallback > content JSON fallback.
+        // Kimi ACP streams tool arguments as JSON text in the content array
+        // instead of rawInput/kind. Try all three sources.
+        let input: unknown;
+        if (update.rawInput != null) {
+            input = update.rawInput;
+        } else {
+            const fromKindTitle = deriveInputFromKindAndTitle(asString(update.kind), asString(update.title), update.locations);
+            if (fromKindTitle) {
+                input = fromKindTitle;
+            } else {
+                const fromContent = extractJsonInputFromContent(update.content);
+                input = fromContent;
+            }
+        }
         const status = normalizeStatus(update.status);
 
         this.toolCalls.set(toolCallId, { name, input });
@@ -508,7 +678,7 @@ export class AcpMessageHandler {
         const status = normalizeStatus(update.status);
         const existing = this.toolCalls.get(toolCallId);
 
-        if (update.rawInput !== undefined) {
+        if (update.rawInput != null) {
             const derivedName = deriveToolNameFromUpdate(update);
             const name = this.selectToolNameForUpdate(existing?.name ?? null, derivedName);
             const input = update.rawInput;
@@ -526,16 +696,31 @@ export class AcpMessageHandler {
             // enriched the input or when the call is still active.
             let input = existing.input;
             let name = existing.name;
-            if (input == null) {
-                const fallback = deriveInputFromKindAndTitle(asString(update.kind), asString(update.title), update.locations);
+            let rederived = false;
+            const updateTitle = asString(update.title);
+            if (input == null || isStaleDerivedInput(input, updateTitle, asString(update.kind))) {
+                const fallback = deriveInputFromKindAndTitle(asString(update.kind), updateTitle, update.locations);
                 if (fallback) {
                     input = fallback;
                     const derivedName = deriveToolNameFromUpdate(update);
                     name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
                     this.toolCalls.set(toolCallId, { name, input });
+                    rederived = true;
                 }
             }
-            const justEnriched = existing.input == null && input != null;
+            // Kimi ACP streams tool arguments as JSON text in the content array.
+            // If we still don't have a useful input, try to parse the content.
+            if (!rederived && (input == null || isStaleDerivedInput(input, updateTitle, asString(update.kind)))) {
+                const fromContent = extractJsonInputFromContent(update.content);
+                if (fromContent && isObject(fromContent)) {
+                    input = fromContent;
+                    const derivedName = deriveToolNameFromUpdate(update);
+                    name = this.selectToolNameForUpdate(existing.name ?? null, derivedName);
+                    this.toolCalls.set(toolCallId, { name, input });
+                    rederived = true;
+                }
+            }
+            const justEnriched = (existing.input == null && input != null) || rederived;
             if (status === 'in_progress' || status === 'pending' || justEnriched) {
                 this.onMessage({
                     type: 'tool_call',
