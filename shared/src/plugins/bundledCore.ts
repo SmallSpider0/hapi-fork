@@ -1,4 +1,4 @@
-import { HAPI_PLUGIN_API_VERSION, type PluginManifestLite } from './manifest'
+import { HAPI_PLUGIN_API_VERSION, type PluginDisplayMetadata, type PluginLocalizedTextMetadata, type PluginManifestLite } from './manifest'
 import type { PluginWebContributions } from './webDescriptors'
 import { getBundledPluginsRoot, prepareBundledPlugins, type BundledPlugin } from './bundledMaterialize'
 
@@ -15,6 +15,40 @@ function manifestBase(manifest: Omit<PluginManifestLite, 'pluginApiVersion' | 'v
         ...manifest,
         version: manifest.version ?? '0.1.0',
         pluginApiVersion: HAPI_PLUGIN_API_VERSION
+    }
+}
+
+function labelMetadata(
+    enName: string,
+    zhName: string,
+    enDescription?: string,
+    zhDescription?: string
+): PluginLocalizedTextMetadata {
+    return {
+        name: { en: enName, 'zh-CN': zhName },
+        ...(enDescription || zhDescription ? {
+            description: {
+                ...(enDescription ? { en: enDescription } : {}),
+                ...(zhDescription ? { 'zh-CN': zhDescription } : {})
+            }
+        } : {})
+    }
+}
+
+function displayMetadata(
+    enName: string,
+    zhName: string,
+    enDescription: string,
+    zhDescription: string,
+    enFeatureIntro: string,
+    zhFeatureIntro: string
+): PluginDisplayMetadata {
+    return {
+        ...labelMetadata(enName, zhName, enDescription, zhDescription),
+        featureIntro: {
+            en: enFeatureIntro,
+            'zh-CN': zhFeatureIntro
+        }
     }
 }
 
@@ -296,11 +330,35 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             id: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
             name: 'Schedule Send',
             description: 'First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.',
+            display: displayMetadata(
+                'Schedule Send',
+                '定时发送',
+                'Adds a delay picker to the chat composer and routes scheduled delivery through the Hub.',
+                '在聊天输入框添加延迟发送选择器，并通过 Hub 可靠投递队列安排发送。',
+                [
+                    '### What it adds',
+                    '- Adds a delay picker to the chat composer.',
+                    '- Validates scheduled-message requests in the Hub runtime.',
+                    '- Uses HAPI reliable delivery so queued messages survive reloads.'
+                ].join('\n'),
+                [
+                    '### 功能',
+                    '- 在聊天输入框提供延迟发送选择器。',
+                    '- 由 Hub 运行时校验定时消息请求。',
+                    '- 使用 HAPI 可靠投递队列，重载后仍可继续发送。'
+                ].join('\n')
+            ),
             capabilities: [{
                 id: 'schedule-send',
                 kind: 'chat.composer.messageAction',
                 displayName: 'Schedule Send',
                 description: 'Adds a delay picker to the chat composer and returns a Hub-owned message delivery plan.',
+                display: labelMetadata(
+                    'Schedule Send',
+                    '定时发送',
+                    'Adds a delay picker to the chat composer and returns a Hub-owned message delivery plan.',
+                    '在聊天输入框添加延迟选择器，并返回由 Hub 管理的消息投递计划。'
+                ),
                 parts: {
                     web: {
                         required: true,
@@ -320,7 +378,13 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                     messageActions: [{
                         id: 'schedule-send',
                         displayName: 'Schedule Send',
-                        description: 'Plans delayed delivery for a user message.'
+                        description: 'Plans delayed delivery for a user message.',
+                        display: labelMetadata(
+                            'Schedule Send',
+                            '定时发送',
+                            'Plans delayed delivery for a user message.',
+                            '为用户消息创建延迟投递计划。'
+                        )
                     }]
                 },
                 web: scheduleSendWebContributions
@@ -333,11 +397,35 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             id: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
             name: 'ServerChan Notifier',
             description: 'First-party Hub plugin that sends selected HAPI notifications through ServerChan.',
+            display: displayMetadata(
+                'ServerChan Notifier',
+                'Server 酱通知',
+                'Sends selected HAPI notifications through ServerChan from the Hub runtime.',
+                '通过 Hub 运行时把选定的 HAPI 通知发送到 Server 酱。',
+                [
+                    '### What it adds',
+                    '- Registers a Hub notification channel backed by ServerChan.',
+                    '- Lets you choose which HAPI events are forwarded.',
+                    '- Reads `SERVERCHAN_SENDKEY` from the Hub environment; Web never stores the secret.'
+                ].join('\n'),
+                [
+                    '### 功能',
+                    '- 注册由 Server 酱驱动的 Hub 通知通道。',
+                    '- 可配置需要转发的 HAPI 事件类型。',
+                    '- 从 Hub 环境变量读取 `SERVERCHAN_SENDKEY`，Web 不保存密钥。'
+                ].join('\n')
+            ),
             capabilities: [{
                 id: 'serverchan-notifier',
                 kind: 'notification.channel',
                 displayName: 'ServerChan Notifier',
                 description: 'Adds a configurable ServerChan notification channel backed by Hub plugin notifications.',
+                display: labelMetadata(
+                    'ServerChan Notifier',
+                    'Server 酱通知',
+                    'Adds a configurable ServerChan notification channel backed by Hub plugin notifications.',
+                    '添加可配置的 Server 酱通知通道，由 Hub 插件通知能力驱动。'
+                ),
                 parts: {
                     web: {
                         required: true,
@@ -356,7 +444,11 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                 hub: {
                     notificationChannels: [{
                         id: 'serverchan',
-                        displayName: 'ServerChan Notifier'
+                        displayName: 'ServerChan Notifier',
+                        display: labelMetadata(
+                            'ServerChan Notifier',
+                            'Server 酱通知'
+                        )
                     }]
                 },
                 web: {
@@ -415,11 +507,35 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             id: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
             name: 'Runner Environment Profiles',
             description: 'First-party Runner plugin for applying non-secret proxy, registry, and PATH environment profiles before spawning agents.',
+            display: displayMetadata(
+                'Runner Environment Profiles',
+                'Runner 环境配置',
+                'Applies non-secret proxy, registry, and PATH profiles before Runner-spawned agents start.',
+                '在 Runner 启动 agent 前应用非敏感的代理、包源和 PATH 环境配置。',
+                [
+                    '### What it adds',
+                    '- Applies HTTP proxy, registry, and PATH values before spawning agents.',
+                    '- Supports agent-id and workspace-prefix filters.',
+                    '- Runs on selected Runner targets; values are non-secret config.'
+                ].join('\n'),
+                [
+                    '### 功能',
+                    '- 在启动 agent 前注入 HTTP 代理、包源和 PATH 等环境变量。',
+                    '- 支持按 Agent ID 与工作区前缀限定生效范围。',
+                    '- 在指定 Runner 目标运行；配置值不应包含密钥。'
+                ].join('\n')
+            ),
             capabilities: [{
                 id: 'runner-env-profiles',
                 kind: 'runner.spawnExtension',
                 displayName: 'Runner Environment Profiles',
                 description: 'Applies common non-secret environment variables to Runner-spawned agent processes.',
+                display: labelMetadata(
+                    'Runner Environment Profiles',
+                    'Runner 环境配置',
+                    'Applies common non-secret environment variables to Runner-spawned agent processes.',
+                    '为 Runner 启动的 agent 进程应用常用非敏感环境变量。'
+                ),
                 parts: {
                     web: {
                         required: true,
@@ -440,7 +556,13 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                     environmentProviders: [{
                         id: 'runner-env-profiles',
                         displayName: 'Runner Environment Profiles',
-                        description: 'Applies proxy, registry, and PATH settings to spawned agents.'
+                        description: 'Applies proxy, registry, and PATH settings to spawned agents.',
+                        display: labelMetadata(
+                            'Runner Environment Profiles',
+                            'Runner 环境配置',
+                            'Applies proxy, registry, and PATH settings to spawned agents.',
+                            '为启动的 agent 应用代理、包源与 PATH 设置。'
+                        )
                     }]
                 },
                 web: {
@@ -489,11 +611,35 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             id: HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
             name: 'Runner Spawn Guard',
             description: 'First-party Runner plugin for blocking risky agent spawns by agent id, workspace prefix, or bypass permission mode.',
+            display: displayMetadata(
+                'Runner Spawn Guard',
+                'Runner 启动保护',
+                'Blocks risky Runner agent launches by agent id, workspace prefix, or bypass permission mode.',
+                '按 Agent ID、工作区前缀或 bypass 权限模式阻止高风险 Runner 启动。',
+                [
+                    '### What it adds',
+                    '- Checks Runner spawn requests before the agent process starts.',
+                    '- Can block specific agent ids or workspace prefixes.',
+                    '- Can prevent yolo / bypass permission mode on selected Runners.'
+                ].join('\n'),
+                [
+                    '### 功能',
+                    '- 在 agent 进程启动前检查 Runner 启动请求。',
+                    '- 可阻止指定 Agent ID 或工作区前缀。',
+                    '- 可在选定 Runner 上禁止 yolo / bypass 权限模式。'
+                ].join('\n')
+            ),
             capabilities: [{
                 id: 'runner-spawn-guard',
                 kind: 'runner.spawnExtension',
                 displayName: 'Runner Spawn Guard',
                 description: 'Blocks configured Runner spawn requests before an agent process starts.',
+                display: labelMetadata(
+                    'Runner Spawn Guard',
+                    'Runner 启动保护',
+                    'Blocks configured Runner spawn requests before an agent process starts.',
+                    '在 agent 进程启动前阻止符合规则的 Runner 启动请求。'
+                ),
                 parts: {
                     web: {
                         required: true,
@@ -514,7 +660,13 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                     spawnHooks: [{
                         id: 'runner-spawn-guard',
                         displayName: 'Runner Spawn Guard',
-                        description: 'Blocks risky spawn requests before execution.'
+                        description: 'Blocks risky spawn requests before execution.',
+                        display: labelMetadata(
+                            'Runner Spawn Guard',
+                            'Runner 启动保护',
+                            'Blocks risky spawn requests before execution.',
+                            '在执行前阻止高风险启动请求。'
+                        )
                     }]
                 },
                 web: {

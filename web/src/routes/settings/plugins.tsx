@@ -5,6 +5,7 @@ import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugins } from '@/hooks/queries/usePlugins'
 import { usePluginActions } from '@/hooks/mutations/usePluginActions'
 import { useTranslation } from '@/lib/use-translation'
+import { localizedPluginDescription, localizedPluginName } from '@/lib/plugin-metadata'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -18,6 +19,7 @@ export type PluginDisplayGroup = {
     name?: string
     version?: string
     description?: string
+    display?: PluginListItem['display']
     source: PluginListItem['source']
     status: PluginListItem['status']
     enabled: boolean
@@ -63,16 +65,16 @@ function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
 }
 
-function pluginTargetLabel(t: (key: string) => string, plugin: PluginListItem): string {
+function pluginTargetLabel(t: (key: string, params?: Record<string, string | number>) => string, plugin: PluginListItem): string {
     if (!plugin.target) return t('settings.plugins.target.local')
-    if (plugin.target.scope === 'hub') return 'Hub'
-    if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
+    if (plugin.target.scope === 'hub') return t('settings.plugins.target.hub')
+    if (plugin.target.runtime === 'runner') return t('settings.plugins.target.runner', { name: plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope })
     return plugin.target.scope
 }
 
-function targetLabel(target: { scope: string; runtime: string; displayName?: string; machineId?: string }): string {
-    if (target.scope === 'hub') return 'Hub'
-    if (target.runtime === 'runner') return `Runner · ${target.displayName ?? target.machineId ?? target.scope}`
+function targetLabel(t: (key: string, params?: Record<string, string | number>) => string, target: { scope: string; runtime: string; displayName?: string; machineId?: string }): string {
+    if (target.scope === 'hub') return t('settings.plugins.target.hub')
+    if (target.runtime === 'runner') return t('settings.plugins.target.runner', { name: target.displayName ?? target.machineId ?? target.scope })
     return target.scope
 }
 
@@ -177,6 +179,7 @@ export function groupPluginListForDisplay(plugins: PluginListItem[]): PluginDisp
                 name: primary.name ?? sorted.find((plugin) => plugin.name)?.name,
                 version: primary.version ?? sorted.find((plugin) => plugin.version)?.version,
                 description: primary.description ?? sorted.find((plugin) => plugin.description)?.description,
+                display: primary.display ?? sorted.find((plugin) => plugin.display)?.display,
                 source: primary.source,
                 status: worst.status,
                 enabled: sorted.some((plugin) => plugin.enabled),
@@ -240,9 +243,12 @@ function PluginCard(props: {
     group: PluginDisplayGroup
     onClick: () => void
     t: (key: string, params?: Record<string, string | number>) => string
+    locale: 'en' | 'zh-CN'
 }) {
-    const { group, t } = props
+    const { group, t, locale } = props
     const issueCount = group.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length
+    const name = localizedPluginName(group, locale)
+    const description = localizedPluginDescription(group, locale)
     return (
         <button
             type="button"
@@ -253,12 +259,12 @@ function PluginCard(props: {
             <div className="min-w-0 flex-1 space-y-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <div className="truncate font-medium">{group.name ?? group.id}</div>
+                        <div className="truncate font-medium">{name}</div>
                         <div className="truncate text-xs text-[var(--app-hint)]">{pluginMeta(t, group, issueCount)}</div>
                     </div>
                     <Badge variant={statusVariant(group.status)}>{t(`settings.plugins.status.${group.status}`)}</Badge>
                 </div>
-                {group.description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{group.description}</div> : null}
+                {description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
                 {group.plugins.length > 1 ? (
                     <div className="flex flex-wrap gap-1">
                         {group.plugins.map((plugin) => (
@@ -323,6 +329,7 @@ function planActionVariant(action: string): BadgeVariant {
 function InstallPlanCard(props: {
     plan: PluginInstallPlanResponse | null
     t: (key: string, params?: Record<string, string | number>) => string
+    locale: 'en' | 'zh-CN'
 }) {
     if (!props.plan) return null
     const { plan, t } = props
@@ -331,7 +338,7 @@ function InstallPlanCard(props: {
             <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
                 <div>
                     <div className="font-medium">{t('settings.plugins.install.planTitle')}</div>
-                    <div className="text-xs text-[var(--app-hint)]">{plan.plugin.name} · {plan.plugin.version}</div>
+                    <div className="text-xs text-[var(--app-hint)]">{localizedPluginName(plan.plugin, props.locale)} · {plan.plugin.version}</div>
                 </div>
                 <div className="flex flex-wrap gap-1">
                     {plan.positions.map((position) => <Badge key={position} variant="default">{t(`settings.plugins.install.position.${position}`)}</Badge>)}
@@ -352,7 +359,7 @@ function InstallPlanCard(props: {
                     <div key={target.target.scope} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2">
                         <div className="flex flex-wrap items-center justify-between gap-2">
                             <div>
-                                <div className="font-medium">{targetLabel(target.target)}</div>
+                                <div className="font-medium">{targetLabel(t, target.target)}</div>
                                 <div className="text-xs text-[var(--app-hint)]">
                                     {target.target.hostInfo
                                         ? `${target.target.hostInfo.hapiVersion} · API ${target.target.hostInfo.pluginApiVersion} · ${target.target.hostInfo.os}/${target.target.hostInfo.arch}`
@@ -376,7 +383,7 @@ export default function PluginsPage() {
     const { api } = useAppContext()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
     const { plugins, isLoading, error, refetch } = usePlugins(api)
     const actions = usePluginActions(api)
     const [filter, setFilter] = useState<PluginFilter>('all')
@@ -529,7 +536,7 @@ export default function PluginsPage() {
                                     {t('settings.plugins.install.selectedPackage', { filename: packageFile.name })}
                                 </div>
                             ) : null}
-                            <InstallPlanCard plan={installPlan} t={t} />
+                            <InstallPlanCard plan={installPlan} t={t} locale={locale} />
                         </CardContent>
                     </Card>
 
@@ -552,6 +559,7 @@ export default function PluginsPage() {
                                 key={group.id}
                                 group={group}
                                 t={t}
+                                locale={locale}
                                 onClick={() => navigate({
                                     to: '/settings/plugins/$pluginId',
                                     params: { pluginId: group.id },

@@ -33,6 +33,69 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                 "description": {
                     "type": "string"
                 },
+                "display": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                {
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "additionalProperties": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                }
+                            ]
+                        },
+                        "description": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                {
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "additionalProperties": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                }
+                            ]
+                        },
+                        "featureIntro": {
+                            "anyOf": [
+                                {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                {
+                                    "type": "object",
+                                    "propertyNames": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "additionalProperties": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "additionalProperties": false
+                },
                 "source": {
                     "type": "string",
                     "enum": [
@@ -451,6 +514,69 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                         "description": {
                             "type": "string"
                         },
+                        "display": {
+                            "type": "object",
+                            "properties": {
+                                "name": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        {
+                                            "type": "object",
+                                            "propertyNames": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "additionalProperties": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    ]
+                                },
+                                "description": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        {
+                                            "type": "object",
+                                            "propertyNames": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "additionalProperties": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    ]
+                                },
+                                "featureIntro": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        {
+                                            "type": "object",
+                                            "propertyNames": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "additionalProperties": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    ]
+                                }
+                            },
+                            "additionalProperties": false
+                        },
                         "capabilities": {
                             "type": "array",
                             "items": {
@@ -481,6 +607,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                     },
                                     "description": {
                                         "type": "string"
+                                    },
+                                    "display": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "propertyNames": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "additionalProperties": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            "description": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "propertyNames": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "additionalProperties": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                ]
+                                            }
+                                        },
+                                        "additionalProperties": false
                                     },
                                     "parts": {
                                         "type": "object",
@@ -706,6 +876,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     "displayName": {
                                                         "type": "string",
                                                         "minLength": 1
+                                                    },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
                                                     }
                                                 },
                                                 "required": [
@@ -732,6 +946,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     },
                                                     "description": {
                                                         "type": "string"
+                                                    },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
                                                     }
                                                 },
                                                 "required": [
@@ -764,6 +1022,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     },
                                                     "description": {
                                                         "type": "string"
+                                                    },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
                                                     },
                                                     "supportStatus": {
                                                         "type": "string",
@@ -806,6 +1108,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     "description": {
                                                         "type": "string"
                                                     },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
+                                                    },
                                                     "supportStatus": {
                                                         "type": "string",
                                                         "enum": [
@@ -846,6 +1192,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     },
                                                     "description": {
                                                         "type": "string"
+                                                    },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
                                                     },
                                                     "supportStatus": {
                                                         "type": "string",
@@ -894,6 +1284,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     "description": {
                                                         "type": "string"
                                                     },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
+                                                    },
                                                     "supportStatus": {
                                                         "type": "string",
                                                         "enum": [
@@ -934,6 +1368,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     },
                                                     "description": {
                                                         "type": "string"
+                                                    },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
                                                     },
                                                     "supportStatus": {
                                                         "type": "string",
@@ -982,6 +1460,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     "description": {
                                                         "type": "string"
                                                     },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
+                                                    },
                                                     "supportStatus": {
                                                         "type": "string",
                                                         "enum": [
@@ -1029,6 +1551,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     "description": {
                                                         "type": "string"
                                                     },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
+                                                    },
                                                     "supportStatus": {
                                                         "type": "string",
                                                         "enum": [
@@ -1075,6 +1641,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                                     },
                                                     "description": {
                                                         "type": "string"
+                                                    },
+                                                    "display": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "name": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            }
+                                                        },
+                                                        "additionalProperties": false
                                                     },
                                                     "supportStatus": {
                                                         "type": "string",
@@ -2862,6 +3472,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                     "displayName": {
                                         "type": "string",
                                         "minLength": 1
+                                    },
+                                    "display": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "propertyNames": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "additionalProperties": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            "description": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "propertyNames": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "additionalProperties": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                ]
+                                            }
+                                        },
+                                        "additionalProperties": false
                                     }
                                 },
                                 "required": [
@@ -2886,6 +3540,50 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                     },
                                     "description": {
                                         "type": "string"
+                                    },
+                                    "display": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "propertyNames": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "additionalProperties": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                ]
+                                            },
+                                            "description": {
+                                                "anyOf": [
+                                                    {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "propertyNames": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "additionalProperties": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                ]
+                                            }
+                                        },
+                                        "additionalProperties": false
                                     }
                                 },
                                 "required": [

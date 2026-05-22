@@ -11,7 +11,16 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { PluginDescriptorPanels, type DescriptorActionHandler } from '@/components/plugins/DescriptorRenderer'
+import {
+    localizedCapabilityDescription,
+    localizedCapabilityName,
+    localizedContributionName,
+    localizedPluginDescription,
+    localizedPluginName,
+    pluginFeatureIntroMarkdown
+} from '@/lib/plugin-metadata'
 import { PluginTargetScopeSchema, type PluginCapabilityView, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
@@ -58,15 +67,19 @@ function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
 }
 
-function pluginTargetLabel(t: (key: string) => string, plugin: PluginDetail): string {
+function pluginTargetLabel(t: (key: string, params?: Record<string, string | number>) => string, plugin: PluginDetail): string {
     if (!plugin.target) return t('settings.plugins.target.local')
-    if (plugin.target.scope === 'hub') return 'Hub'
-    if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
+    if (plugin.target.scope === 'hub') return t('settings.plugins.target.hub')
+    if (plugin.target.runtime === 'runner') return t('settings.plugins.target.runner', { name: plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope })
     return plugin.target.scope
 }
 
-function targetScopeLabel(t: (key: string) => string, scope?: string): string {
-    return scope ?? t('settings.plugins.target.local')
+function targetScopeLabel(t: (key: string, params?: Record<string, string | number>) => string, scope?: string): string {
+    if (!scope) return t('settings.plugins.target.local')
+    if (scope === 'hub') return t('settings.plugins.target.hub')
+    if (scope === 'all-runners') return t('settings.plugins.target.allRunners')
+    if (scope.startsWith('runner:')) return t('settings.plugins.target.runner', { name: scope.slice('runner:'.length) })
+    return scope
 }
 
 function runtimeActive(plugin: PluginDetail, runtime: string): boolean {
@@ -79,18 +92,40 @@ function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }
     return <Badge variant={props.variant ?? 'default'} className="gap-1 font-medium">{props.icon}{props.label}</Badge>
 }
 
-function contributionName(t: (key: string) => string, entry: unknown): string {
-    if (!entry || typeof entry !== 'object') return t('settings.plugins.unknown')
-    const descriptor = entry as { id?: unknown; displayName?: unknown }
-    if (typeof descriptor.displayName === 'string') return descriptor.displayName
-    if (typeof descriptor.id === 'string') return descriptor.id
-    return t('settings.plugins.unknown')
+function contributionId(entry: unknown): string | undefined {
+    if (!entry || typeof entry !== 'object') return undefined
+    const id = (entry as { id?: unknown }).id
+    return typeof id === 'string' ? id : undefined
 }
 
-function contributionSupportSuffix(entry: unknown): string {
+function contributionDisplay(entry: unknown): unknown {
+    if (!entry || typeof entry !== 'object') return undefined
+    const display = (entry as { display?: unknown }).display
+    return display && typeof display === 'object' ? display : undefined
+}
+
+function contributionFallback(entry: unknown): unknown {
+    if (!entry || typeof entry !== 'object') return undefined
+    const descriptor = entry as { displayName?: unknown; title?: unknown; label?: unknown; id?: unknown }
+    return descriptor.displayName ?? descriptor.title ?? descriptor.label ?? descriptor.id
+}
+
+function contributionName(t: (key: string) => string, locale: 'en' | 'zh-CN', pluginId: string, entry: unknown): string {
+    if (!entry || typeof entry !== 'object') return t('settings.plugins.unknown')
+    return localizedContributionName({
+        pluginId,
+        contributionId: contributionId(entry),
+        display: contributionDisplay(entry),
+        fallback: contributionFallback(entry),
+        locale,
+        unknownLabel: t('settings.plugins.unknown')
+    })
+}
+
+function contributionSupportSuffix(t: (key: string) => string, entry: unknown): string {
     if (!entry || typeof entry !== 'object') return ''
     const supportStatus = (entry as { supportStatus?: unknown }).supportStatus
-    return typeof supportStatus === 'string' ? ` · ${supportStatus}` : ''
+    return typeof supportStatus === 'string' ? ` · ${t(`settings.plugins.supportStatus.${supportStatus}`)}` : ''
 }
 
 function formatConfig(value: unknown): string {
@@ -211,18 +246,17 @@ function capabilityStatusVariant(status: string): BadgeVariant {
     return 'default'
 }
 
-function capabilityPartLabel(part: 'web' | 'hub' | 'runner'): string {
-    if (part === 'web') return 'WEB'
-    if (part === 'hub') return 'HUB'
-    return 'RUNNER'
+function capabilityPartLabel(t: (key: string) => string, part: 'web' | 'hub' | 'runner'): string {
+    return t(`settings.plugins.capabilityPart.${part}`)
 }
 
 function CapabilitiesList(props: {
     capabilities: PluginCapabilityView[]
     loading: boolean
     t: (key: string, params?: Record<string, string | number>) => string
+    locale: 'en' | 'zh-CN'
 }) {
-    const { capabilities, loading, t } = props
+    const { capabilities, loading, t, locale } = props
     if (loading && capabilities.length === 0) {
         return <LoadingState label={t('settings.plugins.capabilities.loading')} className="p-2" />
     }
@@ -235,21 +269,21 @@ function CapabilitiesList(props: {
                 <div key={`${capability.pluginId}-${capability.capabilityId}`} className="rounded-lg border border-[var(--app-border)] p-3 text-sm">
                     <div className="flex flex-wrap items-start justify-between gap-2">
                         <div className="min-w-0">
-                            <div className="font-medium">{capability.displayName ?? capability.capabilityId}</div>
-                            <div className="break-all text-xs text-[var(--app-hint)]">{capability.kind} · {capability.capabilityId}</div>
-                            {capability.description ? <div className="mt-1 text-sm text-[var(--app-hint)]">{capability.description}</div> : null}
+                            <div className="font-medium">{localizedCapabilityName(capability, locale)}</div>
+                            <div className="break-all text-xs text-[var(--app-hint)]">{t(`settings.plugins.capabilityKind.${capability.kind}`)} · {capability.capabilityId}</div>
+                            {localizedCapabilityDescription(capability, locale) ? <div className="mt-1 text-sm text-[var(--app-hint)]">{localizedCapabilityDescription(capability, locale)}</div> : null}
                         </div>
-                        <Badge variant={capabilityStatusVariant(capability.status)}>{capability.status}</Badge>
+                        <Badge variant={capabilityStatusVariant(capability.status)}>{t(`settings.plugins.capabilityStatus.${capability.status}`)}</Badge>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2">
                         {(['web', 'hub', 'runner'] as const).map((partName) => {
                             const part = capability.parts[partName]
                             if (!part) return null
-                            const suffix = part.target?.scope ? ` · ${part.target.scope}` : ''
+                            const suffix = part.target?.scope ? ` · ${targetScopeLabel(t, part.target.scope)}` : ''
                             return (
                                 <Chip
                                     key={partName}
-                                    label={`${capabilityPartLabel(partName)} · ${part.status}${suffix}`}
+                                    label={`${capabilityPartLabel(t, partName)} · ${t(`settings.plugins.capabilityStatus.${part.status}`)}${suffix}`}
                                     variant={capabilityStatusVariant(part.status)}
                                 />
                             )
@@ -266,71 +300,71 @@ function CapabilitiesList(props: {
     )
 }
 
-function ContributionsList(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string }) {
-    const { plugin, t } = props
+function ContributionsList(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string; locale: 'en' | 'zh-CN' }) {
+    const { plugin, t, locale } = props
     const chips: Array<{ key: string; label: string; variant?: BadgeVariant }> = [
         ...plugin.contributions.notificationChannels.map((channel) => ({
             key: `hub-notification-${channel.id}`,
-            label: `${t('settings.plugins.contribution.hubNotification')} · ${channel.displayName} · ${channel.id}`,
+            label: `${t('settings.plugins.contribution.hubNotification')} · ${contributionName(t, locale, plugin.id, channel)} · ${channel.id}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.runner?.environmentProviders ?? []).map((entry) => ({
             key: `runner-env-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.runnerEnv')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`,
+            label: `${t('settings.plugins.contribution.runnerEnv')} · ${contributionName(t, locale, plugin.id, entry)}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.runner?.commandResolvers ?? []).map((entry) => ({
             key: `runner-command-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.runnerCommand')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`,
+            label: `${t('settings.plugins.contribution.runnerCommand')} · ${contributionName(t, locale, plugin.id, entry)}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.runner?.spawnHooks ?? []).map((entry) => ({
             key: `runner-spawn-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.runnerSpawn')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`,
+            label: `${t('settings.plugins.contribution.runnerSpawn')} · ${contributionName(t, locale, plugin.id, entry)}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.agent?.adapters ?? []).map((entry) => ({
             key: `agent-adapter-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.agentAdapter')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.agentAdapter')} · ${contributionName(t, locale, plugin.id, entry)}`
         })),
         ...(plugin.contributions.agent?.capabilityProviders ?? []).map((entry) => ({
             key: `agent-capability-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.agentCapability')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.agentCapability')} · ${contributionName(t, locale, plugin.id, entry)}`
         })),
         ...(plugin.contributions.voice?.providers ?? []).map((entry) => ({
             key: `voice-provider-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.voiceProvider')} · ${contributionName(t, entry)}${contributionSupportSuffix(entry)}`,
+            label: `${t('settings.plugins.contribution.voiceProvider')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.deployment?.packs ?? []).map((entry) => ({
             key: `deployment-pack-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.deploymentPack')} · ${contributionName(t, entry)}${contributionSupportSuffix(entry)}`,
+            label: `${t('settings.plugins.contribution.deploymentPack')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.integration?.protocolBridges ?? []).map((entry) => ({
             key: `integration-protocol-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.protocolBridge')} · ${contributionName(t, entry)}${contributionSupportSuffix(entry)}`,
+            label: `${t('settings.plugins.contribution.protocolBridge')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.web?.settingsPanels ?? []).map((entry) => ({
             key: `web-settings-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webSettings')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.webSettings')} · ${contributionName(t, locale, plugin.id, entry)}`
         })),
         ...(plugin.contributions.web?.newSessionFields ?? []).map((entry) => ({
             key: `web-new-session-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webNewSession')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.webNewSession')} · ${contributionName(t, locale, plugin.id, entry)}`
         })),
         ...(plugin.contributions.web?.actions ?? []).map((entry) => ({
             key: `web-action-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webAction')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.webAction')} · ${contributionName(t, locale, plugin.id, entry)}`
         })),
         ...(plugin.contributions.web?.badges ?? []).map((entry) => ({
             key: `web-badge-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webBadge')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.webBadge')} · ${contributionName(t, locale, plugin.id, entry)}`
         })),
         ...(plugin.contributions.web?.composerActions ?? []).map((entry) => ({
             key: `web-composer-action-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webComposerAction')} · ${String((entry as { label?: unknown }).label ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+            label: `${t('settings.plugins.contribution.webComposerAction')} · ${contributionName(t, locale, plugin.id, entry)}`
         }))
     ]
 
@@ -359,8 +393,8 @@ function secretPermissionLabel(
     return parts.join(' · ')
 }
 
-function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string }) {
-    const { plugin, t } = props
+function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string; locale: 'en' | 'zh-CN' }) {
+    const { plugin, t, locale } = props
     return (
         <details className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-sm">
             <summary className="cursor-pointer font-medium">{t('settings.plugins.detail.developerDetails')}</summary>
@@ -378,7 +412,7 @@ function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params
                     {plugin.runtimeEntryPaths.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.none')}</div> : plugin.runtimeEntryPaths.map((entry) => (
                         <div key={`${entry.runtime}-${entry.realPath}`} className="rounded-lg border border-[var(--app-border)] p-3">
                             <div className="mb-2 flex flex-wrap items-center gap-2">
-                                <Badge>{entry.runtime}</Badge>
+                                <Badge>{t(`settings.plugins.runtime.${entry.runtime}`)}</Badge>
                                 <Badge variant={runtimeActive(plugin, entry.runtime) ? 'success' : 'default'}>{runtimeActive(plugin, entry.runtime) ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')}</Badge>
                             </div>
                             <KeyValue label={entry.runtime === 'runner' ? t('settings.plugins.detail.runnerEntryLabel') : t('settings.plugins.detail.hubEntryLabel')} value={entry.entry} />
@@ -390,7 +424,7 @@ function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params
 
                 <div className="space-y-2">
                     <div className="font-medium">{t('settings.plugins.detail.contributions')}</div>
-                    <ContributionsList plugin={plugin} t={t} />
+                    <ContributionsList plugin={plugin} t={t} locale={locale} />
                 </div>
 
                 <div className="space-y-2">
@@ -414,7 +448,7 @@ function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params
                     <div className="space-y-1 rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
                         <div>{t('settings.plugins.config.scopeLabel')}: {plugin.configMetadata?.scope ?? plugin.configScope ?? targetScopeLabel(t)}</div>
                         <div>{t('settings.plugins.detail.targetLabel')}: {plugin.configMetadata?.target.scope ?? plugin.target?.scope ?? targetScopeLabel(t)}</div>
-                        <div>{t('settings.plugins.detail.sourceLabel')}: {plugin.configMetadata?.source ?? t('settings.plugins.none')}</div>
+                        <div>{t('settings.plugins.config.sourceLabel')}: {plugin.configMetadata?.source ? t(`settings.plugins.config.source.${plugin.configMetadata.source}`) : t('settings.plugins.none')}</div>
                         {plugin.configMetadata?.updatedAt ? <div>{t('settings.plugins.config.updatedLabel')}: {new Date(plugin.configMetadata.updatedAt).toLocaleString()}</div> : null}
                     </div>
                     <pre className="max-h-80 overflow-auto rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs">{JSON.stringify(plugin.config ?? {}, null, 2)}</pre>
@@ -436,7 +470,7 @@ export default function PluginPage() {
     const { api } = useAppContext()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
     const { plugin, isLoading, error } = usePlugin(api, pluginId, target)
     const capabilityState = usePluginCapabilities(api, { target })
     const actions = usePluginActions(api)
@@ -462,6 +496,10 @@ export default function PluginPage() {
     const pluginCapabilities = useMemo(
         () => capabilityState.capabilities.filter((capability) => capability.pluginId === plugin?.id),
         [capabilityState.capabilities, plugin?.id]
+    )
+    const featureIntro = useMemo(
+        () => plugin ? pluginFeatureIntroMarkdown(plugin, pluginCapabilities, locale, t) : '',
+        [plugin, pluginCapabilities, locale, t]
     )
 
     const showReloadResult = (title: string, reloadResult: PluginReloadResult) => {
@@ -578,11 +616,11 @@ export default function PluginPage() {
                                         <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-[var(--app-bg)] text-[var(--app-link)] shadow-sm"><PuzzleIcon /></div>
                                         <div className="min-w-0 flex-1">
                                             <div className="flex flex-wrap items-center gap-2">
-                                                <h2 className="truncate text-xl font-semibold">{plugin.name ?? plugin.id}</h2>
+                                                <h2 className="truncate text-xl font-semibold">{localizedPluginName(plugin, locale)}</h2>
                                                 <Badge variant={statusVariant(plugin.status)}>{t(`settings.plugins.status.${plugin.status}`)}</Badge>
                                             </div>
                                             <div className="mt-1 text-sm text-[var(--app-hint)]">{t('settings.plugins.detail.meta', { id: plugin.id, version: plugin.version ?? t('settings.plugins.unknown'), status: t(`settings.plugins.status.${plugin.status}`) })}</div>
-                                            {plugin.description ? <p className="mt-2 text-sm text-[var(--app-hint)]">{plugin.description}</p> : null}
+                                            {localizedPluginDescription(plugin, locale) ? <p className="mt-2 text-sm text-[var(--app-hint)]">{localizedPluginDescription(plugin, locale)}</p> : null}
                                             <div className="mt-3 flex flex-wrap gap-1.5">
                                                 <Chip label={pluginTargetLabel(t, plugin)} variant={plugin.target?.active === false ? 'warning' : 'default'} />
                                                 {plugin.target?.stale ? <Chip label={t('settings.plugins.target.stale')} variant="warning" /> : null}
@@ -593,6 +631,12 @@ export default function PluginPage() {
                                     </div>
                                 </div>
                             </Card>
+
+                            {featureIntro ? (
+                                <SectionCard title={t('settings.plugins.detail.featureIntro.title')}>
+                                    <MarkdownRenderer content={featureIntro} className="text-sm" />
+                                </SectionCard>
+                            ) : null}
 
                             <SectionCard title={t('settings.plugins.detail.actions')}>
                                 <div className="flex flex-wrap gap-2">
@@ -620,7 +664,7 @@ export default function PluginPage() {
                             ) : null}
 
                             <SectionCard title={t('settings.plugins.capabilities.title')}>
-                                <CapabilitiesList capabilities={pluginCapabilities} loading={capabilityState.isLoading} t={t} />
+                                <CapabilitiesList capabilities={pluginCapabilities} loading={capabilityState.isLoading} t={t} locale={locale} />
                             </SectionCard>
 
                             {hasConfig ? <SectionCard title={t('settings.plugins.config.title')}>
@@ -648,7 +692,7 @@ export default function PluginPage() {
                                 <DiagnosticsList plugin={plugin} t={t} />
                             </SectionCard> : null}
 
-                            <DeveloperDetails plugin={plugin} t={t} />
+                            <DeveloperDetails plugin={plugin} t={t} locale={locale} />
 
                             <ConfirmDialog
                                 isOpen={enableDialogOpen}

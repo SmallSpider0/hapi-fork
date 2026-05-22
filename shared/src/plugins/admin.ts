@@ -1,6 +1,13 @@
 import { z } from 'zod'
 import { PluginDiagnosticSchema, PluginStatusSchema } from './types'
-import { PluginCapabilityKindSchema, PluginCapabilitySchema, PluginManifestLiteSchema, PluginRuntimeNameSchema } from './manifest'
+import {
+    PluginCapabilityKindSchema,
+    PluginCapabilitySchema,
+    PluginDisplayMetadataSchema,
+    PluginLocalizedTextMetadataSchema,
+    PluginManifestLiteSchema,
+    PluginRuntimeNameSchema
+} from './manifest'
 import { PluginInstallMetadataSchema } from './state'
 import { RunnerExtensionContributionSummarySchema } from './runnerExtensions'
 import { PluginWebContributionsSchema, PluginWebContributionViewSchema } from './webDescriptors'
@@ -163,6 +170,7 @@ export const PluginCapabilityViewSchema = z.object({
     kind: PluginCapabilityKindSchema,
     displayName: z.string().optional(),
     description: z.string().optional(),
+    display: PluginLocalizedTextMetadataSchema.optional(),
     status: PluginCapabilityStatusSchema,
     target: PluginTargetSummarySchema.optional(),
     parts: z.object({
@@ -191,6 +199,7 @@ export const PluginListItemSchema = z.object({
     name: z.string().optional(),
     version: z.string().optional(),
     description: z.string().optional(),
+    display: PluginDisplayMetadataSchema.optional(),
     source: z.enum(['env', 'user-home', 'bundled']),
     status: PluginAdminStatusSchema,
     enabled: z.boolean(),
@@ -217,12 +226,14 @@ export const PluginDetailSchema = PluginListItemSchema.extend({
     contributions: z.object({
         notificationChannels: z.array(z.object({
             id: z.string().min(1),
-            displayName: z.string().min(1)
+            displayName: z.string().min(1),
+            display: PluginLocalizedTextMetadataSchema.optional()
         }).strict()),
         messageActions: z.array(z.object({
             id: z.string().min(1),
             displayName: z.string().min(1),
-            description: z.string().optional()
+            description: z.string().optional(),
+            display: PluginLocalizedTextMetadataSchema.optional()
         }).strict()).optional(),
         runner: z.object({
             environmentProviders: z.array(z.unknown()).optional(),
@@ -404,6 +415,14 @@ export const PluginInstallPackageRequestSchema = z.object({
     checksum: z.string().min(1),
     format: PluginPackageFormatSchema.optional(),
     manifest: PluginPackageManifestSchema.optional(),
+    installSource: z.object({
+        type: z.literal('marketplace'),
+        sourceUrl: z.string().min(1),
+        pluginId: z.string().min(1),
+        repo: z.string().min(1),
+        version: z.string().min(1),
+        assetUrl: z.string().min(1)
+    }).strict().optional(),
     enable: z.boolean().optional(),
     reload: z.boolean().optional(),
     overwrite: z.boolean().optional()
@@ -451,7 +470,8 @@ export const PluginInstallPlanResponseSchema = z.object({
         id: z.string().min(1),
         name: z.string().min(1),
         version: z.string().min(1),
-        description: z.string().optional()
+        description: z.string().optional(),
+        display: PluginDisplayMetadataSchema.optional()
     }).strict(),
     source: z.object({
         type: z.literal('uploaded-package'),
