@@ -9,7 +9,7 @@ import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingState } from '@/components/LoadingState'
-import type { PluginInstallResult, PluginListItem, PluginReloadResult, PluginTargetInventory, PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import type { PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
@@ -51,6 +51,12 @@ function pluginTargetLabel(t: (key: string) => string, plugin: PluginListItem): 
     if (plugin.target.scope === 'hub') return 'Hub'
     if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
     return plugin.target.scope
+}
+
+function targetLabel(target: { scope: string; runtime: string; displayName?: string; machineId?: string }): string {
+    if (target.scope === 'hub') return 'Hub'
+    if (target.runtime === 'runner') return `Runner · ${target.displayName ?? target.machineId ?? target.scope}`
+    return target.scope
 }
 
 function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }) {
@@ -183,18 +189,62 @@ function packageFormat(filename: string): 'tgz' | 'zip' | undefined {
     return undefined
 }
 
-function targetOptions(t: (key: string) => string, targets: PluginTargetInventory[]): Array<{ value: PluginTargetScope; label: string }> {
-    const options = new Map<PluginTargetScope, string>()
-    options.set('hub', 'Hub')
-    for (const target of targets) {
-        options.set(target.target.scope, target.target.runtime === 'runner'
-            ? `Runner · ${target.target.displayName ?? target.target.machineId ?? target.target.scope}`
-            : 'Hub')
-    }
-    if ([...options.keys()].some((scope) => scope.startsWith('runner:'))) {
-        options.set('all-runners', t('settings.plugins.target.allRunners'))
-    }
-    return Array.from(options.entries()).map(([value, label]) => ({ value, label }))
+function planActionVariant(action: string): BadgeVariant {
+    if (action === 'install' || action === 'overwrite' || action === 'unchanged') return 'success'
+    if (action === 'skip') return 'warning'
+    return 'destructive'
+}
+
+function InstallPlanCard(props: {
+    plan: PluginInstallPlanResponse | null
+    t: (key: string, params?: Record<string, string | number>) => string
+}) {
+    if (!props.plan) return null
+    const { plan, t } = props
+    return (
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-sm">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                    <div className="font-medium">{t('settings.plugins.install.planTitle')}</div>
+                    <div className="text-xs text-[var(--app-hint)]">{plan.plugin.name} · {plan.plugin.version}</div>
+                </div>
+                <div className="flex flex-wrap gap-1">
+                    {plan.positions.map((position) => <Badge key={position} variant="default">{t(`settings.plugins.install.position.${position}`)}</Badge>)}
+                </div>
+            </div>
+            {plan.warnings.length > 0 ? (
+                <ul className="mb-2 space-y-1 rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
+                    {plan.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                </ul>
+            ) : null}
+            {plan.blockingErrors.length > 0 ? (
+                <ul className="mb-2 space-y-1 rounded-lg border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-2 text-xs text-[var(--app-badge-error-text)]">
+                    {plan.blockingErrors.map((blockingError) => <li key={blockingError}>{blockingError}</li>)}
+                </ul>
+            ) : null}
+            <div className="space-y-2">
+                {plan.targets.map((target) => (
+                    <div key={target.target.scope} className="rounded-lg border border-[var(--app-border)] bg-[var(--app-bg)] p-2">
+                        <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                                <div className="font-medium">{targetLabel(target.target)}</div>
+                                <div className="text-xs text-[var(--app-hint)]">
+                                    {target.target.hostInfo
+                                        ? `${target.target.hostInfo.hapiVersion} · API ${target.target.hostInfo.pluginApiVersion} · ${target.target.hostInfo.os}/${target.target.hostInfo.arch}`
+                                        : t('settings.plugins.install.hostUnknown')}
+                                </div>
+                            </div>
+                            <div className="flex flex-wrap gap-1">
+                                <Badge variant={target.compatible ? 'success' : 'warning'}>{t(`settings.plugins.install.status.${target.status}`)}</Badge>
+                                <Badge variant={planActionVariant(target.action)}>{t(`settings.plugins.install.planAction.${target.action}`)}</Badge>
+                            </div>
+                        </div>
+                        {target.reason ? <div className="mt-1 text-xs text-[var(--app-hint)]">{target.reason}</div> : null}
+                    </div>
+                ))}
+            </div>
+        </div>
+    )
 }
 
 export default function PluginsPage() {
@@ -202,21 +252,18 @@ export default function PluginsPage() {
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const { t } = useTranslation()
-    const { plugins, targets, isLoading, error, refetch } = usePlugins(api)
+    const { plugins, isLoading, error, refetch } = usePlugins(api)
     const actions = usePluginActions(api)
     const [filter, setFilter] = useState<PluginFilter>('all')
     const [result, setResult] = useState<ResultState>(null)
     const [enableAfterInstall, setEnableAfterInstall] = useState(false)
     const [overwriteLocal, setOverwriteLocal] = useState(false)
-    const [installTarget, setInstallTarget] = useState<PluginTargetScope>('hub')
     const [packageFile, setPackageFile] = useState<File | null>(null)
+    const [installPlan, setInstallPlan] = useState<PluginInstallPlanResponse | null>(null)
 
-    const installTargetOptions = useMemo(() => targetOptions(t, targets), [t, targets])
     useEffect(() => {
-        if (!installTargetOptions.some((option) => option.value === installTarget)) {
-            setInstallTarget('hub')
-        }
-    }, [installTarget, installTargetOptions])
+        setInstallPlan(null)
+    }, [packageFile, enableAfterInstall, overwriteLocal])
 
     const counts = useMemo(() => ({
         all: plugins.length,
@@ -244,17 +291,17 @@ export default function PluginsPage() {
         }
     }
 
-    const installPackage = async () => {
+    const createPackageInstallPlan = async (): Promise<PluginInstallPlanResponse | null> => {
         if (!packageFile) {
             setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.packageRequired')] })
-            return
+            return null
         }
         const format = packageFormat(packageFile.name)
         if (!format) {
             setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.packageInvalid')] })
-            return
+            return null
         }
-        await runWithResult(async () => formatInstallResult(t, await actions.installPackagePlugin({
+        const plan = await actions.createInstallPlan({
             filename: packageFile.name,
             contentBase64: await fileToBase64(packageFile),
             checksum: await fileSha256(packageFile),
@@ -262,7 +309,50 @@ export default function PluginsPage() {
             enable: enableAfterInstall,
             overwrite: overwriteLocal,
             reload: true
-        }, installTarget)))
+        })
+        setInstallPlan(plan)
+        if (plan.blockingErrors.length > 0) {
+            setResult({
+                title: t('settings.plugins.install.planBlocked'),
+                tone: 'warning',
+                lines: plan.blockingErrors
+            })
+        } else {
+            setResult({
+                title: t('settings.plugins.install.planReady'),
+                tone: 'success',
+                lines: [t('settings.plugins.install.planTargets', { count: plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })]
+            })
+        }
+        return plan
+    }
+
+    const previewInstallPlan = async () => {
+        await runWithResult(async () => {
+            const plan = await createPackageInstallPlan()
+            if (!plan) return { title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.packageRequired')] }
+            return {
+                title: plan.blockingErrors.length > 0 ? t('settings.plugins.install.planBlocked') : t('settings.plugins.install.planReady'),
+                tone: plan.blockingErrors.length > 0 ? 'warning' : 'success',
+                lines: plan.blockingErrors.length > 0
+                    ? plan.blockingErrors
+                    : [t('settings.plugins.install.planTargets', { count: plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })]
+            }
+        })
+    }
+
+    const installPackage = async () => {
+        await runWithResult(async () => {
+            const plan = installPlan ?? await createPackageInstallPlan()
+            if (!plan) {
+                return { title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.packageRequired')] }
+            }
+            if (plan.blockingErrors.length > 0) {
+                return { title: t('settings.plugins.install.planBlocked'), tone: 'warning', lines: plan.blockingErrors }
+            }
+            return formatInstallResult(t, await actions.executeInstallPlan(plan.planId))
+        })
+        setInstallPlan(null)
     }
 
     const reloadAll = async () => {
@@ -286,15 +376,6 @@ export default function PluginsPage() {
                     <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
                         <CardContent className="space-y-2 p-3">
                             <div className="flex flex-wrap items-center gap-2">
-                                <label htmlFor="plugin-install-target" className="sr-only">{t('settings.plugins.install.target')}</label>
-                                <select
-                                    id="plugin-install-target"
-                                    value={installTarget}
-                                    onChange={(event) => setInstallTarget(event.target.value as PluginTargetScope)}
-                                    className="h-8 min-w-[9rem] rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-sm text-[var(--app-fg)]"
-                                >
-                                    {installTargetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
-                                </select>
                                 <label
                                     htmlFor="plugin-package-file"
                                     className={`inline-flex h-8 items-center rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 text-sm font-medium text-[var(--app-fg)] transition ${actions.isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer hover:bg-[var(--app-subtle-bg)]'}`}
@@ -309,7 +390,8 @@ export default function PluginsPage() {
                                     onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)}
                                     className="sr-only"
                                 />
-                                <Button type="button" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
+                                <Button type="button" variant="outline" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void previewInstallPlan()}>{t('settings.plugins.install.previewPlan')}</Button>
+                                <Button type="button" size="sm" disabled={actions.isPending || !packageFile || (installPlan?.blockingErrors.length ?? 0) > 0} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
                             </div>
                             <div className="flex flex-wrap items-center gap-3">
                                 <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableAfterInstall} onChange={(event) => setEnableAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
@@ -320,6 +402,7 @@ export default function PluginsPage() {
                                     {t('settings.plugins.install.selectedPackage', { filename: packageFile.name })}
                                 </div>
                             ) : null}
+                            <InstallPlanCard plan={installPlan} t={t} />
                         </CardContent>
                     </Card>
 

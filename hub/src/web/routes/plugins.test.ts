@@ -7,6 +7,7 @@ import { join } from 'node:path'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import type { PluginCapabilityView, PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
@@ -64,6 +65,14 @@ function makeMachine(id: string, active: boolean, plugins: PluginListItem[] = [r
             pluginInventory: {
                 machineId: id,
                 updatedAt: 1234,
+                hostInfo: {
+                    runtime: 'runner',
+                    hapiVersion: '0.18.4',
+                    pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+                    os: 'linux',
+                    arch: 'x64',
+                    supportedExtensionPoints: ['runner.spawnHook', 'agent.capabilityProvider']
+                },
                 plugins,
                 diagnostics: []
             }
@@ -126,7 +135,7 @@ function deleteResult(): PluginDeleteResult {
     }
 }
 
-function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = pluginId): { body: { filename: string; contentBase64: string; checksum: string; format: 'tgz' }; cleanup: () => void } {
+function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = pluginId, manifestOverrides: Record<string, unknown> = {}): { body: { filename: string; contentBase64: string; checksum: string; format: 'tgz' }; cleanup: () => void } {
     const testDir = mkdtempSync(join(tmpdir(), 'hapi-plugin-package-route-'))
     const pluginRoot = join(testDir, 'plugin')
     mkdirSync(pluginRoot, { recursive: true })
@@ -136,10 +145,12 @@ function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = plu
         name: 'Package Plugin',
         version: '0.1.0',
         pluginApiVersion: '0.1',
-        runtimes: { hub: { entry: 'hub.js' } }
+        runtimes: { hub: { entry: 'hub.js' } },
+        ...manifestOverrides
     }
     const manifestText = JSON.stringify(pluginManifest, null, 2)
     writeFileSync(join(pluginRoot, 'hub.js'), hubEntry)
+    writeFileSync(join(pluginRoot, 'runner.js'), 'export function activate() {}')
     writeFileSync(join(pluginRoot, 'hapi.plugin.json'), manifestText)
     writeFileSync(join(pluginRoot, 'hapi.plugin.package.json'), JSON.stringify({
         formatVersion: 'hapi-plugin-package/v1',
@@ -535,6 +546,58 @@ describe('plugin admin routes', () => {
             expect(payload.targetResults).toHaveLength(2)
             expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.ok).toBe(true)
             expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
+    it('creates and executes manifest-driven install plans without target query', async () => {
+        const online = makeMachine('runner-1', true, [])
+        const packageFixture = makeTgzPackage('com.example.cross', 'com.example.cross', {
+            runtimes: {
+                hub: { entry: 'hub.js' },
+                runner: { entry: 'runner.js' }
+            }
+        })
+        const calls: string[] = []
+        try {
+            const app = createApp({
+                listPlugins: () => [],
+                installPluginPackage: async () => {
+                    calls.push('hub')
+                    return installResult('installed')
+                }
+            } as never, {
+                getMachinesByNamespace: () => [online],
+                getMachineByNamespace: () => online,
+                listRunnerPlugins: async () => online.runnerState!.pluginInventory!,
+                installRunnerPluginPackage: async (machineId: string) => {
+                    calls.push(`runner:${machineId}`)
+                    return runnerInstallResult(machineId)
+                }
+            } as never)
+
+            const planResponse = await app.request('/api/plugins/install-plan', {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+                body: JSON.stringify(packageFixture.body)
+            })
+
+            expect(planResponse.status).toBe(200)
+            const plan = await planResponse.json() as { planId: string; positions: string[]; targets: Array<{ target: { scope: string }; action: string }>; blockingErrors: string[] }
+            expect(plan.positions).toEqual(['hub', 'runner'])
+            expect(plan.targets.map((entry) => entry.target.scope)).toEqual(['hub', 'runner:runner-1'])
+            expect(plan.blockingErrors).toEqual([])
+
+            const executeResponse = await app.request(`/api/plugins/install-plan/${plan.planId}/execute`, {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}` }
+            })
+
+            expect(executeResponse.status).toBe(200)
+            const payload = await executeResponse.json() as PluginInstallResult
+            expect(payload.targetResults?.map((entry) => entry.target.scope)).toEqual(['hub', 'runner:runner-1'])
+            expect(calls).toEqual(['hub', 'runner:runner-1'])
         } finally {
             packageFixture.cleanup()
         }

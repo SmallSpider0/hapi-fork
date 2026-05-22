@@ -29,6 +29,25 @@ const RuntimeEntrySchema = z.object({
 const HubRuntimeSchema = RuntimeEntrySchema
 const RunnerRuntimeSchema = RuntimeEntrySchema
 
+const RuntimeCompatibilitySchema = z.object({
+    hapi: z.string().min(1).optional(),
+    pluginApi: z.string().min(1).optional(),
+    os: z.array(z.enum(['darwin', 'linux', 'win32'])).optional(),
+    arch: z.array(z.string().min(1)).optional(),
+    extensionPoints: z.array(z.string().min(1)).optional()
+}).strict()
+
+const CrossRuntimeCompatibilitySchema = z.object({
+    samePluginVersionAcrossTargets: z.boolean().optional(),
+    allowVersionSkew: z.enum(['none', 'patch', 'minor']).optional()
+}).strict()
+
+const PluginInstallHintsSchema = z.object({
+    runnerPlacement: z.enum(['session-runner', 'selected-runners', 'compatible-runners', 'all-runners']).optional(),
+    offlineRunnerPolicy: z.enum(['skip', 'fail']).optional(),
+    minReadyRunnerCount: z.number().int().nonnegative().optional()
+}).strict()
+
 const HubNotificationChannelContributionSchema = z.object({
     id: ContributionIdSchema,
     displayName: z.string().min(1)
@@ -153,8 +172,14 @@ const PluginManifestLiteBaseSchema = z.object({
     }).strict().optional(),
     compatibility: z.object({
         hapi: z.string().min(1).optional(),
-        os: z.array(z.enum(['darwin', 'linux', 'win32'])).optional()
-    }).strict().optional()
+        pluginApi: z.string().min(1).optional(),
+        os: z.array(z.enum(['darwin', 'linux', 'win32'])).optional(),
+        arch: z.array(z.string().min(1)).optional(),
+        hub: RuntimeCompatibilitySchema.optional(),
+        runner: RuntimeCompatibilitySchema.optional(),
+        crossRuntime: CrossRuntimeCompatibilitySchema.optional()
+    }).strict().optional(),
+    install: PluginInstallHintsSchema.optional()
 }).strict()
 
 export const RawPluginManifestLiteSchema = PluginManifestLiteBaseSchema

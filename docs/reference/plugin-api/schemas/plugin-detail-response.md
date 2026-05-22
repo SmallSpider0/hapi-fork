@@ -182,6 +182,51 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                     "updatedAt": {
                                         "type": "number"
                                     },
+                                    "hostInfo": {
+                                        "type": "object",
+                                        "properties": {
+                                            "runtime": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "hub",
+                                                    "runner"
+                                                ]
+                                            },
+                                            "hapiVersion": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "pluginApiVersion": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "os": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "arch": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "supportedExtensionPoints": {
+                                                "default": [],
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            }
+                                        },
+                                        "required": [
+                                            "runtime",
+                                            "hapiVersion",
+                                            "pluginApiVersion",
+                                            "os",
+                                            "arch",
+                                            "supportedExtensionPoints"
+                                        ],
+                                        "additionalProperties": false
+                                    },
                                     "error": {
                                         "type": "string"
                                     }
@@ -261,6 +306,51 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                         },
                         "updatedAt": {
                             "type": "number"
+                        },
+                        "hostInfo": {
+                            "type": "object",
+                            "properties": {
+                                "runtime": {
+                                    "type": "string",
+                                    "enum": [
+                                        "hub",
+                                        "runner"
+                                    ]
+                                },
+                                "hapiVersion": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "pluginApiVersion": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "os": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "arch": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "supportedExtensionPoints": {
+                                    "default": [],
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                }
+                            },
+                            "required": [
+                                "runtime",
+                                "hapiVersion",
+                                "pluginApiVersion",
+                                "os",
+                                "arch",
+                                "supportedExtensionPoints"
+                            ],
+                            "additionalProperties": false
                         },
                         "error": {
                             "type": "string"
@@ -2274,6 +2364,10 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                     "type": "string",
                                     "minLength": 1
                                 },
+                                "pluginApi": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
                                 "os": {
                                     "type": "array",
                                     "items": {
@@ -2284,6 +2378,135 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                             "win32"
                                         ]
                                     }
+                                },
+                                "arch": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                },
+                                "hub": {
+                                    "type": "object",
+                                    "properties": {
+                                        "hapi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "darwin",
+                                                    "linux",
+                                                    "win32"
+                                                ]
+                                            }
+                                        },
+                                        "arch": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "extensionPoints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "runner": {
+                                    "type": "object",
+                                    "properties": {
+                                        "hapi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "darwin",
+                                                    "linux",
+                                                    "win32"
+                                                ]
+                                            }
+                                        },
+                                        "arch": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "extensionPoints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "crossRuntime": {
+                                    "type": "object",
+                                    "properties": {
+                                        "samePluginVersionAcrossTargets": {
+                                            "type": "boolean"
+                                        },
+                                        "allowVersionSkew": {
+                                            "type": "string",
+                                            "enum": [
+                                                "none",
+                                                "patch",
+                                                "minor"
+                                            ]
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                }
+                            },
+                            "additionalProperties": false
+                        },
+                        "install": {
+                            "type": "object",
+                            "properties": {
+                                "runnerPlacement": {
+                                    "type": "string",
+                                    "enum": [
+                                        "session-runner",
+                                        "selected-runners",
+                                        "compatible-runners",
+                                        "all-runners"
+                                    ]
+                                },
+                                "offlineRunnerPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                        "skip",
+                                        "fail"
+                                    ]
+                                },
+                                "minReadyRunnerCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
                                 }
                             },
                             "additionalProperties": false
@@ -2377,6 +2600,51 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                 },
                                 "updatedAt": {
                                     "type": "number"
+                                },
+                                "hostInfo": {
+                                    "type": "object",
+                                    "properties": {
+                                        "runtime": {
+                                            "type": "string",
+                                            "enum": [
+                                                "hub",
+                                                "runner"
+                                            ]
+                                        },
+                                        "hapiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "arch": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "supportedExtensionPoints": {
+                                            "default": [],
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "runtime",
+                                        "hapiVersion",
+                                        "pluginApiVersion",
+                                        "os",
+                                        "arch",
+                                        "supportedExtensionPoints"
+                                    ],
+                                    "additionalProperties": false
                                 },
                                 "error": {
                                     "type": "string"
@@ -2491,6 +2759,51 @@ JSON Schema: [PluginDetailResponse](/docs/plugin-api/schemas/plugin-detail-respo
                                             },
                                             "updatedAt": {
                                                 "type": "number"
+                                            },
+                                            "hostInfo": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "runtime": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "hub",
+                                                            "runner"
+                                                        ]
+                                                    },
+                                                    "hapiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "pluginApiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "os": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "arch": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "supportedExtensionPoints": {
+                                                        "default": [],
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "runtime",
+                                                    "hapiVersion",
+                                                    "pluginApiVersion",
+                                                    "os",
+                                                    "arch",
+                                                    "supportedExtensionPoints"
+                                                ],
+                                                "additionalProperties": false
                                             },
                                             "error": {
                                                 "type": "string"

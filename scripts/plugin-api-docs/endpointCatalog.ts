@@ -56,9 +56,24 @@ export const endpointCatalog: EndpointDoc[] = [
         id: 'plugins.installPackage',
         method: 'POST',
         path: '/api/plugins/install-package',
-        description: 'Install a plugin from a tgz/zip package upload payload.',
+        description: 'Legacy target-scoped package install. Prefer install-plan for manifest-driven cross-runtime installs.',
         targetQuery: true,
         bodySchema: 'PluginInstallPackageRequest',
+        responseSchema: 'PluginInstallResult'
+    },
+    {
+        id: 'plugins.installPlan',
+        method: 'POST',
+        path: '/api/plugins/install-plan',
+        description: 'Inspect a package upload and return an install plan derived from manifest positions and Hub/Runner compatibility.',
+        bodySchema: 'PluginInstallPlanRequest',
+        responseSchema: 'PluginInstallPlanResponse'
+    },
+    {
+        id: 'plugins.executeInstallPlan',
+        method: 'POST',
+        path: '/api/plugins/install-plan/{planId}/execute',
+        description: 'Execute a previously created manifest-driven install plan.',
         responseSchema: 'PluginInstallResult'
     },
     {

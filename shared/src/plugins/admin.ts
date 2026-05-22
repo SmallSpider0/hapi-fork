@@ -29,6 +29,16 @@ export function parseRunnerPluginTargetScope(scope: PluginTargetScope): string |
     return typeof scope === 'string' && scope.startsWith('runner:') ? scope.slice('runner:'.length) : null
 }
 
+export const PluginHostInfoSchema = z.object({
+    runtime: PluginRuntimeNameSchema,
+    hapiVersion: z.string().min(1),
+    pluginApiVersion: z.string().min(1),
+    os: z.string().min(1),
+    arch: z.string().min(1),
+    supportedExtensionPoints: z.array(z.string().min(1)).default([])
+}).strict()
+export type PluginHostInfo = z.infer<typeof PluginHostInfoSchema>
+
 const PluginConfigScopePluginIdSchema = z.string()
     .min(1)
     .max(128)
@@ -66,6 +76,7 @@ export const PluginTargetSummarySchema = z.object({
     active: z.boolean(),
     stale: z.boolean().optional(),
     updatedAt: z.number().optional(),
+    hostInfo: PluginHostInfoSchema.optional(),
     error: z.string().optional()
 }).strict()
 export type PluginTargetSummary = z.infer<typeof PluginTargetSummarySchema>
@@ -256,6 +267,7 @@ export type PluginTargetInventory = z.infer<typeof PluginTargetInventorySchema>
 export const RunnerPluginInventorySchema = z.object({
     machineId: PluginTargetMachineIdSchema,
     updatedAt: z.number(),
+    hostInfo: PluginHostInfoSchema.optional(),
     plugins: z.array(PluginListItemSchema),
     diagnostics: z.array(PluginDiagnosticViewSchema).default([]),
     extensions: z.object({
@@ -397,6 +409,62 @@ export const PluginInstallPackageRequestSchema = z.object({
     overwrite: z.boolean().optional()
 }).strict()
 export type PluginInstallPackageRequest = z.infer<typeof PluginInstallPackageRequestSchema>
+
+export const PluginInstallPositionSchema = z.enum(['web', 'hub', 'runner'])
+export type PluginInstallPosition = z.infer<typeof PluginInstallPositionSchema>
+
+export const PluginInstallRunnerSelectionSchema = z.object({
+    mode: z.enum(['compatible', 'all', 'selected']).default('compatible'),
+    machineIds: z.array(PluginTargetMachineIdSchema).optional()
+}).strict()
+export type PluginInstallRunnerSelection = z.infer<typeof PluginInstallRunnerSelectionSchema>
+
+export const PluginInstallPlanRequestSchema = PluginInstallPackageRequestSchema.extend({
+    runnerSelection: PluginInstallRunnerSelectionSchema.optional(),
+    dryRun: z.boolean().optional()
+}).strict()
+export type PluginInstallPlanRequest = z.infer<typeof PluginInstallPlanRequestSchema>
+
+export const PluginInstallPlanTargetActionSchema = z.enum(['install', 'overwrite', 'unchanged', 'skip', 'block'])
+export type PluginInstallPlanTargetAction = z.infer<typeof PluginInstallPlanTargetActionSchema>
+
+export const PluginInstallPlanTargetStatusSchema = z.enum(['compatible', 'incompatible', 'offline', 'conflict'])
+export type PluginInstallPlanTargetStatus = z.infer<typeof PluginInstallPlanTargetStatusSchema>
+
+export const PluginInstallPlanTargetSchema = z.object({
+    target: PluginTargetSummarySchema,
+    runtime: PluginRuntimeNameSchema,
+    required: z.boolean(),
+    compatible: z.boolean(),
+    status: PluginInstallPlanTargetStatusSchema,
+    action: PluginInstallPlanTargetActionSchema,
+    reason: z.string().optional(),
+    existingVersion: z.string().optional()
+}).strict()
+export type PluginInstallPlanTarget = z.infer<typeof PluginInstallPlanTargetSchema>
+
+export const PluginInstallPlanResponseSchema = z.object({
+    planId: z.string().min(1),
+    createdAt: z.number(),
+    expiresAt: z.number().optional(),
+    plugin: z.object({
+        id: z.string().min(1),
+        name: z.string().min(1),
+        version: z.string().min(1),
+        description: z.string().optional()
+    }).strict(),
+    source: z.object({
+        type: z.literal('uploaded-package'),
+        filename: z.string().min(1),
+        checksum: z.string().min(1),
+        format: PluginPackageFormatSchema.optional()
+    }).strict(),
+    positions: z.array(PluginInstallPositionSchema).min(1),
+    targets: z.array(PluginInstallPlanTargetSchema),
+    warnings: z.array(z.string()).default([]),
+    blockingErrors: z.array(z.string()).default([])
+}).strict()
+export type PluginInstallPlanResponse = z.infer<typeof PluginInstallPlanResponseSchema>
 
 export const PluginInstallResultSchema = z.object({
     ok: z.boolean(),

@@ -1,17 +1,19 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { PluginDeleteResult, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallResult, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import type { PluginDeleteResult, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallPlanRequest, PluginInstallPlanResponse, PluginInstallResult, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
 import { queryKeys } from '@/lib/query-keys'
 
-type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginDeleteResult
+type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginInstallPlanResponse | PluginDeleteResult
 
 type PluginAction = {
-    type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'install-package' | 'delete'
+    type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'install-package' | 'install-plan' | 'execute-install-plan' | 'delete'
     id?: string
     target?: PluginTargetScope
     config?: Record<string, unknown>
     installLocal?: PluginInstallLocalRequest
     installPackage?: PluginInstallPackageRequest
+    installPlan?: PluginInstallPlanRequest
+    planId?: string
 }
 
 export function usePluginActions(api: ApiClient | null): {
@@ -22,6 +24,8 @@ export function usePluginActions(api: ApiClient | null): {
     saveConfig: (id: string, config: Record<string, unknown>, target?: PluginTargetScope) => Promise<PluginReloadResult>
     installLocalPlugin: (body: PluginInstallLocalRequest, target?: PluginTargetScope) => Promise<PluginInstallResult>
     installPackagePlugin: (body: PluginInstallPackageRequest, target?: PluginTargetScope) => Promise<PluginInstallResult>
+    createInstallPlan: (body: PluginInstallPlanRequest) => Promise<PluginInstallPlanResponse>
+    executeInstallPlan: (planId: string) => Promise<PluginInstallResult>
     deletePlugin: (id: string, target?: PluginTargetScope) => Promise<PluginDeleteResult>
     isPending: boolean
 } {
@@ -45,11 +49,14 @@ export function usePluginActions(api: ApiClient | null): {
             if (action.type === 'config' && action.id && action.config) return await api.updatePluginConfig(action.id, action.config, action.target)
             if (action.type === 'install-local' && action.installLocal) return await api.installLocalPlugin(action.installLocal, action.target)
             if (action.type === 'install-package' && action.installPackage) return await api.installPackagePlugin(action.installPackage, action.target)
+            if (action.type === 'install-plan' && action.installPlan) return await api.createPluginInstallPlan(action.installPlan)
+            if (action.type === 'execute-install-plan' && action.planId) return await api.executePluginInstallPlan(action.planId)
             if (action.type === 'delete' && action.id) return await api.deletePlugin(action.id, action.target)
             return await api.reloadPlugins(action.target)
         },
         onSuccess: (result, action) => {
             const installedId = 'pluginId' in result ? result.pluginId : undefined
+            if (action.type === 'install-plan') return
             void invalidate(action.id ?? installedId, action.target)
         },
     })
@@ -62,6 +69,8 @@ export function usePluginActions(api: ApiClient | null): {
         saveConfig: async (id, config, target) => await mutation.mutateAsync({ type: 'config', id, config, target }) as PluginReloadResult,
         installLocalPlugin: async (body, target) => await mutation.mutateAsync({ type: 'install-local', installLocal: body, target }) as PluginInstallResult,
         installPackagePlugin: async (body, target) => await mutation.mutateAsync({ type: 'install-package', installPackage: body, target }) as PluginInstallResult,
+        createInstallPlan: async (body) => await mutation.mutateAsync({ type: 'install-plan', installPlan: body }) as PluginInstallPlanResponse,
+        executeInstallPlan: async (planId) => await mutation.mutateAsync({ type: 'execute-install-plan', planId }) as PluginInstallResult,
         deletePlugin: async (id, target) => await mutation.mutateAsync({ type: 'delete', id, target }) as PluginDeleteResult,
         isPending: mutation.isPending,
     }

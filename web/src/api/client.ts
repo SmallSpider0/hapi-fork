@@ -38,6 +38,8 @@ import type {
     PluginCapabilitiesResponse,
     PluginInstallLocalRequest,
     PluginInstallPackageRequest,
+    PluginInstallPlanRequest,
+    PluginInstallPlanResponse,
     PluginInstallResult,
     PluginLocalDirectoryListResponse,
     PluginListResponse,
@@ -259,6 +261,19 @@ export class ApiClient {
         return await this.request<PluginInstallResult>(withPluginTarget('/api/plugins/install-package', target), {
             method: 'POST',
             body: JSON.stringify(body)
+        })
+    }
+
+    async createPluginInstallPlan(body: PluginInstallPlanRequest): Promise<PluginInstallPlanResponse> {
+        return await this.request<PluginInstallPlanResponse>('/api/plugins/install-plan', {
+            method: 'POST',
+            body: JSON.stringify(body)
+        })
+    }
+
+    async executePluginInstallPlan(planId: string): Promise<PluginInstallResult> {
+        return await this.request<PluginInstallResult>(`/api/plugins/install-plan/${encodeURIComponent(planId)}/execute`, {
+            method: 'POST'
         })
     }
 

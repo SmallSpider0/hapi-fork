@@ -5,6 +5,8 @@ import type {
     PluginDetailResponse,
     PluginInstallLocalRequest,
     PluginInstallPackageRequest,
+    PluginInstallPlanRequest,
+    PluginInstallPlanResponse,
     PluginInstallResult,
     PluginListResponse,
     PluginReloadResult,
@@ -92,6 +94,23 @@ export async function installRemotePackagePlugin(accessToken: string, body: Plug
         method: 'POST',
         headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }),
         body: JSON.stringify(body)
+    }, timeoutMs)
+}
+
+export async function createRemotePluginInstallPlan(accessToken: string, body: PluginInstallPlanRequest, timeoutMs = 120000): Promise<PluginInstallPlanResponse> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginInstallPlanResponse>('/api/plugins/install-plan', {
+        method: 'POST',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body)
+    }, timeoutMs)
+}
+
+export async function executeRemotePluginInstallPlan(accessToken: string, planId: string, timeoutMs = 120000): Promise<PluginInstallResult> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginInstallResult>(`/api/plugins/install-plan/${encodeURIComponent(planId)}/execute`, {
+        method: 'POST',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
     }, timeoutMs)
 }
 

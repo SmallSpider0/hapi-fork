@@ -2,7 +2,7 @@
 
 # Plugin API reference
 Plugin API version: `0.1`
-Generated schema count: **32**
+Generated schema count: **34**
 This section is generated from the repo source. Edit TypeScript/Zod sources, then run:
 
 ```bash

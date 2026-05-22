@@ -30,12 +30,14 @@ import {
     AgentCapabilityProviderSnapshotSchema,
     AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
+    HAPI_PLUGIN_API_VERSION,
     HAPI_PLUGIN_MANIFEST_FILE,
     assertPluginConfigSafeForPersistence,
     builtinAgentDescriptors,
     runnerPluginConfigScope,
     sanitizePluginConfigForView
 } from '@hapi/protocol/plugins'
+import packageJson from '../../../package.json'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import {
     applyPluginState,
@@ -87,6 +89,19 @@ type ReloadReason = 'startup' | 'manual' | 'state-change'
 type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter' | 'agentCapabilityProvider' | 'action'>
 const BUILTIN_AGENT_IDS = new Set(builtinAgentDescriptors().map((descriptor) => descriptor.id))
 const DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS = 1000
+const RUNNER_SUPPORTED_EXTENSION_POINTS = [
+    'runner.environmentProvider',
+    'runner.commandResolver',
+    'runner.spawnHook',
+    'runner.action',
+    'agent.adapter',
+    'agent.capabilityProvider',
+    'web.settingsPanel',
+    'web.newSessionField',
+    'web.action',
+    'web.badge',
+    'web.composerAction'
+]
 
 function runtimeContributionSort<T>(
     left: RegisteredRunnerContribution<T>,
@@ -336,6 +351,14 @@ export class RunnerPluginManager {
         return {
             machineId: this.options.machineId,
             updatedAt: this.lastInventoryUpdatedAt,
+            hostInfo: {
+                runtime: 'runner',
+                hapiVersion: packageJson.version,
+                pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+                os: process.platform,
+                arch: process.arch,
+                supportedExtensionPoints: RUNNER_SUPPORTED_EXTENSION_POINTS
+            },
             plugins: this.listPlugins(),
             diagnostics: this.getDiagnostics(),
             extensions: {
@@ -1155,7 +1178,15 @@ export class RunnerPluginManager {
             machineId: this.options.machineId,
             active: true,
             stale: false,
-            updatedAt: this.lastInventoryUpdatedAt
+            updatedAt: this.lastInventoryUpdatedAt,
+            hostInfo: {
+                runtime: 'runner',
+                hapiVersion: packageJson.version,
+                pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+                os: process.platform,
+                arch: process.arch,
+                supportedExtensionPoints: RUNNER_SUPPORTED_EXTENSION_POINTS
+            }
         }
     }
 

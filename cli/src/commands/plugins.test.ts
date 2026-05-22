@@ -268,12 +268,29 @@ describe('hapi plugins command', () => {
         expect(existsSync(marker)).toBe(false)
     })
 
-    it('uploads package installs with checksum and target scope', async () => {
+    it('uploads package installs with checksum and manifest-driven install plan', async () => {
         const packagePath = join(testDir, 'plugin.tgz')
         const content = Buffer.from('fake-package-bytes')
         writeFileSync(packagePath, content)
         process.env.CLI_API_TOKEN = 'test-token'
-        const installRemotePackagePlugin = vi.fn(async () => ({
+        const createRemotePluginInstallPlan = vi.fn(async () => ({
+            planId: 'plan-1',
+            createdAt: 1,
+            plugin: { id: 'com.package.install', name: 'Package plugin', version: '1.0.0' },
+            source: { type: 'uploaded-package', filename: 'plugin.tgz', checksum: 'sha256:test', format: 'tgz' },
+            positions: ['hub'],
+            targets: [{
+                target: { scope: 'hub', runtime: 'hub', active: true },
+                runtime: 'hub',
+                required: true,
+                compatible: true,
+                status: 'compatible',
+                action: 'install'
+            }],
+            warnings: [],
+            blockingErrors: []
+        }))
+        const executeRemotePluginInstallPlan = vi.fn(async () => ({
             ok: true,
             action: 'installed',
             pluginId: 'com.package.install',
@@ -287,22 +304,25 @@ describe('hapi plugins command', () => {
             updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins: vi.fn(),
             installRemoteLocalPlugin: vi.fn(),
-            installRemotePackagePlugin
+            createRemotePluginInstallPlan,
+            executeRemotePluginInstallPlan
         }))
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 
-        await handlePluginsCommand(['install-package', packagePath, '--target', 'hub', '--json'])
+        await handlePluginsCommand(['install-package', packagePath, '--json'])
 
         const expectedChecksum = `sha256:${createHash('sha256').update(content).digest('hex')}`
-        expect(installRemotePackagePlugin).toHaveBeenCalledWith('test-token', expect.objectContaining({
+        expect(createRemotePluginInstallPlan).toHaveBeenCalledWith('test-token', expect.objectContaining({
             filename: 'plugin.tgz',
             contentBase64: content.toString('base64'),
             checksum: expectedChecksum,
             format: 'tgz',
             enable: false,
             reload: false,
-            overwrite: false
-        }), 120000, 'hub')
+            overwrite: false,
+            runnerSelection: { mode: 'compatible' }
+        }), 120000)
+        expect(executeRemotePluginInstallPlan).toHaveBeenCalledWith('test-token', 'plan-1', 120000)
     })
 
     it('gets and sets remote scoped config with --target', async () => {
