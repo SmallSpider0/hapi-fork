@@ -13,7 +13,9 @@ OpenAPI JSON: [/docs/plugin-api/openapi.json](/docs/plugin-api/openapi.json)
 | `GET` | `/api/plugins/capabilities` | `target` | — | `PluginCapabilitiesResponse` | List user-facing plugin capabilities aggregated across Web, Hub, and Runner parts; pass sessionId to resolve session-runner parts for a chat surface. |
 | `POST` | `/api/plugins/reload` | `target` | — | `PluginReloadResult` | Reload all plugins on the selected target. |
 | `POST` | `/api/plugins/install-local` | `target` | `PluginInstallLocalRequest` | `PluginInstallResult` | Install a plugin from a target-local directory. |
-| `POST` | `/api/plugins/install-package` | `target` | `PluginInstallPackageRequest` | `PluginInstallResult` | Install a plugin from a tgz/zip package upload payload. |
+| `POST` | `/api/plugins/install-package` | `target` | `PluginInstallPackageRequest` | `PluginInstallResult` | Legacy target-scoped package install. Prefer install-plan for manifest-driven cross-runtime installs. |
+| `POST` | `/api/plugins/install-plan` | — | `PluginInstallPlanRequest` | `PluginInstallPlanResponse` | Inspect a package upload and return an install plan derived from manifest positions and Hub/Runner compatibility. |
+| `POST` | `/api/plugins/install-plan/{planId}/execute` | — | — | `PluginInstallResult` | Execute a previously created manifest-driven install plan. |
 | `POST` | `/api/plugins/local-directory` | `target` | `PluginLocalDirectoryListRequest` | `PluginLocalDirectoryListResponse` | Browse a target-local directory for plugin install UI. |
 | `GET` | `/api/plugins/{id}` | `target` | — | `PluginDetailResponse` | Inspect one plugin on Hub or one Runner target. |
 | `POST` | `/api/plugins/{id}/reload` | `target` | — | `PluginReloadResult` | Reload one plugin on the selected target. |

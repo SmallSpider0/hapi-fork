@@ -15,6 +15,8 @@ import {
     PluginEnableRequestSchema,
     PluginInstallLocalRequestSchema,
     PluginInstallPackageRequestSchema,
+    PluginInstallPlanRequestSchema,
+    PluginInstallPlanResponseSchema,
     PluginInstallResultSchema,
     PluginListResponseSchema,
     PluginLocalDirectoryListRequestSchema,
@@ -128,6 +130,20 @@ export const schemaCatalog: SchemaDoc[] = [
         group: 'admin',
         description: 'Install a tgz/zip plugin package by upload payload.',
         schema: PluginInstallPackageRequestSchema
+    },
+    {
+        id: 'plugin-install-plan-request',
+        title: 'PluginInstallPlanRequest',
+        group: 'admin',
+        description: 'Create a manifest-driven cross-runtime install plan from a tgz/zip plugin package upload.',
+        schema: PluginInstallPlanRequestSchema
+    },
+    {
+        id: 'plugin-install-plan-response',
+        title: 'PluginInstallPlanResponse',
+        group: 'admin',
+        description: 'Install plan with inferred positions, compatible targets, warnings, and blocking errors.',
+        schema: PluginInstallPlanResponseSchema
     },
     {
         id: 'plugin-install-result',

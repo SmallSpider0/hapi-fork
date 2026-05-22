@@ -117,6 +117,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                 "updatedAt": {
                     "type": "number"
                 },
+                "hostInfo": {
+                    "type": "object",
+                    "properties": {
+                        "runtime": {
+                            "type": "string",
+                            "enum": [
+                                "hub",
+                                "runner"
+                            ]
+                        },
+                        "hapiVersion": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "pluginApiVersion": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "os": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "arch": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "supportedExtensionPoints": {
+                            "default": [],
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        }
+                    },
+                    "required": [
+                        "runtime",
+                        "hapiVersion",
+                        "pluginApiVersion",
+                        "os",
+                        "arch",
+                        "supportedExtensionPoints"
+                    ],
+                    "additionalProperties": false
+                },
                 "error": {
                     "type": "string"
                 }
@@ -189,6 +234,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                                 },
                                 "updatedAt": {
                                     "type": "number"
+                                },
+                                "hostInfo": {
+                                    "type": "object",
+                                    "properties": {
+                                        "runtime": {
+                                            "type": "string",
+                                            "enum": [
+                                                "hub",
+                                                "runner"
+                                            ]
+                                        },
+                                        "hapiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "arch": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "supportedExtensionPoints": {
+                                            "default": [],
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "runtime",
+                                        "hapiVersion",
+                                        "pluginApiVersion",
+                                        "os",
+                                        "arch",
+                                        "supportedExtensionPoints"
+                                    ],
+                                    "additionalProperties": false
                                 },
                                 "error": {
                                     "type": "string"
@@ -284,6 +374,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                                             },
                                             "updatedAt": {
                                                 "type": "number"
+                                            },
+                                            "hostInfo": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "runtime": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "hub",
+                                                            "runner"
+                                                        ]
+                                                    },
+                                                    "hapiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "pluginApiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "os": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "arch": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "supportedExtensionPoints": {
+                                                        "default": [],
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "runtime",
+                                                    "hapiVersion",
+                                                    "pluginApiVersion",
+                                                    "os",
+                                                    "arch",
+                                                    "supportedExtensionPoints"
+                                                ],
+                                                "additionalProperties": false
                                             },
                                             "error": {
                                                 "type": "string"
@@ -387,6 +522,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                                 "updatedAt": {
                                     "type": "number"
                                 },
+                                "hostInfo": {
+                                    "type": "object",
+                                    "properties": {
+                                        "runtime": {
+                                            "type": "string",
+                                            "enum": [
+                                                "hub",
+                                                "runner"
+                                            ]
+                                        },
+                                        "hapiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "arch": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "supportedExtensionPoints": {
+                                            "default": [],
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "runtime",
+                                        "hapiVersion",
+                                        "pluginApiVersion",
+                                        "os",
+                                        "arch",
+                                        "supportedExtensionPoints"
+                                    ],
+                                    "additionalProperties": false
+                                },
                                 "error": {
                                     "type": "string"
                                 }
@@ -481,6 +661,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                                             },
                                             "updatedAt": {
                                                 "type": "number"
+                                            },
+                                            "hostInfo": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "runtime": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "hub",
+                                                            "runner"
+                                                        ]
+                                                    },
+                                                    "hapiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "pluginApiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "os": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "arch": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "supportedExtensionPoints": {
+                                                        "default": [],
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "runtime",
+                                                    "hapiVersion",
+                                                    "pluginApiVersion",
+                                                    "os",
+                                                    "arch",
+                                                    "supportedExtensionPoints"
+                                                ],
+                                                "additionalProperties": false
                                             },
                                             "error": {
                                                 "type": "string"
@@ -584,6 +809,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                                 "updatedAt": {
                                     "type": "number"
                                 },
+                                "hostInfo": {
+                                    "type": "object",
+                                    "properties": {
+                                        "runtime": {
+                                            "type": "string",
+                                            "enum": [
+                                                "hub",
+                                                "runner"
+                                            ]
+                                        },
+                                        "hapiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApiVersion": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "arch": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "supportedExtensionPoints": {
+                                            "default": [],
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "required": [
+                                        "runtime",
+                                        "hapiVersion",
+                                        "pluginApiVersion",
+                                        "os",
+                                        "arch",
+                                        "supportedExtensionPoints"
+                                    ],
+                                    "additionalProperties": false
+                                },
                                 "error": {
                                     "type": "string"
                                 }
@@ -678,6 +948,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                                             },
                                             "updatedAt": {
                                                 "type": "number"
+                                            },
+                                            "hostInfo": {
+                                                "type": "object",
+                                                "properties": {
+                                                    "runtime": {
+                                                        "type": "string",
+                                                        "enum": [
+                                                            "hub",
+                                                            "runner"
+                                                        ]
+                                                    },
+                                                    "hapiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "pluginApiVersion": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "os": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "arch": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    },
+                                                    "supportedExtensionPoints": {
+                                                        "default": [],
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "runtime",
+                                                    "hapiVersion",
+                                                    "pluginApiVersion",
+                                                    "os",
+                                                    "arch",
+                                                    "supportedExtensionPoints"
+                                                ],
+                                                "additionalProperties": false
                                             },
                                             "error": {
                                                 "type": "string"
@@ -2018,6 +2333,51 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
                             },
                             "updatedAt": {
                                 "type": "number"
+                            },
+                            "hostInfo": {
+                                "type": "object",
+                                "properties": {
+                                    "runtime": {
+                                        "type": "string",
+                                        "enum": [
+                                            "hub",
+                                            "runner"
+                                        ]
+                                    },
+                                    "hapiVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "pluginApiVersion": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "os": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "arch": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "supportedExtensionPoints": {
+                                        "default": [],
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "runtime",
+                                    "hapiVersion",
+                                    "pluginApiVersion",
+                                    "os",
+                                    "arch",
+                                    "supportedExtensionPoints"
+                                ],
+                                "additionalProperties": false
                             },
                             "error": {
                                 "type": "string"

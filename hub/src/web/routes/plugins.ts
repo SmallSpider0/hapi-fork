@@ -1,6 +1,8 @@
+import { randomUUID } from 'node:crypto'
 import { Hono, type Context } from 'hono'
 import {
     parseRunnerPluginTargetScope,
+    PluginHostInfoSchema,
     PluginCapabilitiesResponseSchema,
     PluginConfigUpdateRequestSchema,
     PluginDeleteResultSchema,
@@ -10,6 +12,8 @@ import {
     PluginDiagnosticsResponseSchema,
     PluginInstallLocalRequestSchema,
     PluginInstallPackageRequestSchema,
+    PluginInstallPlanRequestSchema,
+    PluginInstallPlanResponseSchema,
     PluginInstallResultSchema,
     PluginLocalDirectoryListRequestSchema,
     PluginLocalDirectoryListResponseSchema,
@@ -18,21 +22,28 @@ import {
     PluginTargetScopeSchema,
     type PluginDeleteResult,
     type PluginDetail,
+    type PluginInstallPackageRequest,
     type PluginInstallResult,
+    type PluginInstallPlanRequest,
+    type PluginInstallPlanResponse,
     type PluginListItem,
     type PluginReloadResult,
     type PluginCapabilityPartStatus,
     type PluginCapabilityView,
+    type PluginHostInfo,
     type PluginTargetActionResult,
     type PluginTargetInventory,
     type PluginTargetScope,
     type PluginTargetSummary,
     type RunnerPluginInventory
 } from '@hapi/protocol/plugins/admin'
-import { PluginInstallError, PluginStateLockError, validatePluginPackagePayload } from '@hapi/protocol/plugins/foundation'
+import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
+import { PluginInstallError, PluginStateLockError, inspectPluginPackagePayload, validatePluginPackagePayload } from '@hapi/protocol/plugins/foundation'
+import { buildPluginInstallPlan, type PluginInstallTargetCandidate } from '../../plugins/installPlanner'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
+import packageJson from '../../../../cli/package.json'
 
 function errorStatus(error: unknown): 400 | 404 | 409 | 500 {
     if (error instanceof PluginStateLockError) {
@@ -94,6 +105,28 @@ function parseOptionalSessionId(c: Context<WebAppEnv>): string | null | Response
     return sessionId
 }
 
+const HUB_SUPPORTED_EXTENSION_POINTS = [
+    'hub.notificationChannel',
+    'hub.messageAction',
+    'hub.action',
+    'web.settingsPanel',
+    'web.newSessionField',
+    'web.action',
+    'web.badge',
+    'web.composerAction'
+]
+
+function hubHostInfo(): PluginHostInfo {
+    return PluginHostInfoSchema.parse({
+        runtime: 'hub',
+        hapiVersion: packageJson.version,
+        pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+        os: process.platform,
+        arch: process.arch,
+        supportedExtensionPoints: HUB_SUPPORTED_EXTENSION_POINTS
+    })
+}
+
 function hubTargetSummary(): PluginTargetSummary {
     return {
         scope: 'hub',
@@ -101,7 +134,8 @@ function hubTargetSummary(): PluginTargetSummary {
         active: true,
         stale: false,
         displayName: 'Hub',
-        updatedAt: Date.now()
+        updatedAt: Date.now(),
+        hostInfo: hubHostInfo()
     }
 }
 
@@ -118,6 +152,7 @@ function runnerTargetSummary(machine: Machine, inventory?: RunnerPluginInventory
         active: machine.active,
         stale: !machine.active || Boolean(error),
         ...(inventory?.updatedAt ? { updatedAt: inventory.updatedAt } : {}),
+        ...(inventory?.hostInfo ? { hostInfo: inventory.hostInfo } : {}),
         ...(error ? { error } : {})
     }
 }
@@ -527,11 +562,245 @@ function requireExplicitInstallTarget(c: Context<WebAppEnv>, target: PluginTarge
     return target
 }
 
+async function buildInstallTargetCandidates(options: {
+    manager: HubPluginManager
+    engine: SyncEngine | null
+    namespace: string
+}): Promise<PluginInstallTargetCandidate[]> {
+    const candidates: PluginInstallTargetCandidate[] = []
+    const hub = hubInventory(options.manager)
+    candidates.push({ target: hub.target, plugins: hub.plugins })
+
+    if (!options.engine) {
+        return candidates
+    }
+
+    const machines = options.engine.getMachinesByNamespace(options.namespace)
+    const runnerInventories = await Promise.all(machines.map((machine) => loadRunnerInventory(options.engine!, machine)))
+    candidates.push(...runnerInventories.map((inventory) => ({
+        target: inventory.target,
+        plugins: inventory.plugins
+    })))
+    return candidates
+}
+
+async function createInstallPlan(options: {
+    manager: HubPluginManager
+    engine: SyncEngine | null
+    namespace: string
+    request: PluginInstallPlanRequest
+    planId: string
+    now: number
+    expiresAt?: number
+}): Promise<PluginInstallPlanResponse> {
+    const inspection = await inspectPluginPackagePayload(options.request)
+    const candidates = await buildInstallTargetCandidates({
+        manager: options.manager,
+        engine: options.engine,
+        namespace: options.namespace
+    })
+    return PluginInstallPlanResponseSchema.parse(buildPluginInstallPlan({
+        planId: options.planId,
+        now: options.now,
+        expiresAt: options.expiresAt,
+        manifest: inspection.manifest,
+        request: options.request,
+        packageFormat: inspection.packageFormat,
+        candidates
+    }))
+}
+
+function installActionFromPlan(action: 'install' | 'overwrite' | 'unchanged'): PluginInstallResult['action'] {
+    if (action === 'install') return 'installed'
+    if (action === 'overwrite') return 'overwritten'
+    return 'unchanged'
+}
+
+function isExecutablePlanAction(action: string): action is 'install' | 'overwrite' | 'unchanged' {
+    return action === 'install' || action === 'overwrite' || action === 'unchanged'
+}
+
+function packageRequestFromPlan(request: PluginInstallPlanRequest): PluginInstallPackageRequest {
+    const { runnerSelection: _runnerSelection, dryRun: _dryRun, ...packageRequest } = request
+    return packageRequest
+}
+
+async function executeInstallPlan(options: {
+    manager: HubPluginManager
+    engine: SyncEngine | null
+    namespace: string
+    request: PluginInstallPlanRequest
+    plan: PluginInstallPlanResponse
+}): Promise<PluginInstallResult> {
+    const targetResults: NonNullable<PluginInstallResult['targetResults']> = []
+    const plugins: PluginListItem[] = []
+    const attempted: Array<{ ok: boolean; action?: PluginInstallResult['action'] }> = []
+    const executableTargets = options.plan.targets.filter((target) =>
+        target.compatible
+        && isExecutablePlanAction(target.action))
+
+    for (const target of options.plan.targets.filter((entry) => entry.action === 'skip')) {
+        targetResults.push({
+            target: target.target,
+            ok: false,
+            error: target.reason ?? 'Target skipped by install plan.',
+            pluginId: options.plan.plugin.id,
+            diagnostics: [],
+            plugins: target.runtime === 'hub'
+                ? options.manager.listPlugins().map((plugin) => withTarget(plugin, target.target))
+                : []
+        })
+    }
+
+    for (const target of executableTargets) {
+        if (target.runtime === 'hub') {
+            try {
+                if (target.action === 'unchanged') {
+                    const reload = options.request.enable === true
+                        ? await options.manager.enablePlugin(options.plan.plugin.id, undefined, options.request.reload !== false)
+                        : undefined
+                    const latestPlugins = options.manager.listPlugins().map((plugin) => withTarget(plugin, hubTargetSummary()))
+                    plugins.push(...latestPlugins)
+                    targetResults.push({
+                        target: target.target,
+                        ok: reload?.ok ?? true,
+                        action: 'unchanged',
+                        pluginId: options.plan.plugin.id,
+                        diagnostics: [],
+                        plugins: latestPlugins
+                    })
+                    attempted.push({ ok: reload?.ok ?? true, action: 'unchanged' })
+                    continue
+                }
+                const result = await options.manager.installPluginPackage({
+                    ...packageRequestFromPlan(options.request),
+                    overwrite: target.action === 'overwrite' || options.request.overwrite === true
+                })
+                const targetSummary = hubTargetSummary()
+                const latestPlugins = result.plugins.map((plugin) => withTarget(plugin, targetSummary))
+                plugins.push(...latestPlugins)
+                targetResults.push({
+                    target: targetSummary,
+                    ok: result.ok,
+                    action: result.action,
+                    pluginId: result.pluginId,
+                    targetPath: result.targetPath,
+                    diagnostics: result.diagnostics,
+                    plugins: latestPlugins
+                })
+                attempted.push({ ok: result.ok, action: result.action })
+            } catch (error) {
+                const latestPlugins = options.manager.listPlugins().map((plugin) => withTarget(plugin, hubTargetSummary()))
+                plugins.push(...latestPlugins)
+                targetResults.push({
+                    target: target.target,
+                    ok: false,
+                    error: errorMessage(error),
+                    pluginId: options.plan.plugin.id,
+                    diagnostics: [],
+                    plugins: latestPlugins
+                })
+                attempted.push({ ok: false })
+            }
+            continue
+        }
+
+        const machineId = target.target.machineId
+        if (!machineId || !options.engine) {
+            targetResults.push({
+                target: target.target,
+                ok: false,
+                error: 'Runner target is not available.',
+                pluginId: options.plan.plugin.id,
+                diagnostics: [],
+                plugins: []
+            })
+            attempted.push({ ok: false })
+            continue
+        }
+        const machine = options.engine.getMachineByNamespace(machineId, options.namespace)
+        if (!machine) {
+            targetResults.push({
+                target: target.target,
+                ok: false,
+                error: 'Runner target was not found.',
+                pluginId: options.plan.plugin.id,
+                diagnostics: [],
+                plugins: []
+            })
+            attempted.push({ ok: false })
+            continue
+        }
+        try {
+            if (target.action === 'unchanged') {
+                const reload = options.request.enable === true
+                    ? await options.engine.enableRunnerPlugin(machineId, options.plan.plugin.id, undefined, options.request.reload !== false)
+                    : undefined
+                const inventory = await loadRunnerInventory(options.engine, machine)
+                const latestPlugins = inventory.plugins.map((plugin) => withTarget(plugin, inventory.target))
+                plugins.push(...latestPlugins)
+                targetResults.push({
+                    target: inventory.target,
+                    ok: reload?.ok ?? true,
+                    action: 'unchanged',
+                    pluginId: options.plan.plugin.id,
+                    diagnostics: [],
+                    plugins: latestPlugins
+                })
+                attempted.push({ ok: reload?.ok ?? true, action: 'unchanged' })
+                continue
+            }
+            const result = await options.engine.installRunnerPluginPackage(machineId, {
+                ...packageRequestFromPlan(options.request),
+                overwrite: target.action === 'overwrite' || options.request.overwrite === true
+            })
+            const targetSummary = result.target ?? runnerTargetSummary(machine, machine.runnerState?.pluginInventory)
+            const latestPlugins = result.plugins.map((plugin) => withTarget(plugin, targetSummary))
+            plugins.push(...latestPlugins)
+            targetResults.push({
+                target: targetSummary,
+                ok: result.ok,
+                action: result.action,
+                pluginId: result.pluginId,
+                targetPath: result.targetPath,
+                diagnostics: result.diagnostics,
+                plugins: latestPlugins
+            })
+            attempted.push({ ok: result.ok, action: result.action })
+        } catch (error) {
+            const cached = cachedRunnerInventory(machine, errorMessage(error))
+            plugins.push(...cached.plugins)
+            targetResults.push({
+                target: cached.target,
+                ok: false,
+                error: errorMessage(error),
+                pluginId: options.plan.plugin.id,
+                diagnostics: [],
+                plugins: cached.plugins
+            })
+            attempted.push({ ok: false })
+        }
+    }
+
+    const firstExecutableAction = executableTargets.find((target) => isExecutablePlanAction(target.action))?.action
+
+    return PluginInstallResultSchema.parse({
+        ok: attempted.every((entry) => entry.ok),
+        action: attempted.find((entry) => entry.action)?.action ?? (firstExecutableAction && isExecutablePlanAction(firstExecutableAction) ? installActionFromPlan(firstExecutableAction) : 'unchanged'),
+        pluginId: options.plan.plugin.id,
+        targetResults,
+        diagnostics: [],
+        plugins
+    })
+}
+
 export function createPluginsRoutes(
     getPluginManager: () => HubPluginManager | null,
     getSyncEngine: () => SyncEngine | null = () => null
 ): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
+    const installPlans = new Map<string, { namespace: string; request: PluginInstallPlanRequest; expiresAt: number }>()
+    const installPlanTtlMs = 10 * 60 * 1000
 
     app.get('/plugins', async (c) => {
         const manager = requirePluginManager(c, getPluginManager)
@@ -688,6 +957,77 @@ export function createPluginsRoutes(
             action: async (machineId) => await engine.installRunnerPluginLocal(machineId, parsed.data)
         })
         return result instanceof Response ? result : c.json(PluginInstallResultSchema.parse(result))
+    })
+
+    app.post('/plugins/install-plan', async (c) => {
+        const manager = requirePluginManager(c, getPluginManager)
+        if (manager instanceof Response) return manager
+        const json = await c.req.json().catch(() => null)
+        const parsed = PluginInstallPlanRequestSchema.safeParse(json)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
+        }
+        const planId = randomUUID()
+        const now = Date.now()
+        const expiresAt = now + installPlanTtlMs
+        try {
+            const plan = await createInstallPlan({
+                manager,
+                engine: getSyncEngine(),
+                namespace: c.get('namespace'),
+                request: parsed.data,
+                planId,
+                now,
+                expiresAt
+            })
+            installPlans.set(planId, {
+                namespace: c.get('namespace'),
+                request: parsed.data,
+                expiresAt
+            })
+            return c.json(PluginInstallPlanResponseSchema.parse(plan))
+        } catch (error) {
+            return c.json({ error: errorMessage(error) }, errorStatus(error))
+        }
+    })
+
+    app.post('/plugins/install-plan/:planId/execute', async (c) => {
+        const manager = requirePluginManager(c, getPluginManager)
+        if (manager instanceof Response) return manager
+        const planId = c.req.param('planId')
+        const stored = installPlans.get(planId)
+        if (!stored || stored.namespace !== c.get('namespace')) {
+            return c.json({ error: 'Plugin install plan not found or expired' }, 404)
+        }
+        if (stored.expiresAt <= Date.now()) {
+            installPlans.delete(planId)
+            return c.json({ error: 'Plugin install plan expired' }, 410)
+        }
+        try {
+            const plan = await createInstallPlan({
+                manager,
+                engine: getSyncEngine(),
+                namespace: c.get('namespace'),
+                request: stored.request,
+                planId,
+                now: Date.now(),
+                expiresAt: stored.expiresAt
+            })
+            if (plan.blockingErrors.length > 0) {
+                return c.json({ error: 'Plugin install plan is blocked', plan }, 409)
+            }
+            const result = await executeInstallPlan({
+                manager,
+                engine: getSyncEngine(),
+                namespace: c.get('namespace'),
+                request: stored.request,
+                plan
+            })
+            installPlans.delete(planId)
+            return c.json(PluginInstallResultSchema.parse(result))
+        } catch (error) {
+            return c.json({ error: errorMessage(error) }, errorStatus(error))
+        }
     })
 
     app.post('/plugins/install-package', async (c) => {

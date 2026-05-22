@@ -1987,6 +1987,10 @@ JSON Schema: [PluginInstallPackageRequest](/docs/plugin-api/schemas/plugin-insta
                                     "type": "string",
                                     "minLength": 1
                                 },
+                                "pluginApi": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
                                 "os": {
                                     "type": "array",
                                     "items": {
@@ -1997,6 +2001,135 @@ JSON Schema: [PluginInstallPackageRequest](/docs/plugin-api/schemas/plugin-insta
                                             "win32"
                                         ]
                                     }
+                                },
+                                "arch": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                },
+                                "hub": {
+                                    "type": "object",
+                                    "properties": {
+                                        "hapi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "darwin",
+                                                    "linux",
+                                                    "win32"
+                                                ]
+                                            }
+                                        },
+                                        "arch": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "extensionPoints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "runner": {
+                                    "type": "object",
+                                    "properties": {
+                                        "hapi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "pluginApi": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "os": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "darwin",
+                                                    "linux",
+                                                    "win32"
+                                                ]
+                                            }
+                                        },
+                                        "arch": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "extensionPoints": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                },
+                                "crossRuntime": {
+                                    "type": "object",
+                                    "properties": {
+                                        "samePluginVersionAcrossTargets": {
+                                            "type": "boolean"
+                                        },
+                                        "allowVersionSkew": {
+                                            "type": "string",
+                                            "enum": [
+                                                "none",
+                                                "patch",
+                                                "minor"
+                                            ]
+                                        }
+                                    },
+                                    "additionalProperties": false
+                                }
+                            },
+                            "additionalProperties": false
+                        },
+                        "install": {
+                            "type": "object",
+                            "properties": {
+                                "runnerPlacement": {
+                                    "type": "string",
+                                    "enum": [
+                                        "session-runner",
+                                        "selected-runners",
+                                        "compatible-runners",
+                                        "all-runners"
+                                    ]
+                                },
+                                "offlineRunnerPolicy": {
+                                    "type": "string",
+                                    "enum": [
+                                        "skip",
+                                        "fail"
+                                    ]
+                                },
+                                "minReadyRunnerCount": {
+                                    "type": "integer",
+                                    "minimum": 0,
+                                    "maximum": 9007199254740991
                                 }
                             },
                             "additionalProperties": false

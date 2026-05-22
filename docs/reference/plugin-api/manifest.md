@@ -18,6 +18,7 @@ Supported plugin API version: `0.1`
 | `\\|c\\|o\\|n\\|f\\|i\\|g\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|p\\|e\\|r\\|m\\|i\\|s\\|s\\|i\\|o\\|n\\|s\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|c\\|o\\|m\\|p\\|a\\|t\\|i\\|b\\|i\\|l\\|i\\|t\\|y\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
+| `\\|i\\|n\\|s\\|t\\|a\\|l\\|l\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 
 ## Minimal example
 
@@ -2015,6 +2016,10 @@ Download: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schema.j
                     "type": "string",
                     "minLength": 1
                 },
+                "pluginApi": {
+                    "type": "string",
+                    "minLength": 1
+                },
                 "os": {
                     "type": "array",
                     "items": {
@@ -2025,6 +2030,135 @@ Download: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schema.j
                             "win32"
                         ]
                     }
+                },
+                "arch": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "hub": {
+                    "type": "object",
+                    "properties": {
+                        "hapi": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "pluginApi": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "os": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "darwin",
+                                    "linux",
+                                    "win32"
+                                ]
+                            }
+                        },
+                        "arch": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        },
+                        "extensionPoints": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "runner": {
+                    "type": "object",
+                    "properties": {
+                        "hapi": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "pluginApi": {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        "os": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "enum": [
+                                    "darwin",
+                                    "linux",
+                                    "win32"
+                                ]
+                            }
+                        },
+                        "arch": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        },
+                        "extensionPoints": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        }
+                    },
+                    "additionalProperties": false
+                },
+                "crossRuntime": {
+                    "type": "object",
+                    "properties": {
+                        "samePluginVersionAcrossTargets": {
+                            "type": "boolean"
+                        },
+                        "allowVersionSkew": {
+                            "type": "string",
+                            "enum": [
+                                "none",
+                                "patch",
+                                "minor"
+                            ]
+                        }
+                    },
+                    "additionalProperties": false
+                }
+            },
+            "additionalProperties": false
+        },
+        "install": {
+            "type": "object",
+            "properties": {
+                "runnerPlacement": {
+                    "type": "string",
+                    "enum": [
+                        "session-runner",
+                        "selected-runners",
+                        "compatible-runners",
+                        "all-runners"
+                    ]
+                },
+                "offlineRunnerPolicy": {
+                    "type": "string",
+                    "enum": [
+                        "skip",
+                        "fail"
+                    ]
+                },
+                "minReadyRunnerCount": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
                 }
             },
             "additionalProperties": false

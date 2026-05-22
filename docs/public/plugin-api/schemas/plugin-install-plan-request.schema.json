@@ -2186,6 +2186,36 @@
         },
         "overwrite": {
             "type": "boolean"
+        },
+        "runnerSelection": {
+            "type": "object",
+            "properties": {
+                "mode": {
+                    "default": "compatible",
+                    "type": "string",
+                    "enum": [
+                        "compatible",
+                        "all",
+                        "selected"
+                    ]
+                },
+                "machineIds": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                    }
+                }
+            },
+            "required": [
+                "mode"
+            ],
+            "additionalProperties": false
+        },
+        "dryRun": {
+            "type": "boolean"
         }
     },
     "required": [

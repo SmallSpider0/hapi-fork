@@ -9,7 +9,7 @@ import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
 import { initializeToken } from '@/ui/tokenInit'
-import { getRemotePlugin, getRemotePlugins, installRemoteLocalPlugin, installRemotePackagePlugin, reloadRemotePlugins, updateRemotePluginConfig } from '@/api/pluginAdmin'
+import { createRemotePluginInstallPlan, executeRemotePluginInstallPlan, getRemotePlugin, getRemotePlugins, installRemoteLocalPlugin, reloadRemotePlugins, updateRemotePluginConfig } from '@/api/pluginAdmin'
 import type { CommandDefinition } from './types'
 import {
     applyPluginState,
@@ -24,7 +24,7 @@ import {
 import { assertPluginConfigSafeForPersistence, PluginTargetScopeSchema, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
-import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
+import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
 
 function hasFlag(args: string[], flag: string): boolean {
     return args.includes(flag)
@@ -54,6 +54,37 @@ function parseTargetArg(args: string[]): PluginTargetScope | undefined {
     const raw = valueAfter(args, '--target')
     if (!raw) return undefined
     return PluginTargetScopeSchema.parse(raw)
+}
+
+function parseRunnerSelectionArg(args: string[]): { mode: 'compatible' | 'all' | 'selected'; machineIds?: string[] } | undefined {
+    const raw = valueAfter(args, '--runners')
+    if (!raw || raw === 'compatible') return { mode: 'compatible' }
+    if (raw === 'all') return { mode: 'all' }
+    const machineIds = raw
+        .split(',')
+        .map((entry) => entry.trim())
+        .filter(Boolean)
+        .map((entry) => entry.startsWith('runner:') ? entry.slice('runner:'.length) : entry)
+    if (machineIds.length === 0) {
+        throw new Error('--runners must be compatible, all, or a comma-separated Runner machine id list.')
+    }
+    return { mode: 'selected', machineIds }
+}
+
+function printInstallPlan(plan: PluginInstallPlanResponse): void {
+    console.log(chalk.bold(`Install plan: ${plan.plugin.name} ${plan.plugin.version}`))
+    console.log(chalk.gray(`Positions: ${plan.positions.join(', ')}`))
+    for (const warning of plan.warnings) {
+        console.log(chalk.yellow(`warning: ${warning}`))
+    }
+    for (const error of plan.blockingErrors) {
+        console.log(chalk.red(`blocked: ${error}`))
+    }
+    for (const target of plan.targets) {
+        const label = target.target.displayName ?? target.target.machineId ?? target.target.scope
+        const marker = target.compatible ? chalk.green(target.action) : target.action === 'skip' ? chalk.yellow(target.action) : chalk.red(target.action)
+        console.log(`${target.target.scope} (${label}): ${marker}${target.reason ? ` - ${target.reason}` : ''}`)
+    }
 }
 
 function pluginId(record: DiscoveredPluginRecord): string {
@@ -553,9 +584,12 @@ async function runInstallLocal(args: string[]): Promise<void> {
 }
 
 async function runInstallPackage(args: string[]): Promise<void> {
-    const packagePath = positionalArgs(args, ['--target'])[0]
-    const target = parseTargetArg(args)
-    if (!packagePath || !target) throw new Error('Usage: hapi plugins install-package <package.tgz|package.zip> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]')
+    const packagePath = positionalArgs(args, ['--target', '--runners'])[0]
+    const legacyTarget = parseTargetArg(args)
+    if (legacyTarget) {
+        throw new Error('Plugin package install no longer accepts --target. Installation targets are inferred from the plugin manifest; use --runners compatible|all|id[,id] only when narrowing Runner placement.')
+    }
+    if (!packagePath) throw new Error('Usage: hapi plugins install-package <package.tgz|package.zip> [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]')
     const bytes = await readFile(packagePath)
     const checksum = `sha256:${createHash('sha256').update(bytes).digest('hex')}`
     const lowered = packagePath.toLowerCase()
@@ -563,20 +597,40 @@ async function runInstallPackage(args: string[]): Promise<void> {
     if (!format) throw new Error('Plugin package must be .tgz, .tar.gz, or .zip.')
     await initializeApiUrl()
     await initializeToken()
-    const payload = await installRemotePackagePlugin(configuration.cliApiToken, {
+    const plan = await createRemotePluginInstallPlan(configuration.cliApiToken, {
         filename: basename(packagePath),
         contentBase64: bytes.toString('base64'),
         checksum,
         format,
         enable: hasFlag(args, '--enable'),
         reload: hasFlag(args, '--reload'),
-        overwrite: hasFlag(args, '--overwrite')
-    }, 120000, target)
-    if (hasFlag(args, '--json')) {
-        console.log(JSON.stringify(payload, null, 2))
+        overwrite: hasFlag(args, '--overwrite'),
+        runnerSelection: parseRunnerSelectionArg(args),
+        dryRun: hasFlag(args, '--dry-run')
+    }, 120000)
+    if (hasFlag(args, '--dry-run')) {
+        if (hasFlag(args, '--json')) {
+            console.log(JSON.stringify(plan, null, 2))
+            return
+        }
+        printInstallPlan(plan)
         return
     }
-    console.log(chalk.green(`Plugin package install ${payload.ok ? 'completed' : 'completed with issues'} on ${target}.`))
+    if (plan.blockingErrors.length > 0) {
+        if (hasFlag(args, '--json')) {
+            console.log(JSON.stringify(plan, null, 2))
+            return
+        }
+        printInstallPlan(plan)
+        throw new Error('Plugin install plan is blocked.')
+    }
+    const payload = await executeRemotePluginInstallPlan(configuration.cliApiToken, plan.planId, 120000)
+    if (hasFlag(args, '--json')) {
+        console.log(JSON.stringify({ plan, result: payload }, null, 2))
+        return
+    }
+    printInstallPlan(plan)
+    console.log(chalk.green(`Plugin package install ${payload.ok ? 'completed' : 'completed with issues'}.`))
     for (const targetResult of payload.targetResults ?? []) {
         console.log(`${targetResult.target.scope}: ${targetResult.ok ? 'ok' : 'failed'}${targetResult.error ? ` - ${targetResult.error}` : ''}`)
     }
@@ -706,12 +760,12 @@ ${chalk.bold('Usage:')}
   hapi plugins config get <id> [--target hub|runner:<machineId>] [--json]
   hapi plugins config set <id> <key> <value> [--target hub|runner:<machineId>] [--reload] [--json]
   hapi plugins install-local <path> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
-  hapi plugins install-package <package.tgz|package.zip> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
+  hapi plugins install-package <package.tgz|package.zip> [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]
   hapi plugins delete <id> [--reload] [--json] [--yes]
   hapi plugins reload [id] [--json]
   hapi plugins doctor [id] [--json]
 
-Package archives must include hapi.plugin.package.json metadata. Hub validates checksum and metadata before distributing uploads to Runner targets.
+Package archives must include hapi.plugin.package.json metadata. Hub reads the manifest, plans required Hub/Web/Runner positions, validates host compatibility, then distributes uploads to compatible Runner targets.
 `)
 }
 

@@ -30,6 +30,8 @@ Generated from Zod schemas under `shared/src/plugins/*`.
 | [PluginReloadResult](/docs/plugin-api/schemas/plugin-reload-result.schema.json) | Reload/enable/disable/config result, including partial target results. |
 | [PluginInstallLocalRequest](/docs/plugin-api/schemas/plugin-install-local-request.schema.json) | Install a plugin from a path local to the selected target machine. |
 | [PluginInstallPackageRequest](/docs/plugin-api/schemas/plugin-install-package-request.schema.json) | Install a tgz/zip plugin package by upload payload. |
+| [PluginInstallPlanRequest](/docs/plugin-api/schemas/plugin-install-plan-request.schema.json) | Create a manifest-driven cross-runtime install plan from a tgz/zip plugin package upload. |
+| [PluginInstallPlanResponse](/docs/plugin-api/schemas/plugin-install-plan-response.schema.json) | Install plan with inferred positions, compatible targets, warnings, and blocking errors. |
 | [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-result.schema.json) | Install result for Hub, one Runner, or all Runners. |
 | [PluginDeleteResult](/docs/plugin-api/schemas/plugin-delete-result.schema.json) | Delete result for Hub, one Runner, or all Runners. |
 | [PluginEnableRequest](/docs/plugin-api/schemas/plugin-enable-request.schema.json) | Enable a plugin with optional non-secret config. |

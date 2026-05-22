@@ -108,6 +108,11 @@ export interface PluginPackageValidationResult {
     packageFormat: PluginPackageFormat
 }
 
+export interface PluginPackageInspectionResult extends PluginPackageValidationResult {
+    manifest: PluginManifestLite
+    packageManifest: PluginPackageManifestMetadata
+}
+
 export const HAPI_PLUGIN_PACKAGE_MANIFEST_FILE = 'hapi.plugin.package.json'
 
 const PluginPackageManifestMetadataSchema = z.object({
@@ -808,6 +813,55 @@ export async function validatePluginPackagePayload(options: {
         bytes,
         checksum: actualChecksum,
         packageFormat: format
+    }
+}
+
+export async function inspectPluginPackagePayload(options: {
+    filename: string
+    contentBase64: string
+    checksum: string
+    format?: PluginPackageFormat
+    manifest?: PluginPackageManifestMetadata
+}): Promise<PluginPackageInspectionResult> {
+    const validation = await validatePluginPackagePayload({ ...options, inspectArchive: false })
+
+    const tempRoot = await mkdtemp(join(tmpdir(), 'hapi-plugin-package-inspect-'))
+    try {
+        const packagePath = join(tempRoot, validation.packageFormat === 'zip' ? 'plugin.zip' : 'plugin.tgz')
+        const extractDir = join(tempRoot, 'extract')
+        await writeFile(packagePath, validation.bytes, { mode: 0o600 })
+        await mkdir(extractDir, { recursive: true, mode: 0o700 })
+        const entries = await listArchiveEntries(packagePath, validation.packageFormat)
+        if (entries.length === 0) {
+            throw new PluginInstallError('plugin-install-invalid-source', 'Plugin package is empty.')
+        }
+        for (const entry of entries) {
+            assertArchiveEntrySafe(entry)
+        }
+        await extractArchive(packagePath, validation.packageFormat, extractDir)
+        await rejectSymlinks(extractDir)
+        const pluginRoot = await findExtractedPluginRoot(extractDir)
+        const packageManifest = options.manifest
+            ? PluginPackageManifestMetadataSchema.parse(options.manifest)
+            : await readInternalPackageManifest(pluginRoot)
+        if (!packageManifest) {
+            throw new PluginInstallError('plugin-install-invalid-source', `Plugin package must include ${HAPI_PLUGIN_PACKAGE_MANIFEST_FILE} or provide package manifest metadata.`)
+        }
+        await validatePackageManifestMetadata({
+            metadata: packageManifest,
+            pluginRoot,
+            extractDir,
+            archiveEntries: entries,
+            packageChecksum: validation.checksum,
+            strictPackageChecksum: Boolean(options.manifest)
+        })
+        return {
+            ...validation,
+            manifest: packageManifest.manifest,
+            packageManifest
+        }
+    } finally {
+        await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined)
     }
 }
 
