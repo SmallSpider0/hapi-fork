@@ -3,6 +3,7 @@ import type { ConversationStatus } from '@/realtime/types'
 import { useTranslation } from '@/lib/use-translation'
 import { ScheduleTimePicker } from './ScheduleTimePicker'
 import type { PendingSchedule } from './ScheduleTimePicker'
+import type { DeliveryNotBeforeComposerAction } from './composerActions'
 import { useRef, useState } from 'react'
 
 function ScheduleIcon() {
@@ -344,6 +345,7 @@ export function ComposerButtons(props: {
     pendingSchedule?: PendingSchedule | null
     onSchedule?: (pending: PendingSchedule) => void
     onClearSchedule?: () => void
+    deliveryNotBeforeAction?: DeliveryNotBeforeComposerAction | null
     // The backend rejects scheduled-send + attachment combinations (the per-CLI
     // upload directory is torn down before a mature emit could read the files).
     // The composer must surface that constraint at UI time so the user never
@@ -357,6 +359,7 @@ export function ComposerButtons(props: {
 
     const hasSchedule = props.pendingSchedule != null
     const hasAttachments = props.hasAttachments ?? false
+    const scheduleAction = props.deliveryNotBeforeAction
 
     return (
         <div className="flex items-center justify-between px-2 pb-2">
@@ -438,14 +441,14 @@ export function ComposerButtons(props: {
                     </button>
                 ) : null}
 
-                {/* Schedule button — only shown when onSchedule handler is provided */}
-                {props.onSchedule ? (
+                {/* Delivery scheduler action — contributed through the Web composer action registry. */}
+                {props.onSchedule && scheduleAction ? (
                     <>
                         <button
                             ref={scheduleButtonRef}
                             type="button"
-                            aria-label={t('composer.scheduleSend')}
-                            title={t('composer.scheduleSend')}
+                            aria-label={typeof scheduleAction.label === 'string' ? scheduleAction.label : t('composer.scheduleSend')}
+                            title={typeof scheduleAction.label === 'string' ? scheduleAction.label : t('composer.scheduleSend')}
                             disabled={props.controlsDisabled || hasAttachments}
                             onClick={() => {
                                 if (hasSchedule && props.onClearSchedule) {
@@ -471,6 +474,13 @@ export function ComposerButtons(props: {
                                 }}
                                 onClose={() => setShowSchedulePicker(false)}
                                 pendingSchedule={props.pendingSchedule}
+                                presets={scheduleAction.presets.map((preset) => ({
+                                    id: preset.id,
+                                    label: typeof preset.label === 'string' ? preset.label : t('composer.scheduleSend'),
+                                    delayMs: preset.delayMs,
+                                }))}
+                                maxDelayMs={scheduleAction.maxDelayMs}
+                                title={typeof scheduleAction.label === 'string' ? scheduleAction.label : undefined}
                             />
                         )}
                     </>

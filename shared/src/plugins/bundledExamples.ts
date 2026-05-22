@@ -1,19 +1,9 @@
-import { lstat, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { homedir } from 'node:os'
-import { HAPI_PLUGIN_API_VERSION, HAPI_PLUGIN_MANIFEST_FILE, type PluginManifestLite } from './manifest'
+import { HAPI_PLUGIN_API_VERSION, type PluginManifestLite } from './manifest'
+import { getBundledPluginsRoot, prepareBundledPlugins, type BundledPlugin } from './bundledMaterialize'
 
 export const HAPI_BUNDLED_EXAMPLE_PLUGINS_DIR = 'bundled-example-plugins'
 
-type BundledExamplePluginFile = {
-    path: string
-    content: string
-}
-
-export type BundledExamplePlugin = {
-    manifest: PluginManifestLite
-    files: BundledExamplePluginFile[]
-}
+export type BundledExamplePlugin = BundledPlugin
 
 function manifestBase(manifest: Omit<PluginManifestLite, 'pluginApiVersion' | 'version'> & { version?: string }): PluginManifestLite {
     return {
@@ -275,7 +265,8 @@ export const bundledExamplePlugins: BundledExamplePlugin[] = [
                                 rows: [
                                     { point: 'settingsPanels', status: 'rendered on plugin detail' },
                                     { point: 'newSessionFields', status: 'rendered after Runner target enable' },
-                                    { point: 'actions', status: 'limited to core plugin actions' }
+                                    { point: 'actions', status: 'limited to core plugin actions' },
+                                    { point: 'composerActions', status: 'rendered in the session composer' }
                                 ]
                             }
                         ]
@@ -288,7 +279,18 @@ export const bundledExamplePlugins: BundledExamplePlugin[] = [
                         defaultValue: 'descriptor-only'
                     }],
                     actions: [{ id: 'reload-self', label: 'Reload plugin', actionId: 'plugin.reload' }],
-                    badges: [{ id: 'descriptor-only', label: 'Descriptor-only', variant: 'success' }]
+                    badges: [{ id: 'descriptor-only', label: 'Descriptor-only', variant: 'success' }],
+                    composerActions: [{
+                        id: 'example-schedule-send',
+                        kind: 'deliveryNotBefore',
+                        label: 'Example schedule send',
+                        icon: 'clock',
+                        maxDelayMs: 10 * 60 * 1000,
+                        presets: [
+                            { id: 'example-plus-2m', label: '+2m', delayMs: 2 * 60 * 1000 },
+                            { id: 'example-plus-10m', label: '+10m', delayMs: 10 * 60 * 1000 }
+                        ]
+                    }]
                 }
             }
         }),
@@ -418,91 +420,14 @@ export const bundledExamplePlugins: BundledExamplePlugin[] = [
 ]
 
 export function getBundledExamplePluginsRoot(hapiHome: string): string {
-    return join(expandHomePath(hapiHome), HAPI_BUNDLED_EXAMPLE_PLUGINS_DIR)
-}
-
-function expandHomePath(path: string): string {
-    return path.replace(/^~(?=$|[/\\])/, homedir())
-}
-
-function isPathInside(parentPath: string, childPath: string): boolean {
-    const rel = relative(parentPath, childPath)
-    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
-}
-
-function isEnoent(error: unknown): boolean {
-    return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
-}
-
-async function ensureDirectory(path: string, label: string): Promise<void> {
-    try {
-        const stats = await lstat(path)
-        if (stats.isSymbolicLink()) {
-            throw new Error(`Refusing to use bundled example ${label} symbolic link: ${path}`)
-        }
-        if (!stats.isDirectory()) {
-            throw new Error(`Refusing to use bundled example ${label} non-directory: ${path}`)
-        }
-        return
-    } catch (error) {
-        if (!isEnoent(error)) {
-            throw error
-        }
-    }
-
-    await mkdir(path, { recursive: true, mode: 0o700 })
-    const stats = await lstat(path)
-    if (stats.isSymbolicLink()) {
-        throw new Error(`Refusing to use bundled example ${label} symbolic link: ${path}`)
-    }
-    if (!stats.isDirectory()) {
-        throw new Error(`Refusing to use bundled example ${label} non-directory: ${path}`)
-    }
-}
-
-async function writeFileIfChanged(path: string, content: string): Promise<void> {
-    try {
-        const stats = await lstat(path)
-        if (stats.isSymbolicLink()) {
-            throw new Error(`Refusing to overwrite bundled example symlink: ${path}`)
-        }
-        if (stats.isFile()) {
-            const current = await readFile(path, 'utf8')
-            if (current === content) {
-                return
-            }
-        }
-    } catch (error) {
-        if (!isEnoent(error)) {
-            throw error
-        }
-    }
-    await writeFile(path, content, 'utf8')
+    return getBundledPluginsRoot(hapiHome, HAPI_BUNDLED_EXAMPLE_PLUGINS_DIR)
 }
 
 export async function prepareBundledExamplePlugins(hapiHome: string): Promise<string> {
-    const root = getBundledExamplePluginsRoot(hapiHome)
-    await ensureDirectory(root, 'root')
-    const allowedIds = new Set(bundledExamplePlugins.map((plugin) => plugin.manifest.id))
-    for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
-        if (!allowedIds.has(entry.name)) {
-            await rm(join(root, entry.name), { recursive: true, force: true })
-        }
-    }
-
-    for (const plugin of bundledExamplePlugins) {
-        const pluginRoot = join(root, plugin.manifest.id)
-        await ensureDirectory(pluginRoot, `plugin directory for ${plugin.manifest.id}`)
-        await writeFileIfChanged(join(pluginRoot, HAPI_PLUGIN_MANIFEST_FILE), `${JSON.stringify(plugin.manifest, null, 2)}\n`)
-        for (const file of plugin.files) {
-            const filePath = resolve(pluginRoot, file.path)
-            if (!isPathInside(resolve(pluginRoot), filePath)) {
-                throw new Error(`Bundled example file path escapes plugin root: ${file.path}`)
-            }
-            await ensureDirectory(dirname(filePath), `file directory for ${plugin.manifest.id}`)
-            await writeFileIfChanged(filePath, file.content)
-        }
-    }
-
-    return root
+    return await prepareBundledPlugins({
+        hapiHome,
+        directoryName: HAPI_BUNDLED_EXAMPLE_PLUGINS_DIR,
+        plugins: bundledExamplePlugins,
+        label: 'bundled example'
+    })
 }

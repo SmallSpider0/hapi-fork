@@ -63,7 +63,9 @@ describe('hapi plugins command', () => {
         await handlePluginsCommand(['list', '--json'])
 
         const payload = JSON.parse(logs.join('\n')) as { plugins: Array<{ id: string; status: string; enabled: boolean }> }
-        expect(payload.plugins).toMatchObject([{ id: 'com.example.plugin', status: 'disabled', enabled: false }])
+        expect(payload.plugins).toEqual(expect.arrayContaining([
+            expect.objectContaining({ id: 'com.example.plugin', status: 'disabled', enabled: false })
+        ]))
     })
 
     it('lists bundled example plugins by default', async () => {
@@ -78,6 +80,22 @@ describe('hapi plugins command', () => {
                 id: 'com.hapi.examples.notification-logger',
                 source: 'bundled',
                 enabled: false
+            })
+        ]))
+    })
+
+    it('lists default-enabled bundled core plugins even when examples are disabled', async () => {
+        rmSync(pluginRoot, { recursive: true, force: true })
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await handlePluginsCommand(['list', '--json'])
+
+        const payload = JSON.parse(logs.join('\n')) as { plugins: Array<{ id: string; source: string; enabled: boolean }> }
+        expect(payload.plugins).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'com.hapi.core.schedule-send',
+                source: 'bundled',
+                enabled: true
             })
         ]))
     })

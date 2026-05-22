@@ -540,6 +540,7 @@ export default {
   'settings.plugins.contribution.webNewSession': 'Web new session',
   'settings.plugins.contribution.webAction': 'Web action',
   'settings.plugins.contribution.webBadge': 'Web badge',
+  'settings.plugins.contribution.webComposerAction': 'Web composer action',
   'settings.plugins.descriptor.required': '{label} is required.',
   'settings.plugins.descriptor.secretPlaceholder': 'Secret value is provided by the target runtime',
   'settings.plugins.descriptor.select': 'Select…',

@@ -157,19 +157,39 @@ export const MessagesQuerySchema = z.object({
 
 export type MessagesQuery = z.infer<typeof MessagesQuerySchema>
 
+export const MessageDeliveryRequestSchema = z.object({
+    notBefore: z.number().int().positive().nullable().optional()
+}).strict()
+
+export type MessageDeliveryRequest = z.infer<typeof MessageDeliveryRequestSchema>
+
 export const SendMessageRequestSchema = z.object({
     text: z.string(),
     localId: z.string().min(1).optional(),
     attachments: z.array(AttachmentMetadataSchema).optional(),
+    delivery: MessageDeliveryRequestSchema.optional(),
     scheduledAt: z.number().int().positive().nullable().optional()
+}).superRefine((data, ctx) => {
+    const deliveryNotBefore = data.delivery?.notBefore ?? null
+    const scheduledAt = data.scheduledAt ?? null
+    if (deliveryNotBefore != null && scheduledAt != null && deliveryNotBefore !== scheduledAt) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'scheduledAt and delivery.notBefore must match when both are provided',
+            path: ['delivery', 'notBefore']
+        })
+    }
 }).refine(
-    (data) => data.scheduledAt == null || typeof data.localId === 'string',
-    { message: 'scheduledAt requires localId', path: ['localId'] }
+    (data) => (data.delivery?.notBefore ?? data.scheduledAt) == null || typeof data.localId === 'string',
+    { message: 'delivery.notBefore requires localId', path: ['localId'] }
 ).refine(
-    (data) => data.scheduledAt == null || data.scheduledAt <= Date.now() + 7 * 24 * 60 * 60 * 1000,
-    { message: 'scheduledAt must be within 7 days from now', path: ['scheduledAt'] }
+    (data) => {
+        const notBefore = data.delivery?.notBefore ?? data.scheduledAt
+        return notBefore == null || notBefore <= Date.now() + 7 * 24 * 60 * 60 * 1000
+    },
+    { message: 'delivery.notBefore must be within 7 days from now', path: ['delivery', 'notBefore'] }
 ).refine(
-    (data) => data.scheduledAt == null || !data.attachments?.length,
+    (data) => (data.delivery?.notBefore ?? data.scheduledAt) == null || !data.attachments?.length,
     { message: 'scheduled messages with attachments are not supported', path: ['attachments'] }
 )
 

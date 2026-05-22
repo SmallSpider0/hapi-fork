@@ -128,7 +128,10 @@ function hubInventory(manager: HubPluginManager): PluginTargetInventory {
     const target = hubTargetSummary()
     return {
         target,
-        plugins: manager.listPlugins().map((plugin) => withTarget(plugin, target))
+        plugins: manager.listPlugins().map((plugin) => withTarget(plugin, target)),
+        webContributions: typeof manager.collectWebContributions === 'function'
+            ? manager.collectWebContributions()
+            : []
     }
 }
 
@@ -138,6 +141,7 @@ function cachedRunnerInventory(machine: Machine, error?: string): PluginTargetIn
     return {
         target,
         plugins: (inventory?.plugins ?? []).map((plugin) => withTarget(plugin, target)),
+        ...(inventory?.webContributions ? { webContributions: inventory.webContributions } : {}),
         ...(target.error ? { error: target.error } : {})
     }
 }
@@ -146,7 +150,8 @@ function freshRunnerInventory(machine: Machine, inventory: RunnerPluginInventory
     const target = runnerTargetSummary(machine, inventory)
     return {
         target,
-        plugins: inventory.plugins.map((plugin) => withTarget(plugin, target))
+        plugins: inventory.plugins.map((plugin) => withTarget(plugin, target)),
+        webContributions: inventory.webContributions
     }
 }
 

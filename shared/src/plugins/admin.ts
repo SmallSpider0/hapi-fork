@@ -176,6 +176,7 @@ export type PluginDetail = z.infer<typeof PluginDetailSchema>
 export const PluginTargetInventorySchema = z.object({
     target: PluginTargetSummarySchema,
     plugins: z.array(PluginListItemSchema),
+    webContributions: z.array(PluginWebContributionViewSchema).optional(),
     error: z.string().optional()
 }).strict()
 export type PluginTargetInventory = z.infer<typeof PluginTargetInventorySchema>

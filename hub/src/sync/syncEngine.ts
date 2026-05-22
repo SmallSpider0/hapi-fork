@@ -360,6 +360,9 @@ export class SyncEngine {
                 previewUrl?: string
             }>
             sentFrom?: 'telegram-bot' | 'webapp'
+            delivery?: {
+                notBefore?: number | null
+            }
             scheduledAt?: number | null
         }
     ): Promise<void> {

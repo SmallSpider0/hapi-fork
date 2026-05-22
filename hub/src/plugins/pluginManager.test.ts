@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { Session } from '../sync/syncEngine'
 import { HubPluginManager } from './pluginManager'
 import { writePluginState } from '@hapi/protocol/plugins/foundation'
+import { HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID, bundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
@@ -307,10 +308,42 @@ describe('HubPluginManager', () => {
         ])
     })
 
+    it('discovers default-enabled bundled core web plugins for the Hub manager', async () => {
+        const manager = new HubPluginManager({ hapiHome, watch: false, includeBundledCore: true })
+        await manager.start()
+        const plugins = manager.listPlugins()
+        const webContributions = manager.collectWebContributions()
+
+        expect(plugins.map((plugin) => plugin.id).sort()).toEqual(bundledCorePlugins.map((plugin) => plugin.manifest.id).sort())
+        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
+            source: 'bundled',
+            enabled: true,
+            active: false,
+            install: { sourceType: 'bundled' }
+        })
+        expect(webContributions).toEqual([
+            expect.objectContaining({
+                pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+                contributions: expect.objectContaining({
+                    composerActions: [expect.objectContaining({ id: 'schedule-send', kind: 'deliveryNotBefore' })]
+                })
+            })
+        ])
+
+        await manager.disablePlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
+        expect(manager.getPlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
+            enabled: false,
+            status: 'disabled'
+        })
+        expect(manager.collectWebContributions()).toEqual([])
+        await manager.dispose()
+    })
+
     it('respects the bundled example disable flag for the Hub manager', async () => {
         const manager = new HubPluginManager({
             hapiHome,
             watch: false,
+            includeBundledCore: true,
             includeBundledExamples: true,
             env: { HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS: '1' }
         })
@@ -319,6 +352,7 @@ describe('HubPluginManager', () => {
         await manager.dispose()
 
         expect(plugins.map((plugin) => plugin.id)).not.toContain('com.hapi.examples.notification-logger')
+        expect(plugins.map((plugin) => plugin.id)).toContain(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
     })
 
     it('activates and protects bundled Hub example plugins from deletion', async () => {

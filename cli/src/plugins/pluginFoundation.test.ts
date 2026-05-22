@@ -287,6 +287,23 @@ describe('plugin foundation cold path', () => {
         expect(failClosedRecords[0]?.enabled).toBe(false)
     })
 
+    it('supports default-enabled bundled plugins with explicit disable override', async () => {
+        const root = join(testDir, 'default-enabled-state')
+        mkdirSync(root, { recursive: true })
+        writeManifest(root, validManifest({ id: 'com.example.default', runtimes: undefined, contributions: undefined }))
+        const records = [await validatePluginRoot(root)]
+
+        const defaultEnabled = applyPluginState(records, { enabled: {} }, { defaultEnabledPluginIds: ['com.example.default'] })
+        expect(defaultEnabled[0]?.status).toBe('enabled')
+        expect(defaultEnabled[0]?.enabled).toBe(true)
+
+        const explicitlyDisabled = applyPluginState(records, {
+            enabled: { 'com.example.default': { enabled: false } }
+        }, { defaultEnabledPluginIds: ['com.example.default'] })
+        expect(explicitlyDisabled[0]?.status).toBe('disabled')
+        expect(explicitlyDisabled[0]?.enabled).toBe(false)
+    })
+
     it('safe-fails plugins.json writes when a lock file already exists', async () => {
         const stateFile = getPluginStateFile(testDir)
         writeFileSync(`${stateFile}.lock`, 'existing')
