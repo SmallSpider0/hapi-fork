@@ -1,6 +1,5 @@
-import { useCallback, useEffect, useMemo, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react'
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { useNavigate } from '@tanstack/react-router'
-import type { ApiClient } from '@/api/client'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugins } from '@/hooks/queries/usePlugins'
@@ -8,11 +7,9 @@ import { usePluginActions } from '@/hooks/mutations/usePluginActions'
 import { useTranslation } from '@/lib/use-translation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog'
-import { DirectorySection } from '@/components/NewSession/DirectorySection'
+import { Card, CardContent } from '@/components/ui/card'
 import { LoadingState } from '@/components/LoadingState'
-import type { PluginInstallResult, PluginListItem, PluginLocalDirectoryEntry, PluginReloadResult, PluginTargetInventory, PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import type { PluginInstallResult, PluginListItem, PluginReloadResult, PluginTargetInventory, PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
@@ -48,14 +45,6 @@ function FolderIcon() {
 
 function AlertIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
-}
-
-function ChevronLeftIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
-}
-
-function RefreshIcon(props: { className?: string }) {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={props.className}><polyline points="23 4 23 10 17 10" /><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10" /></svg>
 }
 
 function statusVariant(status: string): BadgeVariant {
@@ -191,207 +180,6 @@ function EmptyState(props: {
     )
 }
 
-function isWindowsStylePath(path: string): boolean {
-    return /^[A-Za-z]:[\\/]/.test(path) || path.includes('\\')
-}
-
-function getPathSeparator(path: string): '/' | '\\' {
-    return isWindowsStylePath(path) ? '\\' : '/'
-}
-
-function normalizePath(path: string): string {
-    const normalized = path.replace(/[\\/]+/g, '/')
-    if (/^[A-Za-z]:\/$/.test(normalized) || normalized === '/') return normalized
-    if (/^[A-Za-z]:$/.test(normalized)) return `${normalized}/`
-    return normalized.replace(/\/+$/, '')
-}
-
-function denormalizePath(path: string, sample: string): string {
-    return getPathSeparator(sample) === '\\' ? path.replace(/\//g, '\\') : path
-}
-
-function joinPath(base: string, name: string): string {
-    const normalizedBase = normalizePath(base)
-    const joined = normalizedBase === '/' || /^[A-Za-z]:\/$/.test(normalizedBase)
-        ? `${normalizedBase}${name}`
-        : `${normalizedBase}/${name}`
-    return denormalizePath(joined, base)
-}
-
-function parentPath(path: string): string {
-    const normalized = normalizePath(path)
-    if (normalized === '/' || /^[A-Za-z]:\/$/.test(normalized)) return denormalizePath(normalized, path)
-    const index = normalized.lastIndexOf('/')
-    const parent = index <= 0 ? '/' : normalized.slice(0, index)
-    const resolvedParent = /^[A-Za-z]:$/.test(parent) ? `${parent}/` : parent
-    return denormalizePath(resolvedParent, path)
-}
-
-function buildBreadcrumbs(currentPath: string): { label: string; path: string }[] {
-    const normalized = normalizePath(currentPath)
-    const windowsRoot = normalized.match(/^[A-Za-z]:\//)?.[0]
-    const rootPath = windowsRoot ?? '/'
-    const rootLabel = windowsRoot ? windowsRoot.slice(0, 2) : '/'
-    const crumbs: { label: string; path: string }[] = [{ label: rootLabel, path: denormalizePath(rootPath, currentPath) }]
-    const rest = normalized.slice(rootPath.length).split('/').filter(Boolean)
-    let acc = rootPath
-    for (const part of rest) {
-        acc = acc === '/' || /^[A-Za-z]:\/$/.test(acc) ? `${acc}${part}` : `${acc}/${part}`
-        crumbs.push({ label: part, path: denormalizePath(acc, currentPath) })
-    }
-    return crumbs
-}
-
-function HubLocalDirectoryBrowser(props: {
-    api: ApiClient
-    target: PluginTargetScope
-    initialPath: string
-    onSelect: (path: string) => void
-    t: (key: string, params?: Record<string, string | number>) => string
-}) {
-    const { api, initialPath, onSelect, t } = props
-    const [currentPath, setCurrentPath] = useState('')
-    const [pathInput, setPathInput] = useState(initialPath)
-    const [entries, setEntries] = useState<PluginLocalDirectoryEntry[]>([])
-    const [hasPluginManifest, setHasPluginManifest] = useState(false)
-    const [isLoading, setIsLoading] = useState(false)
-    const [error, setError] = useState<string | null>(null)
-
-    const loadDirectory = useCallback(async (path?: string) => {
-        setIsLoading(true)
-        setError(null)
-        try {
-            const response = await api.listPluginDirectory(path?.trim() ? path.trim() : undefined, props.target)
-            if (!response.success || !response.path) {
-                setError(response.error ?? t('settings.plugins.install.browseFailed'))
-                return
-            }
-            setCurrentPath(response.path)
-            setPathInput(response.path)
-            setEntries(response.entries ?? [])
-            setHasPluginManifest(response.hasPluginManifest === true)
-        } catch (err) {
-            setError(err instanceof Error ? err.message : t('settings.plugins.install.browseFailed'))
-        } finally {
-            setIsLoading(false)
-        }
-    }, [api, props.target, t])
-
-    useEffect(() => {
-        void loadDirectory(initialPath.trim() || undefined)
-    }, [initialPath, loadDirectory])
-
-    const breadcrumbs = useMemo(() => currentPath ? buildBreadcrumbs(currentPath) : [], [currentPath])
-    const canGoUp = currentPath && normalizePath(parentPath(currentPath)) !== normalizePath(currentPath)
-
-    const openPath = () => {
-        void loadDirectory(pathInput)
-    }
-
-    const handlePathKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'Enter') {
-            event.preventDefault()
-            openPath()
-        }
-    }
-
-    return (
-        <div className="flex min-h-0 flex-1 flex-col">
-            <div className="space-y-3 border-b border-[var(--app-divider)] p-3">
-                <div className="flex flex-col gap-2 sm:flex-row">
-                    <input
-                        value={pathInput}
-                        onChange={(event) => setPathInput(event.target.value)}
-                        onKeyDown={handlePathKeyDown}
-                        placeholder={t('settings.plugins.install.pathPlaceholder')}
-                        className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)] focus:outline-none focus:ring-2 focus:ring-[var(--app-link)]"
-                    />
-                    <Button type="button" variant="outline" disabled={isLoading} onClick={openPath}>{t('settings.plugins.install.openPath')}</Button>
-                </div>
-                {currentPath ? (
-                    <div className="flex items-center gap-1 overflow-x-auto text-xs">
-                        <button
-                            type="button"
-                            onClick={() => void loadDirectory(parentPath(currentPath))}
-                            disabled={!canGoUp || isLoading}
-                            className="shrink-0 rounded p-0.5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)] disabled:opacity-30"
-                            title={t('settings.plugins.install.parent')}
-                        >
-                            <ChevronLeftIcon />
-                        </button>
-                        {breadcrumbs.map((crumb, index) => (
-                            <span key={`${crumb.path}-${index}`} className="flex shrink-0 items-center gap-1">
-                                {index > 0 ? <span className="text-[var(--app-hint)]">/</span> : null}
-                                <button
-                                    type="button"
-                                    onClick={() => void loadDirectory(crumb.path)}
-                                    className={`hover:underline ${index === breadcrumbs.length - 1 ? 'font-medium text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
-                                >
-                                    {crumb.label}
-                                </button>
-                            </span>
-                        ))}
-                        <button
-                            type="button"
-                            onClick={() => void loadDirectory(currentPath)}
-                            disabled={isLoading}
-                            className="ml-auto shrink-0 rounded p-0.5 text-[var(--app-hint)] transition-colors hover:bg-[var(--app-subtle-bg)] hover:text-[var(--app-fg)]"
-                            title={t('browse.refresh')}
-                        >
-                            <RefreshIcon className={`h-3.5 w-3.5 ${isLoading ? 'animate-spin' : ''}`} />
-                        </button>
-                    </div>
-                ) : null}
-                {currentPath ? (
-                    <div className="flex flex-wrap items-center gap-2 text-xs">
-                        <Badge variant={hasPluginManifest ? 'success' : 'default'}>
-                            {hasPluginManifest ? t('settings.plugins.install.manifestFound') : t('settings.plugins.install.manifestMissing')}
-                        </Badge>
-                        <span className="min-w-0 truncate text-[var(--app-hint)]" title={currentPath}>{currentPath}</span>
-                    </div>
-                ) : null}
-                {error ? <div className="rounded-md bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/20 dark:text-red-400">{error}</div> : null}
-            </div>
-            <div className="app-scroll-y min-h-0 flex-1 p-2">
-                {isLoading && entries.length === 0 ? (
-                    <div className="flex items-center justify-center py-8 text-sm text-[var(--app-hint)]">{t('settings.plugins.install.loadingDirectory')}</div>
-                ) : entries.length === 0 ? (
-                    <div className="flex items-center justify-center py-8 text-sm text-[var(--app-hint)]">{t('settings.plugins.install.noEntries')}</div>
-                ) : (
-                    <div className="flex flex-col">
-                        {entries.map((entry) => {
-                            const isDirectory = entry.type === 'directory'
-                            return (
-                                <button
-                                    key={`${entry.type}-${entry.name}`}
-                                    type="button"
-                                    onClick={() => isDirectory && currentPath ? void loadDirectory(joinPath(currentPath, entry.name)) : undefined}
-                                    disabled={!isDirectory}
-                                    className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors hover:bg-[var(--app-subtle-bg)] disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent"
-                                >
-                                    <FolderIcon />
-                                    <span className="min-w-0 flex-1 truncate text-sm text-[var(--app-fg)]">{entry.name}</span>
-                                    {entry.hasPluginManifest ? <Badge variant="success">{t('settings.plugins.install.pluginFolder')}</Badge> : null}
-                                    {entry.type !== 'directory' ? <Badge>{entry.type}</Badge> : null}
-                                </button>
-                            )
-                        })}
-                    </div>
-                )}
-            </div>
-            {currentPath ? (
-                <div className="border-t border-[var(--app-divider)] p-3">
-                    <div className="flex items-center gap-2">
-                        <div className="min-w-0 flex-1 truncate text-xs text-[var(--app-hint)]" title={currentPath}>{currentPath}</div>
-                        <Button type="button" disabled={!currentPath} onClick={() => onSelect(currentPath)}>{t('settings.plugins.install.useThisFolder')}</Button>
-                    </div>
-                </div>
-            ) : null}
-        </div>
-    )
-}
-
-
 async function fileToBase64(file: File): Promise<string> {
     const buffer = await file.arrayBuffer()
     let binary = ''
@@ -438,12 +226,10 @@ export default function PluginsPage() {
     const actions = usePluginActions(api)
     const [filter, setFilter] = useState<PluginFilter>('all')
     const [result, setResult] = useState<ResultState>(null)
-    const [installPath, setInstallPath] = useState('')
     const [enableAfterInstall, setEnableAfterInstall] = useState(false)
     const [overwriteLocal, setOverwriteLocal] = useState(false)
     const [installTarget, setInstallTarget] = useState<PluginTargetScope>('hub')
     const [packageFile, setPackageFile] = useState<File | null>(null)
-    const [browserOpen, setBrowserOpen] = useState(false)
 
     const installTargetOptions = useMemo(() => targetOptions(targets), [targets])
     useEffect(() => {
@@ -478,28 +264,14 @@ export default function PluginsPage() {
         }
     }
 
-    const installLocal = async () => {
-        const sourcePath = installPath.trim()
-        if (!sourcePath) {
-            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.pathRequired')] })
-            return
-        }
-        await runWithResult(async () => formatInstallResult(t, await actions.installLocalPlugin({
-            sourcePath,
-            enable: enableAfterInstall,
-            overwrite: overwriteLocal,
-            reload: true
-        }, installTarget)))
-    }
-
     const installPackage = async () => {
         if (!packageFile) {
-            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: ['Choose a .tgz, .tar.gz, or .zip plugin package first.'] })
+            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.packageRequired')] })
             return
         }
         const format = packageFormat(packageFile.name)
         if (!format) {
-            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: ['Plugin package must be .tgz, .tar.gz, or .zip.'] })
+            setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: [t('settings.plugins.install.packageInvalid')] })
             return
         }
         await runWithResult(async () => formatInstallResult(t, await actions.installPackagePlugin({
@@ -515,13 +287,6 @@ export default function PluginsPage() {
 
     const reloadAll = async () => {
         await runWithResult(async () => formatReloadResult(t, await actions.reloadPlugins()))
-    }
-
-    const installPathKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-        if (event.key === 'Enter') {
-            event.preventDefault()
-            void installLocal()
-        }
     }
 
     return (
@@ -540,62 +305,40 @@ export default function PluginsPage() {
             <div className="app-scroll-y min-h-0 flex-1">
                 <div className="mx-auto w-full max-w-content space-y-3 p-3">
                     <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
-                        <CardHeader>
-                            <CardTitle>{t('settings.plugins.install.title')}</CardTitle>
-                            <CardDescription>{t('settings.plugins.install.description')}</CardDescription>
-                        </CardHeader>
-                        <CardContent className="space-y-3">
-                            <div className="space-y-1">
-                                <label className="text-sm font-medium">Install target</label>
+                        <CardContent className="space-y-2 p-3">
+                            <div className="flex flex-wrap items-center gap-2">
+                                <div className="shrink-0 text-sm font-semibold">{t('settings.plugins.install.title')}</div>
+                                <label htmlFor="plugin-install-target" className="sr-only">{t('settings.plugins.install.target')}</label>
                                 <select
+                                    id="plugin-install-target"
                                     value={installTarget}
                                     onChange={(event) => setInstallTarget(event.target.value as PluginTargetScope)}
-                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                                    className="h-8 min-w-[9rem] rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 text-sm text-[var(--app-fg)]"
                                 >
                                     {installTargetOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                                 </select>
-                                <div className="text-xs text-[var(--app-hint)]">Hub paths are read on the Hub machine; Runner paths are browsed and installed through Runner RPC.</div>
-                            </div>
-                            <div className="rounded-xl border border-[var(--app-border)] p-3">
-                                <DirectorySection
-                                    directory={installPath}
-                                    suggestions={[]}
-                                    selectedIndex={-1}
-                                    isDisabled={actions.isPending}
-                                    recentPaths={[]}
-                                    label={t('settings.plugins.install.localTitle')}
-                                    placeholder={t('settings.plugins.install.pathPlaceholder')}
-                                    browseLabel={t('settings.plugins.install.browse')}
-                                    onDirectoryChange={setInstallPath}
-                                    onDirectoryFocus={() => undefined}
-                                    onDirectoryBlur={() => undefined}
-                                    onDirectoryKeyDown={installPathKeyDown}
-                                    onSuggestionSelect={() => undefined}
-                                    onPathClick={setInstallPath}
-                                    onChooseFolder={() => setBrowserOpen(true)}
-                                />
-                                <div className="mt-2 flex flex-wrap gap-3 text-xs text-[var(--app-hint)]">
-                                    <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={enableAfterInstall} onChange={(event) => setEnableAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
-                                    <label className="inline-flex items-center gap-1.5"><input type="checkbox" checked={overwriteLocal} onChange={(event) => setOverwriteLocal(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
-                                </div>
-                                <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    <Button type="button" disabled={actions.isPending} onClick={() => void installLocal()}>{t('settings.plugins.install.installLocal')}</Button>
-                                    <span className="text-xs text-[var(--app-hint)]">{t('settings.plugins.install.localDescription')}</span>
-                                </div>
-                            </div>
-                            <div className="rounded-xl border border-[var(--app-border)] p-3">
-                                <div className="mb-2 text-sm font-medium">Upload package</div>
+                                <label
+                                    htmlFor="plugin-package-file"
+                                    className={`inline-flex h-8 items-center rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 text-sm font-medium text-[var(--app-fg)] transition ${actions.isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer hover:bg-[var(--app-subtle-bg)]'}`}
+                                >
+                                    {t('settings.plugins.install.choosePackage')}
+                                </label>
                                 <input
+                                    id="plugin-package-file"
                                     type="file"
-                                    accept=".tgz,.gz,.zip"
+                                    accept=".tgz,.tar.gz,.zip"
                                     disabled={actions.isPending}
                                     onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)}
-                                    className="w-full text-sm"
+                                    className="sr-only"
                                 />
-                                <div className="mt-3 flex flex-wrap items-center gap-2">
-                                    <Button type="button" disabled={actions.isPending || !packageFile} onClick={() => void installPackage()}>Install package</Button>
-                                    <span className="text-xs text-[var(--app-hint)]">Package archives must include hapi.plugin.package.json. Hub verifies checksum and package metadata before target distribution.</span>
-                                </div>
+                                <span className="min-w-0 flex-1 truncate text-sm text-[var(--app-hint)]" title={packageFile?.name ?? undefined}>
+                                    {packageFile?.name ?? t('settings.plugins.install.noPackageSelected')}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-3">
+                                <Button type="button" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
+                                <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableAfterInstall} onChange={(event) => setEnableAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
+                                <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={overwriteLocal} onChange={(event) => setOverwriteLocal(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
                             </div>
                         </CardContent>
                     </Card>
@@ -625,24 +368,6 @@ export default function PluginsPage() {
                     </div>
                 </div>
             </div>
-            <Dialog open={browserOpen} onOpenChange={setBrowserOpen}>
-                <DialogContent className="flex max-h-[min(720px,calc(100vh-24px))] max-w-2xl flex-col p-0">
-                    <DialogHeader className="border-b border-[var(--app-divider)] p-4 pb-3">
-                        <DialogTitle>{t('settings.plugins.install.browserTitle')}</DialogTitle>
-                        <DialogDescription>{t('settings.plugins.install.browserDescription')}</DialogDescription>
-                    </DialogHeader>
-                    <HubLocalDirectoryBrowser
-                        api={api}
-                        target={installTarget}
-                        initialPath={installPath}
-                        t={t}
-                        onSelect={(path) => {
-                            setInstallPath(path)
-                            setBrowserOpen(false)
-                        }}
-                    />
-                </DialogContent>
-            </Dialog>
         </div>
     )
 }
