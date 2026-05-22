@@ -30,6 +30,7 @@ import {
     runnerPluginConfigScope,
     sanitizePluginConfigForView
 } from '@hapi/protocol/plugins'
+import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import {
     applyPluginState,
     discoverPlugins,
@@ -65,6 +66,7 @@ export interface RunnerPluginManagerOptions {
     machineId: string
     envPluginDirs?: string
     env?: NodeJS.ProcessEnv
+    includeBundledExamples?: boolean
 }
 
 type ActiveRunnerPluginInstance = {
@@ -642,10 +644,7 @@ export class RunnerPluginManager {
         const items: PluginReloadItem[] = []
         const managerDiagnostics: PluginDiagnosticView[] = []
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
-        const discovered = await discoverPlugins({
-            hapiHome: this.options.hapiHome,
-            envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS
-        })
+        const discovered = await this.discoverPluginRecords()
         const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, stateResult.failClosed), stateResult.state)
 
         if (stateResult.parseError) {
@@ -884,11 +883,20 @@ export class RunnerPluginManager {
     }
 
     private async findDiscoveredRecord(id: string): Promise<DiscoveredPluginRecord | null> {
-        const discovered = await discoverPlugins({
-            hapiHome: this.options.hapiHome,
-            envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS
-        })
+        const discovered = await this.discoverPluginRecords()
         return discovered.find((record) => pluginDisplayId(record) === id || record.manifest?.id === id) ?? null
+    }
+
+    private async discoverPluginRecords(): Promise<DiscoveredPluginRecord[]> {
+        const bundledDisabled = (this.options.env ?? process.env).HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
+        const bundledPluginDirs = this.options.includeBundledExamples && !bundledDisabled
+            ? [await prepareBundledExamplePlugins(this.options.hapiHome)]
+            : undefined
+        return await discoverPlugins({
+            hapiHome: this.options.hapiHome,
+            envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS,
+            bundledPluginDirs
+        })
     }
 
     private async readWritableState(): Promise<PluginStateFile> {
@@ -1358,6 +1366,9 @@ export class RunnerPluginManager {
                         } : {})
                     }
                 } : {}),
+                ...(record.manifest?.contributions?.voice ? { voice: record.manifest.contributions.voice } : {}),
+                ...(record.manifest?.contributions?.deployment ? { deployment: record.manifest.contributions.deployment } : {}),
+                ...(record.manifest?.contributions?.integration ? { integration: record.manifest.contributions.integration } : {}),
                 ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
             },
             runtimeEntryPaths: record.runtimeEntryPaths

@@ -17,8 +17,13 @@ function writeManifest(root: string, overrides: Record<string, unknown> = {}) {
     }, null, 2))
 }
 
-async function importPlugins(hapiHome: string): Promise<PluginsModule> {
+async function importPlugins(hapiHome: string, options: { disableBundledExamples?: boolean } = { disableBundledExamples: true }): Promise<PluginsModule> {
     process.env.HAPI_HOME = hapiHome
+    if (options.disableBundledExamples !== false) {
+        process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS = '1'
+    } else {
+        delete process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS
+    }
     vi.resetModules()
     return await import('./plugins')
 }
@@ -45,6 +50,7 @@ describe('hapi plugins command', () => {
         vi.restoreAllMocks()
         delete process.env.HAPI_HOME
         delete process.env.CLI_API_TOKEN
+        delete process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS
         vi.doUnmock('@/api/pluginAdmin')
         rmSync(testDir, { recursive: true, force: true })
     })
@@ -58,6 +64,44 @@ describe('hapi plugins command', () => {
 
         const payload = JSON.parse(logs.join('\n')) as { plugins: Array<{ id: string; status: string; enabled: boolean }> }
         expect(payload.plugins).toMatchObject([{ id: 'com.example.plugin', status: 'disabled', enabled: false }])
+    })
+
+    it('lists bundled example plugins by default', async () => {
+        rmSync(pluginRoot, { recursive: true, force: true })
+        const { handlePluginsCommand } = await importPlugins(hapiHome, { disableBundledExamples: false })
+
+        await handlePluginsCommand(['list', '--json'])
+
+        const payload = JSON.parse(logs.join('\n')) as { plugins: Array<{ id: string; source: string; enabled: boolean }> }
+        expect(payload.plugins).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'com.hapi.examples.notification-logger',
+                source: 'bundled',
+                enabled: false
+            })
+        ]))
+    })
+
+    it('inspects bundled semantic contribution descriptors', async () => {
+        rmSync(pluginRoot, { recursive: true, force: true })
+        const { handlePluginsCommand } = await importPlugins(hapiHome, { disableBundledExamples: false })
+
+        await handlePluginsCommand(['inspect', 'com.hapi.examples.voice-provider-stub', '--json'])
+
+        const payload = JSON.parse(logs.join('\n')) as {
+            plugin: {
+                contributions: {
+                    voice?: { providers?: Array<{ id: string; supportStatus?: string; limitations?: string[] }> }
+                }
+            }
+        }
+        expect(payload.plugin.contributions.voice?.providers).toEqual([
+            expect.objectContaining({
+                id: 'example-voice-provider',
+                supportStatus: 'unsupported',
+                limitations: ['No voice provider runtime extension point is available yet.']
+            })
+        ])
     })
 
     it('enables and disables plugins with atomic plugins.json writes', async () => {

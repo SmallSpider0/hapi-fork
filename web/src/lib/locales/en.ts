@@ -526,6 +526,7 @@ export default {
   'settings.plugins.secret.missing': 'missing',
   'settings.plugins.source.env': 'env',
   'settings.plugins.source.user-home': 'user home',
+  'settings.plugins.source.bundled': 'bundled',
   'settings.plugins.diagnosticSeverity.info': 'info',
   'settings.plugins.diagnosticSeverity.warning': 'warning',
   'settings.plugins.diagnosticSeverity.error': 'error',

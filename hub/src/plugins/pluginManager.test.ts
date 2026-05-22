@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import type { Session } from '../sync/syncEngine'
 import { HubPluginManager } from './pluginManager'
 import { writePluginState } from '@hapi/protocol/plugins/foundation'
+import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -280,6 +281,72 @@ describe('HubPluginManager', () => {
 
         expect(result.ok).toBe(false)
         expect(result.results[0]?.status).toBe('incompatible')
+    })
+
+    it('discovers bundled example plugins when enabled for the Hub manager', async () => {
+        const manager = new HubPluginManager({ hapiHome, watch: false, includeBundledExamples: true })
+        await manager.start()
+        const plugins = manager.listPlugins()
+        await manager.dispose()
+
+        expect(plugins.map((plugin) => plugin.id).sort()).toEqual(bundledExamplePlugins.map((plugin) => plugin.manifest.id).sort())
+        expect(plugins.every((plugin) => plugin.source === 'bundled')).toBe(true)
+        expect(plugins.find((plugin) => plugin.id === 'com.hapi.examples.notification-logger')).toMatchObject({
+            enabled: false,
+            active: false,
+            install: { sourceType: 'bundled' }
+        })
+        expect(manager.getPlugin('com.hapi.examples.voice-provider-stub')?.contributions.voice?.providers).toEqual([
+            expect.objectContaining({ id: 'example-voice-provider', supportStatus: 'unsupported' })
+        ])
+        expect(manager.getPlugin('com.hapi.examples.deployment-pack-stub')?.contributions.deployment?.packs).toEqual([
+            expect.objectContaining({ id: 'example-docker-pack', supportStatus: 'stub' })
+        ])
+        expect(manager.getPlugin('com.hapi.examples.mcp-bridge-stub')?.contributions.integration?.protocolBridges).toEqual([
+            expect.objectContaining({ id: 'example-mcp-bridge', protocol: 'mcp', supportStatus: 'unsupported' })
+        ])
+    })
+
+    it('respects the bundled example disable flag for the Hub manager', async () => {
+        const manager = new HubPluginManager({
+            hapiHome,
+            watch: false,
+            includeBundledExamples: true,
+            env: { HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS: '1' }
+        })
+        await manager.start()
+        const plugins = manager.listPlugins()
+        await manager.dispose()
+
+        expect(plugins.map((plugin) => plugin.id)).not.toContain('com.hapi.examples.notification-logger')
+    })
+
+    it('activates and protects bundled Hub example plugins from deletion', async () => {
+        const manager = new HubPluginManager({ hapiHome, watch: false, includeBundledExamples: true })
+        await manager.start()
+        const result = await manager.enablePlugin('com.hapi.examples.notification-logger', { prefix: '[test-example]' })
+        await manager.getNotificationChannel().sendReady(createSession())
+
+        expect(result.ok).toBe(true)
+        expect(manager.getPlugin('com.hapi.examples.notification-logger')).toMatchObject({
+            source: 'bundled',
+            status: 'active',
+            active: true
+        })
+        await expect(manager.deletePlugin('com.hapi.examples.notification-logger')).rejects.toThrow('cannot be deleted')
+        await manager.dispose()
+    })
+
+    it('does not self-trigger bundled example watch reloads when examples are unchanged', async () => {
+        const manager = new HubPluginManager({ hapiHome, watch: true, watchDebounceMs: 20, includeBundledExamples: true })
+        await manager.start()
+        await manager.enablePlugin('com.hapi.examples.notification-logger', { prefix: '[watch-test]' })
+        const loadedAt = manager.getPlugin('com.hapi.examples.notification-logger')?.updatedAt
+        await sleep(250)
+        const afterWatchWindow = manager.getPlugin('com.hapi.examples.notification-logger')?.updatedAt
+        await manager.dispose()
+
+        expect(afterWatchWindow).toBe(loadedAt)
     })
 
     it('rejects config updates that would persist secrets', async () => {

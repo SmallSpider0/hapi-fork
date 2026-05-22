@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 export const PluginInstallMetadataSchema = z.object({
-    sourceType: z.enum(['env', 'user-home', 'hub-local-path', 'runner-local-path', 'uploaded-package']),
+    sourceType: z.enum(['env', 'user-home', 'bundled', 'hub-local-path', 'runner-local-path', 'uploaded-package']),
     sourcePath: z.string().min(1).optional(),
     checksum: z.string().min(1).optional(),
     packageFormat: z.enum(['tgz', 'zip']).optional(),

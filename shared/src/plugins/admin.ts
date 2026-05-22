@@ -116,7 +116,7 @@ export const PluginListItemSchema = z.object({
     name: z.string().optional(),
     version: z.string().optional(),
     description: z.string().optional(),
-    source: z.enum(['env', 'user-home']),
+    source: z.enum(['env', 'user-home', 'bundled']),
     status: PluginAdminStatusSchema,
     enabled: z.boolean(),
     active: z.boolean(),
@@ -152,6 +152,15 @@ export const PluginDetailSchema = PluginListItemSchema.extend({
         agent: z.object({
             adapters: z.array(z.unknown()).optional(),
             capabilityProviders: z.array(z.unknown()).optional()
+        }).strict().optional(),
+        voice: z.object({
+            providers: z.array(z.unknown()).optional()
+        }).strict().optional(),
+        deployment: z.object({
+            packs: z.array(z.unknown()).optional()
+        }).strict().optional(),
+        integration: z.object({
+            protocolBridges: z.array(z.unknown()).optional()
         }).strict().optional(),
         web: PluginWebContributionsSchema.optional()
     }).strict(),

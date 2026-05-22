@@ -22,6 +22,7 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import { assertPluginConfigSafeForPersistence, PluginTargetScopeSchema, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
 
 function hasFlag(args: string[], flag: string): boolean {
@@ -60,9 +61,13 @@ function pluginId(record: DiscoveredPluginRecord): string {
 
 async function loadLocalRecords(): Promise<{ records: DiscoveredPluginRecord[]; state: PluginStateFile; parseError?: string }> {
     const stateResult = await readPluginState(getPluginStateFile(configuration.happyHomeDir))
+    const bundledPluginDirs = process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
+        ? undefined
+        : [await prepareBundledExamplePlugins(configuration.happyHomeDir)]
     const discovered = await discoverPlugins({
         hapiHome: configuration.happyHomeDir,
-        envPluginDirs: process.env.HAPI_PLUGIN_DIRS
+        envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
+        bundledPluginDirs
     })
     return {
         records: applyPluginState(discovered, stateResult.state, stateResult.failClosed),
@@ -368,6 +373,9 @@ async function runInspect(args: string[]): Promise<void> {
             notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
             ...(record.manifest?.contributions?.runner ? { runner: record.manifest.contributions.runner } : {}),
             ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
+            ...(record.manifest?.contributions?.voice ? { voice: record.manifest.contributions.voice } : {}),
+            ...(record.manifest?.contributions?.deployment ? { deployment: record.manifest.contributions.deployment } : {}),
+            ...(record.manifest?.contributions?.integration ? { integration: record.manifest.contributions.integration } : {}),
             ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
         },
         permissions: {

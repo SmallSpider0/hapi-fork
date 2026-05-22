@@ -18,7 +18,7 @@ import {
 import { PluginStateFileSchema, type PluginInstallMetadata, type PluginStateEntry, type PluginStateFile } from './state'
 import type { PluginDiagnostic, PluginDiagnosticSeverity, PluginStatus } from './types'
 
-export type PluginSource = 'env' | 'user-home'
+export type PluginSource = 'env' | 'user-home' | 'bundled'
 
 export interface PluginSearchRoot {
     path: string
@@ -52,6 +52,7 @@ export interface DiscoveredPluginRecord {
 export interface DiscoverPluginsOptions {
     hapiHome: string
     envPluginDirs?: string
+    bundledPluginDirs?: string[]
     delimiter?: string
 }
 
@@ -190,6 +191,17 @@ export function getPluginSearchRoots(options: DiscoverPluginsOptions): PluginSea
         priority,
         includeRootManifest: false
     })
+    priority += 1
+
+    for (const bundledPath of options.bundledPluginDirs ?? []) {
+        roots.push({
+            path: resolve(expandHomePath(bundledPath)),
+            source: 'bundled',
+            priority,
+            includeRootManifest: false
+        })
+        priority += 1
+    }
 
     return roots
 }

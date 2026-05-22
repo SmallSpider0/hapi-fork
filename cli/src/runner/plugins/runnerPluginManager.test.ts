@@ -5,6 +5,7 @@ import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { PluginManifestLiteSchema } from '@hapi/protocol/plugins'
+import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { RunnerPluginManager } from './runnerPluginManager'
 
 function writeManifest(root: string, overrides: Record<string, unknown> = {}): void {
@@ -155,6 +156,95 @@ describe('RunnerPluginManager runtime', () => {
             })
         ]))
         expect(JSON.stringify(managerMissingSecret.getDiagnostics())).not.toContain('super-secret-value')
+    })
+
+    it('discovers bundled example plugins when enabled for the Runner manager', async () => {
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {}, includeBundledExamples: true })
+        await manager.start()
+        const plugins = manager.listPlugins()
+
+        expect(plugins.map((plugin) => plugin.id).sort()).toEqual([
+            'com.example.runner',
+            ...bundledExamplePlugins.map((plugin) => plugin.manifest.id)
+        ].sort())
+        expect(plugins.find((plugin) => plugin.id === 'com.hapi.examples.echo-agent')).toMatchObject({
+            source: 'bundled',
+            enabled: false,
+            active: false,
+            install: { sourceType: 'bundled' }
+        })
+        expect(manager.getPlugin('com.hapi.examples.voice-provider-stub')?.contributions.voice?.providers).toEqual([
+            expect.objectContaining({ id: 'example-voice-provider', supportStatus: 'unsupported' })
+        ])
+        await manager.dispose()
+    })
+
+    it('respects the bundled example disable flag for the Runner manager', async () => {
+        const manager = new RunnerPluginManager({
+            hapiHome: testDir,
+            machineId: 'runner-1',
+            env: { HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS: '1' },
+            includeBundledExamples: true
+        })
+        await manager.start()
+        const plugins = manager.listPlugins()
+
+        expect(plugins.map((plugin) => plugin.id)).toEqual(['com.example.runner'])
+        await manager.dispose()
+    })
+
+    it('activates bundled Runner echo agent and capability examples', async () => {
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {}, includeBundledExamples: true })
+        await manager.start()
+        const result = await manager.enablePlugin('com.hapi.examples.echo-agent')
+
+        expect(result.ok).toBe(true)
+        expect(manager.getAgentDescriptor('example:echo')).toMatchObject({
+            id: 'example:echo',
+            displayName: 'Example Echo Agent',
+            source: 'plugin',
+            pluginId: 'com.hapi.examples.echo-agent',
+            capabilities: {
+                models: expect.arrayContaining(['echo-small', 'echo-large'])
+            }
+        })
+        expect(manager.getAgentCapabilities()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                agentId: 'example:echo',
+                pluginId: 'com.hapi.examples.echo-agent',
+                contributionId: 'example-echo-capabilities'
+            })
+        ]))
+        await expect(manager.deletePlugin('com.hapi.examples.echo-agent')).rejects.toThrow('cannot be deleted')
+        await manager.dispose()
+    })
+
+    it('applies bundled Runner environment example to spawn plans', async () => {
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {}, includeBundledExamples: true })
+        await manager.start()
+        await manager.enablePlugin('com.hapi.examples.runner-environment', { envValue: 'from-test' })
+
+        const plan = await manager.resolveSpawnPlan({
+            options: { directory: '/repo', agent: 'codex' },
+            agent: 'codex',
+            basePlan: {
+                command: '/opt/hapi/current',
+                args: ['codex'],
+                displayArgs: ['codex'],
+                mode: 'compiled'
+            },
+            cwd: '/repo',
+            env: { PATH: '/usr/bin' }
+        })
+
+        expect(plan.env.EXAMPLE_RUNNER_ENV).toBe('from-test')
+        expect(plan.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                pluginId: 'com.hapi.examples.runner-environment',
+                code: 'example-runner-environment'
+            })
+        ]))
+        await manager.dispose()
     })
 
     it('ignores Hub-runtime-only plugins in the Runner process', async () => {
