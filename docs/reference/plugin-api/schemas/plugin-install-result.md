@@ -477,7 +477,8 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                 "bundled",
                                 "hub-local-path",
                                 "runner-local-path",
-                                "uploaded-package"
+                                "uploaded-package",
+                                "marketplace"
                             ]
                         },
                         "sourcePath": {
@@ -504,6 +505,44 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                         },
                         "updatedAt": {
                             "type": "number"
+                        },
+                        "marketplace": {
+                            "type": "object",
+                            "properties": {
+                                "sourceUrl": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "pluginId": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "repo": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "version": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "assetUrl": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "checksum": {
+                                    "type": "string",
+                                    "minLength": 1
+                                }
+                            },
+                            "required": [
+                                "sourceUrl",
+                                "pluginId",
+                                "repo",
+                                "version",
+                                "assetUrl",
+                                "checksum"
+                            ],
+                            "additionalProperties": false
                         }
                     },
                     "required": [
@@ -1358,7 +1397,8 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -1385,6 +1425,44 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [
@@ -2432,7 +2510,8 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                                         "bundled",
                                                         "hub-local-path",
                                                         "runner-local-path",
-                                                        "uploaded-package"
+                                                        "uploaded-package",
+                                                        "marketplace"
                                                     ]
                                                 },
                                                 "sourcePath": {
@@ -2459,6 +2538,44 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                                 },
                                                 "updatedAt": {
                                                     "type": "number"
+                                                },
+                                                "marketplace": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "sourceUrl": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "pluginId": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "repo": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "version": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "assetUrl": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "checksum": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "sourceUrl",
+                                                        "pluginId",
+                                                        "repo",
+                                                        "version",
+                                                        "assetUrl",
+                                                        "checksum"
+                                                    ],
+                                                    "additionalProperties": false
                                                 }
                                             },
                                             "required": [
@@ -3132,7 +3249,8 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                             "bundled",
                                             "hub-local-path",
                                             "runner-local-path",
-                                            "uploaded-package"
+                                            "uploaded-package",
+                                            "marketplace"
                                         ]
                                     },
                                     "sourcePath": {
@@ -3159,6 +3277,44 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                     },
                                     "updatedAt": {
                                         "type": "number"
+                                    },
+                                    "marketplace": {
+                                        "type": "object",
+                                        "properties": {
+                                            "sourceUrl": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "pluginId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "repo": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "version": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "assetUrl": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "checksum": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "required": [
+                                            "sourceUrl",
+                                            "pluginId",
+                                            "repo",
+                                            "version",
+                                            "assetUrl",
+                                            "checksum"
+                                        ],
+                                        "additionalProperties": false
                                     }
                                 },
                                 "required": [
@@ -3630,7 +3786,8 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                                     "bundled",
                                     "hub-local-path",
                                     "runner-local-path",
-                                    "uploaded-package"
+                                    "uploaded-package",
+                                    "marketplace"
                                 ]
                             },
                             "sourcePath": {
@@ -3657,6 +3814,44 @@ JSON Schema: [PluginInstallResult](/docs/plugin-api/schemas/plugin-install-resul
                             },
                             "updatedAt": {
                                 "type": "number"
+                            },
+                            "marketplace": {
+                                "type": "object",
+                                "properties": {
+                                    "sourceUrl": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "pluginId": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "repo": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "version": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "assetUrl": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "checksum": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                },
+                                "required": [
+                                    "sourceUrl",
+                                    "pluginId",
+                                    "repo",
+                                    "version",
+                                    "assetUrl",
+                                    "checksum"
+                                ],
+                                "additionalProperties": false
                             }
                         },
                         "required": [

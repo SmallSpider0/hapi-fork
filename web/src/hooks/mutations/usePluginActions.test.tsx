@@ -53,6 +53,27 @@ describe('usePluginActions', () => {
             enablePlugin: vi.fn(async () => reloadResult()),
             installLocalPlugin: vi.fn(async () => installResult('com.installed.plugin')),
             installPackagePlugin: vi.fn(async () => installResult('com.package.plugin')),
+            createMarketplaceInstallPlan: vi.fn(async () => ({
+                marketplace: {
+                    sourceUrl: 'https://raw.githubusercontent.com/tiann/hapi/main/marketplace/catalog.v1.json',
+                    pluginId: 'com.market.plugin',
+                    repo: 'example/market-plugin',
+                    version: '1.0.0',
+                    assetUrl: 'https://github.com/example/market-plugin/releases/download/v1.0.0/plugin.tgz',
+                    checksum: 'sha256:test'
+                },
+                plan: {
+                    planId: 'market-plan-1',
+                    createdAt: 1,
+                    plugin: { id: 'com.market.plugin', name: 'Market plugin', version: '1.0.0' },
+                    source: { type: 'uploaded-package', filename: 'plugin.tgz', checksum: 'sha256:test', format: 'tgz' },
+                    positions: ['hub'],
+                    targets: [],
+                    warnings: [],
+                    blockingErrors: []
+                }
+            })),
+            executePluginInstallPlan: vi.fn(async () => installResult('com.market.plugin')),
             deletePlugin: vi.fn(async () => deleteResult('com.example.plugin')),
         } as unknown as ApiClient
 
@@ -68,6 +89,12 @@ describe('usePluginActions', () => {
             await result.current.installPackagePlugin({ filename: 'plugin.tgz', contentBase64: 'AA==', checksum: 'sha256:test' }, 'hub')
         })
         await act(async () => {
+            await result.current.createMarketplaceInstallPlan('com.market.plugin', { enable: true })
+        })
+        await act(async () => {
+            await result.current.executeInstallPlan('market-plan-1')
+        })
+        await act(async () => {
             await result.current.deletePlugin('com.example.plugin')
         })
 
@@ -79,9 +106,12 @@ describe('usePluginActions', () => {
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.installed.plugin') })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugins('hub') })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.package.plugin', 'hub') })
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.pluginMarketplaceRoot })
         expect(api.enablePlugin).toHaveBeenCalledWith('com.example.plugin', undefined, undefined)
         expect(api.installLocalPlugin).toHaveBeenCalledWith({ sourcePath: '/tmp/plugin', enable: true, reload: true }, undefined)
         expect(api.installPackagePlugin).toHaveBeenCalledWith({ filename: 'plugin.tgz', contentBase64: 'AA==', checksum: 'sha256:test' }, 'hub')
+        expect(api.createMarketplaceInstallPlan).toHaveBeenCalledWith('com.market.plugin', { enable: true })
+        expect(api.executePluginInstallPlan).toHaveBeenCalledWith('market-plan-1')
         expect(api.deletePlugin).toHaveBeenCalledWith('com.example.plugin', undefined)
     })
 

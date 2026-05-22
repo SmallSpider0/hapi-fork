@@ -46,6 +46,12 @@ import type {
     PluginReloadResult,
     PluginTargetScope
 } from '@hapi/protocol/plugins/admin'
+import type {
+    PluginMarketplaceDetailResponse,
+    PluginMarketplaceInstallPlanResponse,
+    PluginMarketplaceInstallRequest,
+    PluginMarketplaceListResponse
+} from '@hapi/protocol/plugins/marketplace'
 
 type ApiClientOptions = {
     baseUrl?: string
@@ -68,6 +74,12 @@ export type PluginCapabilitiesQuery = {
     sessionId?: string
 }
 
+export type PluginMarketplaceQuery = {
+    q?: string
+    category?: string
+    runtime?: string
+}
+
 function withPluginCapabilitiesQuery(path: string, query?: PluginCapabilitiesQuery): string {
     const params = new URLSearchParams()
     if (query?.target) {
@@ -75,6 +87,23 @@ function withPluginCapabilitiesQuery(path: string, query?: PluginCapabilitiesQue
     }
     if (query?.sessionId) {
         params.set('sessionId', query.sessionId)
+    }
+    const suffix = params.toString()
+    if (!suffix) return path
+    const separator = path.includes('?') ? '&' : '?'
+    return `${path}${separator}${suffix}`
+}
+
+function withPluginMarketplaceQuery(path: string, query?: PluginMarketplaceQuery): string {
+    const params = new URLSearchParams()
+    if (query?.q) {
+        params.set('q', query.q)
+    }
+    if (query?.category) {
+        params.set('category', query.category)
+    }
+    if (query?.runtime) {
+        params.set('runtime', query.runtime)
     }
     const suffix = params.toString()
     if (!suffix) return path
@@ -274,6 +303,27 @@ export class ApiClient {
     async executePluginInstallPlan(planId: string): Promise<PluginInstallResult> {
         return await this.request<PluginInstallResult>(`/api/plugins/install-plan/${encodeURIComponent(planId)}/execute`, {
             method: 'POST'
+        })
+    }
+
+    async getPluginMarketplace(query?: PluginMarketplaceQuery): Promise<PluginMarketplaceListResponse> {
+        return await this.request<PluginMarketplaceListResponse>(withPluginMarketplaceQuery('/api/plugins/marketplace', query))
+    }
+
+    async getPluginMarketplaceEntry(pluginId: string): Promise<PluginMarketplaceDetailResponse> {
+        return await this.request<PluginMarketplaceDetailResponse>(`/api/plugins/marketplace/${encodeURIComponent(pluginId)}`)
+    }
+
+    async refreshPluginMarketplace(): Promise<PluginMarketplaceListResponse> {
+        return await this.request<PluginMarketplaceListResponse>('/api/plugins/marketplace/refresh', {
+            method: 'POST'
+        })
+    }
+
+    async createMarketplaceInstallPlan(pluginId: string, body: PluginMarketplaceInstallRequest): Promise<PluginMarketplaceInstallPlanResponse> {
+        return await this.request<PluginMarketplaceInstallPlanResponse>(`/api/plugins/marketplace/${encodeURIComponent(pluginId)}/install-plan`, {
+            method: 'POST',
+            body: JSON.stringify(body)
         })
     }
 

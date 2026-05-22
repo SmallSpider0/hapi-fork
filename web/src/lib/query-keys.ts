@@ -20,6 +20,13 @@ export const queryKeys = {
     machineOpencodeModelsForCwd: (machineId: string, cwd: string) => ['machine-opencode-models', machineId, cwd] as const,
     skills: (sessionId: string) => ['skills', sessionId] as const,
     plugins: (target?: string) => ['plugins', target ?? 'all-targets'] as const,
+    pluginMarketplaceRoot: ['plugin-marketplace'] as const,
+    pluginMarketplace: (options?: { q?: string; category?: string; runtime?: string }) => [
+        'plugin-marketplace',
+        options?.q ?? '',
+        options?.category ?? '',
+        options?.runtime ?? ''
+    ] as const,
     pluginCapabilities: (options?: { target?: string; sessionId?: string }) => [
         'plugin-capabilities',
         options?.target ?? 'all-targets',

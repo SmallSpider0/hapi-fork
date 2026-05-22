@@ -3464,7 +3464,8 @@
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -3491,6 +3492,44 @@
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [
@@ -3987,7 +4026,8 @@
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -4014,6 +4054,44 @@
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [
@@ -4582,7 +4660,8 @@
                                                             "bundled",
                                                             "hub-local-path",
                                                             "runner-local-path",
-                                                            "uploaded-package"
+                                                            "uploaded-package",
+                                                            "marketplace"
                                                         ]
                                                     },
                                                     "sourcePath": {
@@ -4609,6 +4688,44 @@
                                                     },
                                                     "updatedAt": {
                                                         "type": "number"
+                                                    },
+                                                    "marketplace": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "sourceUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "pluginId": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "repo": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "version": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "assetUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "checksum": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "sourceUrl",
+                                                            "pluginId",
+                                                            "repo",
+                                                            "version",
+                                                            "assetUrl",
+                                                            "checksum"
+                                                        ],
+                                                        "additionalProperties": false
                                                     }
                                                 },
                                                 "required": [
@@ -9469,7 +9586,8 @@
                                             "bundled",
                                             "hub-local-path",
                                             "runner-local-path",
-                                            "uploaded-package"
+                                            "uploaded-package",
+                                            "marketplace"
                                         ]
                                     },
                                     "sourcePath": {
@@ -9496,6 +9614,44 @@
                                     },
                                     "updatedAt": {
                                         "type": "number"
+                                    },
+                                    "marketplace": {
+                                        "type": "object",
+                                        "properties": {
+                                            "sourceUrl": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "pluginId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "repo": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "version": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "assetUrl": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "checksum": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "required": [
+                                            "sourceUrl",
+                                            "pluginId",
+                                            "repo",
+                                            "version",
+                                            "assetUrl",
+                                            "checksum"
+                                        ],
+                                        "additionalProperties": false
                                     }
                                 },
                                 "required": [
@@ -19879,7 +20035,8 @@
                                                             "bundled",
                                                             "hub-local-path",
                                                             "runner-local-path",
-                                                            "uploaded-package"
+                                                            "uploaded-package",
+                                                            "marketplace"
                                                         ]
                                                     },
                                                     "sourcePath": {
@@ -19906,6 +20063,44 @@
                                                     },
                                                     "updatedAt": {
                                                         "type": "number"
+                                                    },
+                                                    "marketplace": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "sourceUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "pluginId": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "repo": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "version": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "assetUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "checksum": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "sourceUrl",
+                                                            "pluginId",
+                                                            "repo",
+                                                            "version",
+                                                            "assetUrl",
+                                                            "checksum"
+                                                        ],
+                                                        "additionalProperties": false
                                                     }
                                                 },
                                                 "required": [
@@ -20579,7 +20774,8 @@
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -20606,6 +20802,44 @@
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [
@@ -23384,6 +23618,44 @@
                         ],
                         "additionalProperties": false
                     },
+                    "installSource": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "const": "marketplace"
+                            },
+                            "sourceUrl": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "pluginId": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "repo": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "version": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "assetUrl": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        },
+                        "required": [
+                            "type",
+                            "sourceUrl",
+                            "pluginId",
+                            "repo",
+                            "version",
+                            "assetUrl"
+                        ],
+                        "additionalProperties": false
+                    },
                     "enable": {
                         "type": "boolean"
                     },
@@ -26127,6 +26399,44 @@
                         ],
                         "additionalProperties": false
                     },
+                    "installSource": {
+                        "type": "object",
+                        "properties": {
+                            "type": {
+                                "type": "string",
+                                "const": "marketplace"
+                            },
+                            "sourceUrl": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "pluginId": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "repo": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "version": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "assetUrl": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        },
+                        "required": [
+                            "type",
+                            "sourceUrl",
+                            "pluginId",
+                            "repo",
+                            "version",
+                            "assetUrl"
+                        ],
+                        "additionalProperties": false
+                    },
                     "enable": {
                         "type": "boolean"
                     },
@@ -26953,7 +27263,8 @@
                                             "bundled",
                                             "hub-local-path",
                                             "runner-local-path",
-                                            "uploaded-package"
+                                            "uploaded-package",
+                                            "marketplace"
                                         ]
                                     },
                                     "sourcePath": {
@@ -26980,6 +27291,44 @@
                                     },
                                     "updatedAt": {
                                         "type": "number"
+                                    },
+                                    "marketplace": {
+                                        "type": "object",
+                                        "properties": {
+                                            "sourceUrl": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "pluginId": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "repo": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "version": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "assetUrl": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "checksum": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
+                                        "required": [
+                                            "sourceUrl",
+                                            "pluginId",
+                                            "repo",
+                                            "version",
+                                            "assetUrl",
+                                            "checksum"
+                                        ],
+                                        "additionalProperties": false
                                     }
                                 },
                                 "required": [
@@ -27834,7 +28183,8 @@
                                                             "bundled",
                                                             "hub-local-path",
                                                             "runner-local-path",
-                                                            "uploaded-package"
+                                                            "uploaded-package",
+                                                            "marketplace"
                                                         ]
                                                     },
                                                     "sourcePath": {
@@ -27861,6 +28211,44 @@
                                                     },
                                                     "updatedAt": {
                                                         "type": "number"
+                                                    },
+                                                    "marketplace": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "sourceUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "pluginId": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "repo": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "version": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "assetUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "checksum": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "sourceUrl",
+                                                            "pluginId",
+                                                            "repo",
+                                                            "version",
+                                                            "assetUrl",
+                                                            "checksum"
+                                                        ],
+                                                        "additionalProperties": false
                                                     }
                                                 },
                                                 "required": [
@@ -28908,7 +29296,8 @@
                                                                     "bundled",
                                                                     "hub-local-path",
                                                                     "runner-local-path",
-                                                                    "uploaded-package"
+                                                                    "uploaded-package",
+                                                                    "marketplace"
                                                                 ]
                                                             },
                                                             "sourcePath": {
@@ -28935,6 +29324,44 @@
                                                             },
                                                             "updatedAt": {
                                                                 "type": "number"
+                                                            },
+                                                            "marketplace": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "sourceUrl": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "pluginId": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "repo": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "version": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "assetUrl": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "checksum": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    }
+                                                                },
+                                                                "required": [
+                                                                    "sourceUrl",
+                                                                    "pluginId",
+                                                                    "repo",
+                                                                    "version",
+                                                                    "assetUrl",
+                                                                    "checksum"
+                                                                ],
+                                                                "additionalProperties": false
                                                             }
                                                         },
                                                         "required": [
@@ -29608,7 +30035,8 @@
                                                         "bundled",
                                                         "hub-local-path",
                                                         "runner-local-path",
-                                                        "uploaded-package"
+                                                        "uploaded-package",
+                                                        "marketplace"
                                                     ]
                                                 },
                                                 "sourcePath": {
@@ -29635,6 +30063,44 @@
                                                 },
                                                 "updatedAt": {
                                                     "type": "number"
+                                                },
+                                                "marketplace": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "sourceUrl": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "pluginId": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "repo": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "version": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "assetUrl": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "checksum": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "sourceUrl",
+                                                        "pluginId",
+                                                        "repo",
+                                                        "version",
+                                                        "assetUrl",
+                                                        "checksum"
+                                                    ],
+                                                    "additionalProperties": false
                                                 }
                                             },
                                             "required": [
@@ -30106,7 +30572,8 @@
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -30133,6 +30600,44 @@
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [
@@ -30844,7 +31349,8 @@
                                                             "bundled",
                                                             "hub-local-path",
                                                             "runner-local-path",
-                                                            "uploaded-package"
+                                                            "uploaded-package",
+                                                            "marketplace"
                                                         ]
                                                     },
                                                     "sourcePath": {
@@ -30871,6 +31377,44 @@
                                                     },
                                                     "updatedAt": {
                                                         "type": "number"
+                                                    },
+                                                    "marketplace": {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "sourceUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "pluginId": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "repo": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "version": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "assetUrl": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            },
+                                                            "checksum": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "sourceUrl",
+                                                            "pluginId",
+                                                            "repo",
+                                                            "version",
+                                                            "assetUrl",
+                                                            "checksum"
+                                                        ],
+                                                        "additionalProperties": false
                                                     }
                                                 },
                                                 "required": [
@@ -31764,7 +32308,8 @@
                                                                     "bundled",
                                                                     "hub-local-path",
                                                                     "runner-local-path",
-                                                                    "uploaded-package"
+                                                                    "uploaded-package",
+                                                                    "marketplace"
                                                                 ]
                                                             },
                                                             "sourcePath": {
@@ -31791,6 +32336,44 @@
                                                             },
                                                             "updatedAt": {
                                                                 "type": "number"
+                                                            },
+                                                            "marketplace": {
+                                                                "type": "object",
+                                                                "properties": {
+                                                                    "sourceUrl": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "pluginId": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "repo": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "version": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "assetUrl": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    "checksum": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    }
+                                                                },
+                                                                "required": [
+                                                                    "sourceUrl",
+                                                                    "pluginId",
+                                                                    "repo",
+                                                                    "version",
+                                                                    "assetUrl",
+                                                                    "checksum"
+                                                                ],
+                                                                "additionalProperties": false
                                                             }
                                                         },
                                                         "required": [
@@ -32464,7 +33047,8 @@
                                                         "bundled",
                                                         "hub-local-path",
                                                         "runner-local-path",
-                                                        "uploaded-package"
+                                                        "uploaded-package",
+                                                        "marketplace"
                                                     ]
                                                 },
                                                 "sourcePath": {
@@ -32491,6 +33075,44 @@
                                                 },
                                                 "updatedAt": {
                                                     "type": "number"
+                                                },
+                                                "marketplace": {
+                                                    "type": "object",
+                                                    "properties": {
+                                                        "sourceUrl": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "pluginId": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "repo": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "version": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "assetUrl": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        },
+                                                        "checksum": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    },
+                                                    "required": [
+                                                        "sourceUrl",
+                                                        "pluginId",
+                                                        "repo",
+                                                        "version",
+                                                        "assetUrl",
+                                                        "checksum"
+                                                    ],
+                                                    "additionalProperties": false
                                                 }
                                             },
                                             "required": [
@@ -32962,7 +33584,8 @@
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -32989,6 +33612,44 @@
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [
@@ -33626,7 +34287,8 @@
                                                 "bundled",
                                                 "hub-local-path",
                                                 "runner-local-path",
-                                                "uploaded-package"
+                                                "uploaded-package",
+                                                "marketplace"
                                             ]
                                         },
                                         "sourcePath": {
@@ -33653,6 +34315,44 @@
                                         },
                                         "updatedAt": {
                                             "type": "number"
+                                        },
+                                        "marketplace": {
+                                            "type": "object",
+                                            "properties": {
+                                                "sourceUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "pluginId": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "repo": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "version": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "checksum": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
+                                            "required": [
+                                                "sourceUrl",
+                                                "pluginId",
+                                                "repo",
+                                                "version",
+                                                "assetUrl",
+                                                "checksum"
+                                            ],
+                                            "additionalProperties": false
                                         }
                                     },
                                     "required": [

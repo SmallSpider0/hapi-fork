@@ -12,6 +12,12 @@ import type {
     PluginReloadResult,
     PluginTargetScope
 } from '@hapi/protocol/plugins/admin'
+import type {
+    PluginMarketplaceDetailResponse,
+    PluginMarketplaceInstallPlanResponse,
+    PluginMarketplaceInstallRequest,
+    PluginMarketplaceListResponse
+} from '@hapi/protocol/plugins/marketplace'
 
 async function readError(response: Response): Promise<string> {
     const body = await response.text().catch(() => '')
@@ -22,6 +28,19 @@ function withTargetQuery(path: string, target?: PluginTargetScope): string {
     if (!target) return path
     const separator = path.includes('?') ? '&' : '?'
     return `${path}${separator}target=${encodeURIComponent(target)}`
+}
+
+function withQuery(path: string, query?: Record<string, string | undefined>): string {
+    const params = new URLSearchParams()
+    for (const [key, value] of Object.entries(query ?? {})) {
+        if (value !== undefined && value !== '') {
+            params.set(key, value)
+        }
+    }
+    const suffix = params.toString()
+    if (!suffix) return path
+    const separator = path.includes('?') ? '&' : '?'
+    return `${path}${separator}${suffix}`
 }
 
 function buildUrl(path: string): string {
@@ -111,6 +130,35 @@ export async function executeRemotePluginInstallPlan(accessToken: string, planId
     return await fetchJson<PluginInstallResult>(`/api/plugins/install-plan/${encodeURIComponent(planId)}/execute`, {
         method: 'POST',
         headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+    }, timeoutMs)
+}
+
+export async function getRemotePluginMarketplace(accessToken: string, timeoutMs = 5000, query?: {
+    q?: string
+    category?: string
+    runtime?: string
+}): Promise<PluginMarketplaceListResponse> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginMarketplaceListResponse>(withQuery('/api/plugins/marketplace', query), {
+        method: 'GET',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+    }, timeoutMs)
+}
+
+export async function getRemotePluginMarketplaceEntry(accessToken: string, pluginId: string, timeoutMs = 5000): Promise<PluginMarketplaceDetailResponse> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginMarketplaceDetailResponse>(`/api/plugins/marketplace/${encodeURIComponent(pluginId)}`, {
+        method: 'GET',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+    }, timeoutMs)
+}
+
+export async function createRemoteMarketplaceInstallPlan(accessToken: string, pluginId: string, body: PluginMarketplaceInstallRequest, timeoutMs = 120000): Promise<PluginMarketplaceInstallPlanResponse> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginMarketplaceInstallPlanResponse>(`/api/plugins/marketplace/${encodeURIComponent(pluginId)}/install-plan`, {
+        method: 'POST',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}`, 'Content-Type': 'application/json' }),
+        body: JSON.stringify(body)
     }, timeoutMs)
 }
 

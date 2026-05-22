@@ -112,7 +112,7 @@ export const PluginMarketplaceInstallRequestSchema = z.object({
 }).strict()
 export type PluginMarketplaceInstallRequest = z.infer<typeof PluginMarketplaceInstallRequestSchema>
 
-export const PluginMarketplaceEntryViewSchema = PluginMarketplaceEntrySchema.extend({
+export const PluginMarketplaceEntryViewSchema = PluginMarketplaceEntrySchema.safeExtend({
     installed: z.object({
         version: z.string().min(1).optional(),
         enabled: z.boolean().optional(),

@@ -1,6 +1,6 @@
 # Plugin marketplace design
 
-Status: design + packaging guard on `feat/plugin-runtime-management-roadmap`
+Status: design + MVP implementation on `feat/plugin-runtime-management-roadmap`
 Date: 2026-05-22
 
 ## Goals
@@ -32,18 +32,27 @@ Implemented on this branch:
 - CLI plugin commands can manage local/remote plugin targets.
 - Bundled first-party plugins are materialized at runtime from code (`shared/src/plugins/bundledCore.ts`); example plugins are opt-in with `HAPI_ENABLE_BUNDLED_EXAMPLES=1`.
 
-Missing:
+MVP marketplace additions in this branch:
 
-- No marketplace catalog schema/API/UI.
-- No fetch/download path from GitHub release asset URL to the existing install-plan flow.
-- No installed metadata that can remember marketplace source/release for update checks.
-- No contribution workflow / CI validator for marketplace entries.
+- Shared marketplace catalog/install schemas.
+- Hub marketplace fetch/cache service and REST routes.
+- GitHub Release package download, checksum validation, manifest/catalog match validation, and reuse of the existing install-plan flow.
+- Marketplace source metadata stored on Hub/Runner package installs.
+- CLI marketplace list/info/install commands.
+- Web Settings marketplace search/preview/install panel.
+- Metadata-only marketplace directory plus validation/packaging guard scripts.
+
+Remaining gaps:
+
+- No signed catalog or maintainer key model.
+- No automatic update check/upgrade UI yet.
+- No GitHub Actions workflow for marketplace PRs yet; local `bun run marketplace:check` is available.
 
 Release packaging baseline:
 
 - `bun run build:single-exe(:all)` compiles `cli/src/bootstrap.ts`, embeds Web `web/dist`, and embeds tool assets via explicit imports.
 - A marketplace directory is safe only if it stays metadata-only and runtime code fetches catalog data over HTTP/file URL. Static imports or committed plugin archives would risk bundling.
-- This design adds `bun run marketplace:check-packaging`, wired into `build`, `build:single-exe`, and `build:single-exe:all`.
+- This design adds `bun run marketplace:check` (`marketplace:validate` + `marketplace:check-packaging`), wired into `build`, `build:single-exe`, and `build:single-exe:all`.
 
 ## External references
 
@@ -331,7 +340,7 @@ Rules:
 - Runtime code fetches catalog/package URLs; it must not statically import `marketplace/**`.
 - Web build must not copy `marketplace/**` into `web/dist`.
 - Bun single-exe build embeds only explicit source imports and generated Web assets.
-- Release/build scripts run `bun run marketplace:check-packaging`.
+- Release/build scripts run `bun run marketplace:check`.
 
 Guard behavior:
 
@@ -339,6 +348,14 @@ Guard behavior:
 - fails on `marketplace/**/hapi.plugin.json`;
 - fails on `marketplace/**/dist/**` or `marketplace/**/node_modules/**`;
 - fails on relative static imports from runtime source into top-level `marketplace/**`.
+
+Catalog validator behavior:
+
+- validates `marketplace/catalog.v1.json` with the shared marketplace schema;
+- enforces unique plugin ids and release versions;
+- enforces GitHub Release asset URLs under the declared `owner/repo`;
+- enforces package filename extension matches `format`;
+- enforces SHA-256 checksums through the shared schema.
 
 ## Security posture
 
@@ -399,7 +416,7 @@ Future hardening:
 
 ## Acceptance gates
 
-- `bun run marketplace:check-packaging`
+- `bun run marketplace:check`
 - `bun typecheck`
 - `bun run test`
 - `bun run build:single-exe` or CI `bun run build:single-exe:all`
