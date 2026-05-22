@@ -1,18 +1,20 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
 import type { PluginDeleteResult, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallPlanRequest, PluginInstallPlanResponse, PluginInstallResult, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import type { PluginMarketplaceInstallPlanResponse, PluginMarketplaceInstallRequest } from '@hapi/protocol/plugins/marketplace'
 import { queryKeys } from '@/lib/query-keys'
 
-type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginInstallPlanResponse | PluginDeleteResult
+type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginInstallPlanResponse | PluginMarketplaceInstallPlanResponse | PluginDeleteResult
 
 type PluginAction = {
-    type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'install-package' | 'install-plan' | 'execute-install-plan' | 'delete'
+    type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'install-package' | 'install-plan' | 'marketplace-install-plan' | 'execute-install-plan' | 'delete'
     id?: string
     target?: PluginTargetScope
     config?: Record<string, unknown>
     installLocal?: PluginInstallLocalRequest
     installPackage?: PluginInstallPackageRequest
     installPlan?: PluginInstallPlanRequest
+    marketplaceInstallPlan?: { pluginId: string; request: PluginMarketplaceInstallRequest }
     planId?: string
 }
 
@@ -25,6 +27,7 @@ export function usePluginActions(api: ApiClient | null): {
     installLocalPlugin: (body: PluginInstallLocalRequest, target?: PluginTargetScope) => Promise<PluginInstallResult>
     installPackagePlugin: (body: PluginInstallPackageRequest, target?: PluginTargetScope) => Promise<PluginInstallResult>
     createInstallPlan: (body: PluginInstallPlanRequest) => Promise<PluginInstallPlanResponse>
+    createMarketplaceInstallPlan: (pluginId: string, body: PluginMarketplaceInstallRequest) => Promise<PluginMarketplaceInstallPlanResponse>
     executeInstallPlan: (planId: string) => Promise<PluginInstallResult>
     deletePlugin: (id: string, target?: PluginTargetScope) => Promise<PluginDeleteResult>
     isPending: boolean
@@ -39,6 +42,7 @@ export function usePluginActions(api: ApiClient | null): {
         if (id) {
             await queryClient.invalidateQueries({ queryKey: queryKeys.plugin(id, target) })
         }
+        await queryClient.invalidateQueries({ queryKey: queryKeys.pluginMarketplaceRoot })
     }
     const mutation = useMutation<PluginActionMutationResult, Error, PluginAction>({
         mutationFn: async (action) => {
@@ -50,13 +54,16 @@ export function usePluginActions(api: ApiClient | null): {
             if (action.type === 'install-local' && action.installLocal) return await api.installLocalPlugin(action.installLocal, action.target)
             if (action.type === 'install-package' && action.installPackage) return await api.installPackagePlugin(action.installPackage, action.target)
             if (action.type === 'install-plan' && action.installPlan) return await api.createPluginInstallPlan(action.installPlan)
+            if (action.type === 'marketplace-install-plan' && action.marketplaceInstallPlan) {
+                return await api.createMarketplaceInstallPlan(action.marketplaceInstallPlan.pluginId, action.marketplaceInstallPlan.request)
+            }
             if (action.type === 'execute-install-plan' && action.planId) return await api.executePluginInstallPlan(action.planId)
             if (action.type === 'delete' && action.id) return await api.deletePlugin(action.id, action.target)
             return await api.reloadPlugins(action.target)
         },
         onSuccess: (result, action) => {
             const installedId = 'pluginId' in result ? result.pluginId : undefined
-            if (action.type === 'install-plan') return
+            if (action.type === 'install-plan' || action.type === 'marketplace-install-plan') return
             void invalidate(action.id ?? installedId, action.target)
         },
     })
@@ -70,6 +77,7 @@ export function usePluginActions(api: ApiClient | null): {
         installLocalPlugin: async (body, target) => await mutation.mutateAsync({ type: 'install-local', installLocal: body, target }) as PluginInstallResult,
         installPackagePlugin: async (body, target) => await mutation.mutateAsync({ type: 'install-package', installPackage: body, target }) as PluginInstallResult,
         createInstallPlan: async (body) => await mutation.mutateAsync({ type: 'install-plan', installPlan: body }) as PluginInstallPlanResponse,
+        createMarketplaceInstallPlan: async (pluginId, body) => await mutation.mutateAsync({ type: 'marketplace-install-plan', marketplaceInstallPlan: { pluginId, request: body } }) as PluginMarketplaceInstallPlanResponse,
         executeInstallPlan: async (planId) => await mutation.mutateAsync({ type: 'execute-install-plan', planId }) as PluginInstallResult,
         deletePlugin: async (id, target) => await mutation.mutateAsync({ type: 'delete', id, target }) as PluginDeleteResult,
         isPending: mutation.isPending,

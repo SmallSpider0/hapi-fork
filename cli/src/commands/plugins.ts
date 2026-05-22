@@ -9,7 +9,18 @@ import { configuration } from '@/configuration'
 import { readSettings } from '@/persistence'
 import { initializeApiUrl } from '@/ui/apiUrlInit'
 import { initializeToken } from '@/ui/tokenInit'
-import { createRemotePluginInstallPlan, executeRemotePluginInstallPlan, getRemotePlugin, getRemotePlugins, installRemoteLocalPlugin, reloadRemotePlugins, updateRemotePluginConfig } from '@/api/pluginAdmin'
+import {
+    createRemoteMarketplaceInstallPlan,
+    createRemotePluginInstallPlan,
+    executeRemotePluginInstallPlan,
+    getRemotePlugin,
+    getRemotePluginMarketplace,
+    getRemotePluginMarketplaceEntry,
+    getRemotePlugins,
+    installRemoteLocalPlugin,
+    reloadRemotePlugins,
+    updateRemotePluginConfig
+} from '@/api/pluginAdmin'
 import type { CommandDefinition } from './types'
 import {
     applyPluginState,
@@ -25,6 +36,7 @@ import { assertPluginConfigSafeForPersistence, PluginTargetScopeSchema, sanitize
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
+import type { PluginMarketplaceEntryView, PluginMarketplaceInstallPlanResponse } from '@hapi/protocol/plugins/marketplace'
 
 function hasFlag(args: string[], flag: string): boolean {
     return args.includes(flag)
@@ -190,6 +202,35 @@ function printTable(plugins: PluginListItem[]): void {
     console.log(`${'ID'.padEnd(widths.id)}  ${'TARGET'.padEnd(widths.target)}  ${'RUNTIME'.padEnd(widths.runtime)}  ${'STATUS'.padEnd(widths.status)}  ENABLED  ACTIVE  ${'SOURCE'.padEnd(widths.source)}  NAME`)
     for (const row of rows) {
         console.log(`${row.id.padEnd(widths.id)}  ${row.target.padEnd(widths.target)}  ${row.runtime.padEnd(widths.runtime)}  ${row.status.padEnd(widths.status)}  ${row.enabled.padEnd(widths.enabled)}  ${row.active.padEnd(widths.active)}  ${row.source.padEnd(widths.source)}  ${row.name}`)
+    }
+}
+
+function latestMarketplaceRelease(entry: PluginMarketplaceEntryView): PluginMarketplaceEntryView['releases'][number] | undefined {
+    return [...entry.releases]
+        .filter((release) => !release.yanked)
+        .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true, sensitivity: 'base' }))[0]
+}
+
+function printMarketplaceTable(entries: PluginMarketplaceEntryView[]): void {
+    const rows = entries.map((entry) => {
+        const latest = latestMarketplaceRelease(entry)
+        return {
+            id: entry.id,
+            version: latest?.version ?? '-',
+            repo: entry.repo,
+            categories: (entry.categories ?? []).join(',') || '-',
+            name: entry.name
+        }
+    })
+    const widths = {
+        id: Math.max(2, ...rows.map((row) => row.id.length)),
+        version: Math.max(7, ...rows.map((row) => row.version.length)),
+        repo: Math.max(4, ...rows.map((row) => row.repo.length)),
+        categories: Math.max(10, ...rows.map((row) => row.categories.length))
+    }
+    console.log(`${'ID'.padEnd(widths.id)}  ${'VERSION'.padEnd(widths.version)}  ${'REPO'.padEnd(widths.repo)}  ${'CATEGORIES'.padEnd(widths.categories)}  NAME`)
+    for (const row of rows) {
+        console.log(`${row.id.padEnd(widths.id)}  ${row.version.padEnd(widths.version)}  ${row.repo.padEnd(widths.repo)}  ${row.categories.padEnd(widths.categories)}  ${row.name}`)
     }
 }
 
@@ -641,6 +682,91 @@ async function runInstallPackage(args: string[]): Promise<void> {
     }
 }
 
+async function runMarketplace(args: string[]): Promise<void> {
+    const action = args[0] ?? 'list'
+    const rest = args.slice(1)
+    const json = hasFlag(args, '--json')
+    if (action === 'list' || action === 'search') {
+        const query = valueAfter(rest, '--q') ?? positionalArgs(rest, ['--q', '--category', '--runtime'])[0]
+        await ensurePluginAdminToken()
+        const payload = await getRemotePluginMarketplace(configuration.cliApiToken, 5000, {
+            q: query,
+            category: valueAfter(rest, '--category'),
+            runtime: valueAfter(rest, '--runtime')
+        })
+        if (json) {
+            console.log(JSON.stringify(payload, null, 2))
+            return
+        }
+        console.log(chalk.gray(`Marketplace: ${payload.sourceUrl}`))
+        printMarketplaceTable(payload.entries)
+        return
+    }
+
+    if (action === 'info' || action === 'inspect') {
+        const id = positionalArgs(rest)[0]
+        if (!id) throw new Error('Usage: hapi plugins marketplace info <id> [--json]')
+        await ensurePluginAdminToken()
+        const payload = await getRemotePluginMarketplaceEntry(configuration.cliApiToken, id, 5000)
+        if (json) {
+            console.log(JSON.stringify(payload, null, 2))
+            return
+        }
+        const latest = latestMarketplaceRelease(payload.entry)
+        console.log(chalk.bold(`${payload.entry.name} (${payload.entry.id})`))
+        console.log(`Repo: ${payload.entry.repo}`)
+        console.log(`Latest: ${latest?.version ?? '(none)'}`)
+        console.log(`Categories: ${(payload.entry.categories ?? []).join(', ') || '(none)'}`)
+        console.log(`Description: ${payload.entry.description ?? '(none)'}`)
+        console.log(chalk.gray(`Marketplace: ${payload.sourceUrl}`))
+        return
+    }
+
+    if (action === 'install') {
+        const id = positionalArgs(rest, ['--version', '--runners'])[0]
+        if (!id) throw new Error('Usage: hapi plugins marketplace install <id> [--version x.y.z] [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]')
+        await ensurePluginAdminToken()
+        const planPayload: PluginMarketplaceInstallPlanResponse = await createRemoteMarketplaceInstallPlan(configuration.cliApiToken, id, {
+            version: valueAfter(rest, '--version'),
+            enable: hasFlag(rest, '--enable'),
+            reload: hasFlag(rest, '--reload'),
+            overwrite: hasFlag(rest, '--overwrite'),
+            runnerSelection: parseRunnerSelectionArg(rest)
+        }, 120000)
+        if (hasFlag(rest, '--dry-run')) {
+            if (json) {
+                console.log(JSON.stringify(planPayload, null, 2))
+                return
+            }
+            console.log(chalk.gray(`Marketplace asset: ${planPayload.marketplace.assetUrl}`))
+            printInstallPlan(planPayload.plan)
+            return
+        }
+        if (planPayload.plan.blockingErrors.length > 0) {
+            if (json) {
+                console.log(JSON.stringify(planPayload, null, 2))
+                return
+            }
+            printInstallPlan(planPayload.plan)
+            throw new Error('Marketplace plugin install plan is blocked.')
+        }
+        const result = await executeRemotePluginInstallPlan(configuration.cliApiToken, planPayload.plan.planId, 120000)
+        if (json) {
+            console.log(JSON.stringify({ ...planPayload, result }, null, 2))
+            return
+        }
+        console.log(chalk.gray(`Marketplace asset: ${planPayload.marketplace.assetUrl}`))
+        printInstallPlan(planPayload.plan)
+        console.log(chalk.green(`Marketplace plugin install ${result.ok ? 'completed' : 'completed with issues'}.`))
+        for (const targetResult of result.targetResults ?? []) {
+            console.log(`${targetResult.target.scope}: ${targetResult.ok ? 'ok' : 'failed'}${targetResult.error ? ` - ${targetResult.error}` : ''}`)
+        }
+        return
+    }
+
+    throw new Error(`Unknown plugins marketplace subcommand: ${action}`)
+}
+
 async function runDelete(args: string[]): Promise<void> {
     const id = args.find((arg) => !arg.startsWith('-'))
     if (!id) throw new Error('Usage: hapi plugins delete <id> [--reload] [--json] [--yes]')
@@ -762,6 +888,9 @@ ${chalk.bold('Usage:')}
   hapi plugins config set <id> <key> <value> [--target hub|runner:<machineId>] [--reload] [--json]
   hapi plugins install-local <path> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
   hapi plugins install-package <package.tgz|package.zip> [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]
+  hapi plugins marketplace list [query] [--category <category>] [--runtime hub|runner] [--json]
+  hapi plugins marketplace info <id> [--json]
+  hapi plugins marketplace install <id> [--version x.y.z] [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]
   hapi plugins delete <id> [--reload] [--json] [--yes]
   hapi plugins reload [id] [--json]
   hapi plugins doctor [id] [--json]
@@ -782,6 +911,8 @@ export async function handlePluginsCommand(args: string[]): Promise<void> {
     if (subcommand === 'enable') return await runEnable(rest)
     if (subcommand === 'disable') return await runDisable(rest)
     if (subcommand === 'config') return await runConfig(rest)
+    if (subcommand === 'marketplace' || subcommand === 'market') return await runMarketplace(rest)
+    if (subcommand === 'search') return await runMarketplace(['list', ...rest])
     if (subcommand === 'install-local' || subcommand === 'install') return await runInstallLocal(rest)
     if (subcommand === 'install-package' || subcommand === 'install-upload') return await runInstallPackage(rest)
     if (subcommand === 'delete' || subcommand === 'remove' || subcommand === 'uninstall') return await runDelete(rest)

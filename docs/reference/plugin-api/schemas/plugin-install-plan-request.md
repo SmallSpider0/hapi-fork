@@ -13,6 +13,7 @@ JSON Schema: [PluginInstallPlanRequest](/docs/plugin-api/schemas/plugin-install-
 | `\\|c\\|h\\|e\\|c\\|k\\|s\\|u\\|m\\|` | yes | \\|s\\|t\\|r\\|i\\|n\\|g\\| | \\|—\\| |
 | `\\|f\\|o\\|r\\|m\\|a\\|t\\|` | no | \\|`\\|t\\|g\\|z\\|`\\| \\||\\| \\|`\\|z\\|i\\|p\\|`\\| | \\|—\\| |
 | `\\|m\\|a\\|n\\|i\\|f\\|e\\|s\\|t\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
+| `\\|i\\|n\\|s\\|t\\|a\\|l\\|l\\|S\\|o\\|u\\|r\\|c\\|e\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|e\\|n\\|a\\|b\\|l\\|e\\|` | no | \\|b\\|o\\|o\\|l\\|e\\|a\\|n\\| | \\|—\\| |
 | `\\|r\\|e\\|l\\|o\\|a\\|d\\|` | no | \\|b\\|o\\|o\\|l\\|e\\|a\\|n\\| | \\|—\\| |
 | `\\|o\\|v\\|e\\|r\\|w\\|r\\|i\\|t\\|e\\|` | no | \\|b\\|o\\|o\\|l\\|e\\|a\\|n\\| | \\|—\\| |
@@ -2746,6 +2747,44 @@ JSON Schema: [PluginInstallPlanRequest](/docs/plugin-api/schemas/plugin-install-
                 "manifest",
                 "files",
                 "checksum"
+            ],
+            "additionalProperties": false
+        },
+        "installSource": {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "const": "marketplace"
+                },
+                "sourceUrl": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "pluginId": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "repo": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "version": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "assetUrl": {
+                    "type": "string",
+                    "minLength": 1
+                }
+            },
+            "required": [
+                "type",
+                "sourceUrl",
+                "pluginId",
+                "repo",
+                "version",
+                "assetUrl"
             ],
             "additionalProperties": false
         },

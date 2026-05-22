@@ -42,7 +42,8 @@ import {
     PluginMarketplaceInstallPlanResponseSchema,
     PluginMarketplaceInstallRequestSchema,
     PluginMarketplaceListResponseSchema,
-    type PluginMarketplaceEntry
+    type PluginMarketplaceEntry,
+    type PluginMarketplaceEntryView
 } from '@hapi/protocol/plugins/marketplace'
 import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
 import { PluginInstallError, PluginStateLockError, inspectPluginPackagePayload, validatePluginPackagePayload } from '@hapi/protocol/plugins/foundation'
@@ -666,6 +667,37 @@ function marketplaceEntryMatches(entry: PluginMarketplaceEntry, filters: {
     return haystack.includes(query)
 }
 
+function latestMarketplaceVersion(entry: PluginMarketplaceEntry): string | undefined {
+    return [...entry.releases]
+        .filter((release) => !release.yanked)
+        .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true, sensitivity: 'base' }))[0]?.version
+}
+
+function marketplaceEntriesWithInstallState(entries: PluginMarketplaceEntry[], plugins: PluginListItem[]): PluginMarketplaceEntryView[] {
+    const installedById = new Map<string, PluginListItem>()
+    for (const plugin of plugins) {
+        if (!installedById.has(plugin.id) || plugin.active || plugin.enabled) {
+            installedById.set(plugin.id, plugin)
+        }
+    }
+    return entries.map((entry) => {
+        const installed = installedById.get(entry.id)
+        if (!installed) return entry
+        const installedVersion = installed.version
+        const release = installedVersion ? entry.releases.find((candidate) => candidate.version === installedVersion) : undefined
+        const latestVersion = latestMarketplaceVersion(entry)
+        return {
+            ...entry,
+            installed: {
+                ...(installedVersion ? { version: installedVersion } : {}),
+                enabled: installed.enabled,
+                yanked: release?.yanked !== undefined,
+                updateAvailable: Boolean(installedVersion && latestVersion && installedVersion !== latestVersion)
+            }
+        }
+    })
+}
+
 async function executeInstallPlan(options: {
     manager: HubPluginManager
     engine: SyncEngine | null
@@ -1122,7 +1154,10 @@ export function createPluginsRoutes(
                 category: c.req.query('category')?.trim(),
                 runtime: c.req.query('runtime')?.trim()
             }
-            const entries = snapshot.catalog.plugins.filter((entry) => marketplaceEntryMatches(entry, filters))
+            const entries = marketplaceEntriesWithInstallState(
+                snapshot.catalog.plugins.filter((entry) => marketplaceEntryMatches(entry, filters)),
+                getPluginManager()?.listPlugins() ?? []
+            )
             return c.json(PluginMarketplaceListResponseSchema.parse({
                 sourceUrl: snapshot.sourceUrl,
                 fetchedAt: snapshot.fetchedAt,
@@ -1138,10 +1173,11 @@ export function createPluginsRoutes(
         if (service instanceof Response) return service
         try {
             const snapshot = await service.getCatalog({ force: true })
+            const entries = marketplaceEntriesWithInstallState(snapshot.catalog.plugins, getPluginManager()?.listPlugins() ?? [])
             return c.json(PluginMarketplaceListResponseSchema.parse({
                 sourceUrl: snapshot.sourceUrl,
                 fetchedAt: snapshot.fetchedAt,
-                entries: snapshot.catalog.plugins
+                entries
             }))
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
@@ -1153,10 +1189,11 @@ export function createPluginsRoutes(
         if (service instanceof Response) return service
         try {
             const { snapshot, entry } = await service.getEntry(c.req.param('id'))
+            const [entryView] = marketplaceEntriesWithInstallState([entry], getPluginManager()?.listPlugins() ?? [])
             return c.json(PluginMarketplaceDetailResponseSchema.parse({
                 sourceUrl: snapshot.sourceUrl,
                 fetchedAt: snapshot.fetchedAt,
-                entry
+                entry: entryView
             }))
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))

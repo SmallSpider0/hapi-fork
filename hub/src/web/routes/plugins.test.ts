@@ -4,12 +4,14 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
 import type { PluginCapabilityView, PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { HubPluginManager } from '../../plugins/pluginManager'
+import { PluginMarketplaceService } from '../../plugins/marketplaceService'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
 import { createPluginsRoutes } from './plugins'
 
@@ -135,7 +137,13 @@ function deleteResult(): PluginDeleteResult {
     }
 }
 
-function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = pluginId, manifestOverrides: Record<string, unknown> = {}): { body: { filename: string; contentBase64: string; checksum: string; format: 'tgz' }; cleanup: () => void } {
+function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = pluginId, manifestOverrides: Record<string, unknown> = {}): {
+    body: { filename: string; contentBase64: string; checksum: string; format: 'tgz' }
+    manifest: Record<string, unknown>
+    packagePath: string
+    testDir: string
+    cleanup: () => void
+} {
     const testDir = mkdtempSync(join(tmpdir(), 'hapi-plugin-package-route-'))
     const pluginRoot = join(testDir, 'plugin')
     mkdirSync(pluginRoot, { recursive: true })
@@ -172,14 +180,21 @@ function makeTgzPackage(pluginId = 'com.example.package', metadataPluginId = plu
             checksum: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
             format: 'tgz'
         },
+        manifest: pluginManifest,
+        packagePath,
+        testDir,
         cleanup: () => rmSync(testDir, { recursive: true, force: true })
     }
 }
 
-function createApp(manager: Partial<HubPluginManager> | null, engine: Partial<SyncEngine> | null = null) {
+function createApp(manager: Partial<HubPluginManager> | null, engine: Partial<SyncEngine> | null = null, marketplaceService?: PluginMarketplaceService) {
     const app = new Hono<WebAppEnv>()
     app.use('/api/*', createAuthMiddleware(secret))
-    app.route('/api', createPluginsRoutes(() => manager as HubPluginManager | null, () => engine as SyncEngine | null))
+    app.route('/api', createPluginsRoutes(
+        () => manager as HubPluginManager | null,
+        () => engine as SyncEngine | null,
+        marketplaceService ? () => marketplaceService : undefined
+    ))
     return app
 }
 
@@ -598,6 +613,90 @@ describe('plugin admin routes', () => {
             const payload = await executeResponse.json() as PluginInstallResult
             expect(payload.targetResults?.map((entry) => entry.target.scope)).toEqual(['hub', 'runner:runner-1'])
             expect(calls).toEqual(['hub', 'runner:runner-1'])
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
+    it('lists marketplace plugins and installs a GitHub-style release package through the install planner', async () => {
+        const packageFixture = makeTgzPackage()
+        const catalogPath = join(packageFixture.testDir, 'catalog.v1.json')
+        writeFileSync(catalogPath, JSON.stringify({
+            schemaVersion: 'hapi-plugin-marketplace/v1',
+            updatedAt: '2026-05-22T00:00:00.000Z',
+            plugins: [{
+                id: 'com.example.package',
+                name: 'Package Plugin',
+                description: 'Installable from a release asset.',
+                repo: 'example/package-plugin',
+                categories: ['utility'],
+                runtimes: ['hub'],
+                releases: [{
+                    version: '0.1.0',
+                    tag: 'v0.1.0',
+                    manifest: packageFixture.manifest,
+                    package: {
+                        filename: packageFixture.body.filename,
+                        url: pathToFileURL(packageFixture.packagePath).toString(),
+                        format: packageFixture.body.format,
+                        checksum: packageFixture.body.checksum
+                    }
+                }]
+            }]
+        }, null, 2))
+        const marketplaceService = new PluginMarketplaceService({
+            sourceUrl: catalogPath,
+            cacheTtlMs: 0
+        })
+        const installRequests: unknown[] = []
+        const app = createApp({
+            listPlugins: () => [],
+            installPluginPackage: async (request: unknown) => {
+                installRequests.push(request)
+                return {
+                    ...installResult('installed'),
+                    pluginId: 'com.example.package',
+                    plugins: []
+                }
+            }
+        } as never, null, marketplaceService)
+        const headers = { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' }
+
+        try {
+            const listResponse = await app.request('/api/plugins/marketplace?q=package', { headers })
+            expect(listResponse.status).toBe(200)
+            const list = await listResponse.json() as { entries: Array<{ id: string; repo: string }> }
+            expect(list.entries).toHaveLength(1)
+            expect(list.entries[0]).toMatchObject({ id: 'com.example.package', repo: 'example/package-plugin' })
+
+            const planResponse = await app.request('/api/plugins/marketplace/com.example.package/install-plan', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ enable: true })
+            })
+            expect(planResponse.status).toBe(200)
+            const planPayload = await planResponse.json() as { marketplace: { repo: string; checksum: string }; plan: { planId: string; plugin: { id: string }; positions: string[]; targets: Array<{ action: string }> } }
+            expect(planPayload.marketplace.repo).toBe('example/package-plugin')
+            expect(planPayload.marketplace.checksum).toBe(packageFixture.body.checksum)
+            expect(planPayload.plan.plugin.id).toBe('com.example.package')
+            expect(planPayload.plan.positions).toEqual(['hub'])
+            expect(planPayload.plan.targets[0]?.action).toBe('install')
+
+            const executeResponse = await app.request(`/api/plugins/install-plan/${planPayload.plan.planId}/execute`, {
+                method: 'POST',
+                headers
+            })
+            expect(executeResponse.status).toBe(200)
+            expect(installRequests).toHaveLength(1)
+            expect(installRequests[0]).toMatchObject({
+                installSource: {
+                    type: 'marketplace',
+                    sourceUrl: catalogPath,
+                    pluginId: 'com.example.package',
+                    repo: 'example/package-plugin',
+                    version: '0.1.0'
+                }
+            })
         } finally {
             packageFixture.cleanup()
         }
