@@ -24,6 +24,24 @@ export default defineConfig({
       { text: 'How it Works', link: '/guide/how-it-works' },
       { text: 'Cursor Agent', link: '/guide/cursor' },
       { text: 'Voice Assistant', link: '/guide/voice-assistant' },
+      {
+        text: 'Plugin API',
+        items: [
+          { text: 'Overview', link: '/reference/plugin-api/' },
+          { text: 'Tutorials', link: '/reference/plugin-api/tutorial' },
+          { text: 'Hub Notification Tutorial', link: '/reference/plugin-api/tutorial-hub-notification' },
+          { text: 'Runner Environment Tutorial', link: '/reference/plugin-api/tutorial-runner-env' },
+          { text: 'Web Descriptor Tutorial', link: '/reference/plugin-api/tutorial-web-descriptor' },
+          { text: 'Manifest', link: '/reference/plugin-api/manifest' },
+          { text: 'Runtime SDK', link: '/reference/plugin-api/runtime-sdk' },
+          { text: 'Hub Runtime', link: '/reference/plugin-api/hub-runtime' },
+          { text: 'Runner Runtime', link: '/reference/plugin-api/runner-runtime' },
+          { text: 'Web Descriptors', link: '/reference/plugin-api/web-descriptors' },
+          { text: 'Agent Extensions', link: '/reference/plugin-api/agent-extensions' },
+          { text: 'Admin REST API', link: '/reference/plugin-api/admin-rest-api' },
+          { text: 'Schemas', link: '/reference/plugin-api/schemas' }
+        ]
+      },
       { text: 'Why HAPI', link: '/guide/why-hapi' },
       { text: 'FAQ', link: '/guide/faq' }
     ],

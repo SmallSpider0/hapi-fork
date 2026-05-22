@@ -1,0 +1,121 @@
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { dirname, join, relative } from 'node:path'
+import { z } from 'zod'
+import { endpointCatalog } from './plugin-api-docs/endpointCatalog'
+import {
+    extractSdkDeclarations,
+    renderAdminRestApiPage,
+    renderAgentExtensionsPage,
+    renderHubRuntimePage,
+    renderIndex,
+    renderIndividualSchemaPages,
+    renderManifestPage,
+    renderRuntimeSdkPage,
+    renderRunnerRuntimePage,
+    renderSchemasIndex,
+    renderWebDescriptorsPage,
+    schemaPublicPath,
+    type JsonSchema,
+    type SchemaRenderInput
+} from './plugin-api-docs/renderMarkdown'
+import { renderOpenApi } from './plugin-api-docs/renderOpenApi'
+import { schemaCatalog } from './plugin-api-docs/schemaCatalog'
+import { renderTutorialIndex, renderTutorialPage } from './plugin-api-docs/renderTutorials'
+import { loadTutorialFixtures } from './plugin-api-docs/tutorialCatalog'
+
+const checkMode = process.argv.includes('--check')
+const root = process.cwd()
+const referenceRoot = join(root, 'docs/reference/plugin-api')
+const publicRoot = join(root, 'docs/public/plugin-api')
+const sdkFilePath = join(root, 'shared/src/plugins/sdk.ts')
+
+type GeneratedFile = {
+    path: string
+    content: string
+}
+
+async function main(): Promise<void> {
+    const files = generateFiles()
+    if (checkMode) {
+        const stale = await findStaleFiles(files)
+        if (stale.length > 0) {
+            console.error('Plugin API docs are stale. Run: bun run docs:plugin-api')
+            for (const file of stale) {
+                console.error(` - ${relative(root, file)}`)
+            }
+            process.exit(1)
+        }
+        console.log(`Plugin API docs are up to date (${files.length} files).`)
+        return
+    }
+
+    for (const file of files) {
+        await mkdir(dirname(file.path), { recursive: true })
+        await writeFile(file.path, file.content, 'utf8')
+    }
+    console.log(`Generated plugin API docs (${files.length} files).`)
+}
+
+function generateFiles(): GeneratedFile[] {
+    const jsonSchemas = new Map<string, JsonSchema>()
+    const inputs: SchemaRenderInput[] = schemaCatalog.map((doc) => {
+        const jsonSchema = z.toJSONSchema(doc.schema, { name: doc.title }) as JsonSchema
+        jsonSchemas.set(doc.id, jsonSchema)
+        return {
+            doc,
+            jsonSchema,
+            publicPath: schemaPublicPath(doc.id)
+        }
+    })
+    const declarations = extractSdkDeclarations(sdkFilePath)
+    const openApi = renderOpenApi({ endpoints: endpointCatalog, schemaDocs: schemaCatalog, jsonSchemas })
+    const tutorials = loadTutorialFixtures(root)
+
+    const markdownFiles = new Map<string, string>([
+        ['index.md', renderIndex(inputs)],
+        ['tutorial.md', renderTutorialIndex(tutorials)],
+        ...tutorials.map((tutorial) => [tutorial.page, renderTutorialPage(tutorial)] as const),
+        ['manifest.md', renderManifestPage(inputs)],
+        ['runtime-sdk.md', renderRuntimeSdkPage(declarations)],
+        ['hub-runtime.md', renderHubRuntimePage(inputs, declarations)],
+        ['runner-runtime.md', renderRunnerRuntimePage(inputs, declarations)],
+        ['web-descriptors.md', renderWebDescriptorsPage(inputs)],
+        ['agent-extensions.md', renderAgentExtensionsPage(inputs, declarations)],
+        ['admin-rest-api.md', renderAdminRestApiPage(endpointCatalog)],
+        ['schemas.md', renderSchemasIndex(inputs)],
+        ...renderIndividualSchemaPages(inputs)
+    ])
+
+    const files: GeneratedFile[] = []
+    for (const [name, content] of markdownFiles) {
+        files.push({ path: join(referenceRoot, name), content: ensureTrailingNewline(content) })
+    }
+    for (const [id, jsonSchema] of jsonSchemas) {
+        files.push({
+            path: join(publicRoot, 'schemas', `${id}.schema.json`),
+            content: `${JSON.stringify(jsonSchema, null, 4)}\n`
+        })
+    }
+    files.push({
+        path: join(publicRoot, 'openapi.json'),
+        content: `${JSON.stringify(openApi, null, 4)}\n`
+    })
+    return files.sort((left, right) => left.path.localeCompare(right.path))
+}
+
+async function findStaleFiles(files: GeneratedFile[]): Promise<string[]> {
+    const stale: string[] = []
+    for (const file of files) {
+        const current = await readFile(file.path, 'utf8').catch(() => null)
+        if (current !== file.content) {
+            stale.push(file.path)
+        }
+    }
+    return stale
+}
+
+function ensureTrailingNewline(value: string): string {
+    return value.endsWith('\n') ? value : `${value}\n`
+}
+
+await main()
