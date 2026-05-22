@@ -223,7 +223,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         publicUrl: config.publicUrl,
         env: process.env,
         includeBundledCore: true,
-        includeBundledExamples: true
+        includeBundledExamples: process.env.HAPI_ENABLE_BUNDLED_EXAMPLES === '1'
     })
     await pluginManager.start()
     for (const diagnostic of pluginManager.getDiagnostics()) {

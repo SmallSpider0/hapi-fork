@@ -190,3 +190,29 @@ export const PluginManifestLiteSchema = PluginManifestLiteBaseSchema.extend({
 
 export type PluginManifestLite = z.infer<typeof PluginManifestLiteSchema>
 export type RawPluginManifestLite = z.infer<typeof RawPluginManifestLiteSchema>
+
+function hasDeclaredContributions(value: unknown): boolean {
+    if (!value || typeof value !== 'object') return false
+    return Object.values(value as Record<string, unknown>).some((entry) => Array.isArray(entry) ? entry.length > 0 : Boolean(entry))
+}
+
+export function pluginManifestRequiresHubInstall(manifest: PluginManifestLite): boolean {
+    const capabilities = manifest.capabilities ?? []
+    const hasWeb = hasDeclaredContributions(manifest.contributions?.web)
+        || capabilities.some((capability) => Boolean(capability.parts.web))
+    return Boolean(manifest.runtimes?.hub)
+        || hasDeclaredContributions(manifest.contributions?.hub)
+        || hasDeclaredContributions(manifest.contributions?.voice)
+        || hasDeclaredContributions(manifest.contributions?.deployment)
+        || hasDeclaredContributions(manifest.contributions?.integration)
+        || capabilities.some((capability) => Boolean(capability.parts.hub))
+        || hasWeb
+}
+
+export function pluginManifestRequiresRunnerInstall(manifest: PluginManifestLite): boolean {
+    const capabilities = manifest.capabilities ?? []
+    return Boolean(manifest.runtimes?.runner)
+        || hasDeclaredContributions(manifest.contributions?.runner)
+        || hasDeclaredContributions(manifest.contributions?.agent)
+        || capabilities.some((capability) => Boolean(capability.parts.runner))
+}

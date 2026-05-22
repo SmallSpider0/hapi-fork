@@ -4,7 +4,13 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { PluginManifestLiteSchema } from '@hapi/protocol/plugins'
+import { PluginManifestLiteSchema, pluginManifestRequiresRunnerInstall } from '@hapi/protocol/plugins'
+import {
+    HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
+    HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
+    HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+    HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
+} from '@hapi/protocol/plugins/bundledCore'
 import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { RunnerPluginManager } from './runnerPluginManager'
 
@@ -165,7 +171,9 @@ describe('RunnerPluginManager runtime', () => {
 
         expect(plugins.map((plugin) => plugin.id).sort()).toEqual([
             'com.example.runner',
-            ...bundledExamplePlugins.map((plugin) => plugin.manifest.id)
+            ...bundledExamplePlugins
+                .filter((plugin) => pluginManifestRequiresRunnerInstall(plugin.manifest))
+                .map((plugin) => plugin.manifest.id)
         ].sort())
         expect(plugins.find((plugin) => plugin.id === 'com.hapi.examples.echo-agent')).toMatchObject({
             source: 'bundled',
@@ -173,9 +181,95 @@ describe('RunnerPluginManager runtime', () => {
             active: false,
             install: { sourceType: 'bundled' }
         })
-        expect(manager.getPlugin('com.hapi.examples.voice-provider-stub')?.contributions.voice?.providers).toEqual([
-            expect.objectContaining({ id: 'example-voice-provider', supportStatus: 'unsupported' })
-        ])
+        await manager.dispose()
+    })
+
+    it('discovers and runs bundled core Runner plugins without installing Hub-only core runtime', async () => {
+        const manager = new RunnerPluginManager({
+            hapiHome: testDir,
+            machineId: 'runner-1',
+            env: {},
+            includeBundledCore: true
+        })
+        await manager.start()
+
+        const plugins = manager.listPlugins()
+        expect(plugins.map((plugin) => plugin.id)).toEqual(expect.arrayContaining([
+            'com.example.runner',
+            HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
+            HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID
+        ]))
+        expect(plugins.map((plugin) => plugin.id)).not.toEqual(expect.arrayContaining([
+            HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+            HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
+        ]))
+        expect(manager.getPlugin(HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID)).toMatchObject({
+            source: 'bundled',
+            enabled: false,
+            active: false,
+            contributions: {
+                runner: {
+                    environmentProviders: [expect.objectContaining({ id: 'runner-env-profiles' })]
+                }
+            }
+        })
+
+        await manager.enablePlugin(HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID, {
+            agentIds: 'codex',
+            directoryPrefixes: '/repo',
+            httpProxy: 'http://proxy.local:8080',
+            noProxy: 'localhost,127.0.0.1',
+            pathPrepend: '/opt/hapi/bin,/custom/bin'
+        })
+
+        const envPlan = await manager.resolveSpawnPlan({
+            options: { directory: '/repo', agent: 'codex' },
+            agent: 'codex',
+            basePlan: {
+                command: '/opt/hapi/current',
+                args: ['codex'],
+                displayArgs: ['codex'],
+                mode: 'compiled'
+            },
+            cwd: '/repo/project',
+            env: { PATH: '/usr/bin' }
+        })
+
+        expect(envPlan.env.HTTP_PROXY).toBe('http://proxy.local:8080')
+        expect(envPlan.env.NO_PROXY).toBe('localhost,127.0.0.1')
+        expect(envPlan.env.PATH).toBe('/opt/hapi/bin:/custom/bin:/usr/bin')
+        expect(envPlan.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                pluginId: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
+                code: 'runner-env-profiles-applied'
+            })
+        ]))
+
+        await manager.enablePlugin(HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID, {
+            blockedAgentIds: 'codex'
+        })
+        const blockedPlan = await manager.resolveSpawnPlan({
+            options: { directory: '/repo', agent: 'codex' },
+            agent: 'codex',
+            basePlan: {
+                command: '/opt/hapi/current',
+                args: ['codex'],
+                displayArgs: ['codex'],
+                mode: 'compiled'
+            },
+            cwd: '/repo/project',
+            env: { PATH: '/usr/bin' }
+        })
+
+        expect(blockedPlan.blocked).toEqual({
+            reason: 'Runner Spawn Guard blocked agent codex'
+        })
+        expect(blockedPlan.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                pluginId: HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
+                code: 'runner-spawn-guard-agent-blocked'
+            })
+        ]))
         await manager.dispose()
     })
 

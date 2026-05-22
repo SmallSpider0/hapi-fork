@@ -77,3 +77,7 @@ Hub 与 Runner inventory 暴露 `hostInfo`：`runtime`、`hapiVersion`、`plugin
 - 不同版本已安装且未 `overwrite`：计划 `conflict`，在 `compatible` 模式下跳过，在 `all/selected` 模式下阻塞。
 - Runner 离线：默认 `skip`；Manifest `offlineRunnerPolicy=fail` 时阻塞。
 - Runner 缺少 `hostInfo`：视为需要升级，不能作为兼容目标。
+
+## Bundled first-party plugins
+
+Default bundled plugins follow the same manifest-derived placement as uploaded packages. See [Bundled plugin catalog policy](./bundled-plugin-catalog.md) for the core plugin list and the `HAPI_ENABLE_BUNDLED_EXAMPLES=1` opt-in rule for developer examples.

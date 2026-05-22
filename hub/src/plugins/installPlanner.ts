@@ -8,7 +8,7 @@ import type {
     PluginPackageFormat,
     PluginTargetSummary
 } from '@hapi/protocol/plugins/admin'
-import type { PluginManifestLite, PluginRuntimeName } from '@hapi/protocol/plugins'
+import { pluginManifestRequiresHubInstall, pluginManifestRequiresRunnerInstall, type PluginManifestLite, type PluginRuntimeName } from '@hapi/protocol/plugins'
 
 export interface PluginInstallTargetCandidate {
     target: PluginTargetSummary
@@ -32,26 +32,12 @@ export interface BuildPluginInstallPlanOptions {
 
 type NumericVersion = [number, number, number]
 
-function hasEntries(value: unknown): boolean {
-    if (!value || typeof value !== 'object') return false
-    return Object.values(value as Record<string, unknown>).some((entry) => Array.isArray(entry) ? entry.length > 0 : Boolean(entry))
-}
-
 export function inferPluginInstallPositions(manifest: PluginManifestLite): PluginInstallPosition[] {
     const capabilities = manifest.capabilities ?? []
-    const hasWeb = hasEntries(manifest.contributions?.web)
+    const hasWeb = Boolean(manifest.contributions?.web && Object.values(manifest.contributions.web).some((entry) => Array.isArray(entry) ? entry.length > 0 : Boolean(entry)))
         || capabilities.some((capability) => Boolean(capability.parts.web))
-    const hasHub = Boolean(manifest.runtimes?.hub)
-        || hasEntries(manifest.contributions?.hub)
-        || hasEntries(manifest.contributions?.voice)
-        || hasEntries(manifest.contributions?.deployment)
-        || hasEntries(manifest.contributions?.integration)
-        || capabilities.some((capability) => Boolean(capability.parts.hub))
-        || hasWeb
-    const hasRunner = Boolean(manifest.runtimes?.runner)
-        || hasEntries(manifest.contributions?.runner)
-        || hasEntries(manifest.contributions?.agent)
-        || capabilities.some((capability) => Boolean(capability.parts.runner))
+    const hasHub = pluginManifestRequiresHubInstall(manifest)
+    const hasRunner = pluginManifestRequiresRunnerInstall(manifest)
 
     const positions: PluginInstallPosition[] = []
     if (hasWeb) positions.push('web')
