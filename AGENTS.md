@@ -69,6 +69,13 @@ bun run dev             # hub + web concurrently
 bun run build:single-exe # All-in-one binary
 ```
 
+## Local deployment hygiene
+
+- Prefer local deployment for this fork; do not use GitHub Pages / online deploy unless explicitly requested.
+- After every local deploy, clean historical deployment bins: remove superseded `/opt/hapi-fork/bin/hapi-fork-*` binaries after `/opt/hapi-fork/current` points at the new binary.
+- After every local deploy, clean temporary build outputs such as `cli/dist-exe/`, `web/dist/`, `hub/dist/`, and stale `/tmp/hapi-*` files when they are no longer needed.
+- Preserve runtime/user data: do not delete `$HAPI_HOME`, plugin state, session DBs, or active workspace files.
+
 ## Key source dirs
 
 ### CLI (`cli/src/`)
