@@ -7,7 +7,7 @@ import { usePluginActions } from '@/hooks/mutations/usePluginActions'
 import { useTranslation } from '@/lib/use-translation'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { PluginDescriptorPanels, type DescriptorActionHandler } from '@/components/plugins/DescriptorRenderer'
@@ -28,10 +28,6 @@ function PuzzleIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M19.4 13.5a1.9 1.9 0 1 0 0-3.8H17V7.3A2.3 2.3 0 0 0 14.7 5h-2.4a1.9 1.9 0 1 0-3.8 0H6.3A2.3 2.3 0 0 0 4 7.3v2.2a1.9 1.9 0 1 1 0 3.8v2.4A2.3 2.3 0 0 0 6.3 18h2.2a1.9 1.9 0 1 0 3.8 0h2.4a2.3 2.3 0 0 0 2.3-2.3v-2.2z" /></svg>
 }
 
-function PowerIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2v10" /><path d="M18.4 6.6a9 9 0 1 1-12.8 0" /></svg>
-}
-
 function ActivityIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12" /></svg>
 }
@@ -42,10 +38,6 @@ function FolderIcon() {
 
 function AlertIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z" /><path d="M12 9v4" /><path d="M12 17h.01" /></svg>
-}
-
-function CheckIcon() {
-    return <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
 }
 
 function statusVariant(status: string): BadgeVariant {
@@ -65,11 +57,15 @@ function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
 }
 
-function pluginTargetLabel(plugin: PluginDetail): string {
-    if (!plugin.target) return 'Local'
+function pluginTargetLabel(t: (key: string) => string, plugin: PluginDetail): string {
+    if (!plugin.target) return t('settings.plugins.target.local')
     if (plugin.target.scope === 'hub') return 'Hub'
     if (plugin.target.runtime === 'runner') return `Runner · ${plugin.target.displayName ?? plugin.target.machineId ?? plugin.target.scope}`
     return plugin.target.scope
+}
+
+function targetScopeLabel(t: (key: string) => string, scope?: string): string {
+    return scope ?? t('settings.plugins.target.local')
 }
 
 function runtimeActive(plugin: PluginDetail, runtime: string): boolean {
@@ -82,12 +78,12 @@ function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }
     return <Badge variant={props.variant ?? 'default'} className="gap-1 font-medium">{props.icon}{props.label}</Badge>
 }
 
-function contributionName(entry: unknown): string {
-    if (!entry || typeof entry !== 'object') return 'unknown'
+function contributionName(t: (key: string) => string, entry: unknown): string {
+    if (!entry || typeof entry !== 'object') return t('settings.plugins.unknown')
     const descriptor = entry as { id?: unknown; displayName?: unknown }
     if (typeof descriptor.displayName === 'string') return descriptor.displayName
     if (typeof descriptor.id === 'string') return descriptor.id
-    return 'unknown'
+    return t('settings.plugins.unknown')
 }
 
 function contributionSupportSuffix(entry: unknown): string {
@@ -159,14 +155,13 @@ function ResultCard(props: { result: ResultState; onDismiss: () => void }) {
     )
 }
 
-function SectionCard(props: { title: string; description?: string; children: ReactNode }) {
+function SectionCard(props: { title: string; children: ReactNode }) {
     return (
         <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
-            <CardHeader>
-                <CardTitle>{props.title}</CardTitle>
-                {props.description ? <CardDescription>{props.description}</CardDescription> : null}
-            </CardHeader>
-            <CardContent>{props.children}</CardContent>
+            <CardContent className="space-y-3 p-3">
+                <div className="text-sm font-semibold">{props.title}</div>
+                {props.children}
+            </CardContent>
         </Card>
     )
 }
@@ -196,9 +191,9 @@ function DiagnosticsList(props: { plugin: PluginDetail; t: (key: string, params?
                     <div>{diagnostic.message}</div>
                     {diagnostic.target?.scope || diagnostic.configScope ? (
                         <div className="mt-1 break-all text-xs text-[var(--app-hint)]">
-                            {diagnostic.target?.scope ? `Target: ${diagnostic.target.scope}` : null}
+                            {diagnostic.target?.scope ? `${t('settings.plugins.detail.targetLabel')}: ${diagnostic.target.scope}` : null}
                             {diagnostic.target?.scope && diagnostic.configScope ? ' · ' : null}
-                            {diagnostic.configScope ? `Config scope: ${diagnostic.configScope}` : null}
+                            {diagnostic.configScope ? `${t('settings.plugins.config.scopeLabel')}: ${diagnostic.configScope}` : null}
                         </div>
                     ) : null}
                     {diagnostic.path ? <div className="mt-1 break-all text-xs text-[var(--app-hint)]">{diagnostic.path}</div> : null}
@@ -213,62 +208,62 @@ function ContributionsList(props: { plugin: PluginDetail; t: (key: string, param
     const chips: Array<{ key: string; label: string; variant?: BadgeVariant }> = [
         ...plugin.contributions.notificationChannels.map((channel) => ({
             key: `hub-notification-${channel.id}`,
-            label: `Hub notification · ${channel.displayName} · ${channel.id}`,
+            label: `${t('settings.plugins.contribution.hubNotification')} · ${channel.displayName} · ${channel.id}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.runner?.environmentProviders ?? []).map((entry) => ({
             key: `runner-env-${String((entry as { id?: unknown }).id)}`,
-            label: `Runner env · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`,
+            label: `${t('settings.plugins.contribution.runnerEnv')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.runner?.commandResolvers ?? []).map((entry) => ({
             key: `runner-command-${String((entry as { id?: unknown }).id)}`,
-            label: `Runner command · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`,
+            label: `${t('settings.plugins.contribution.runnerCommand')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.runner?.spawnHooks ?? []).map((entry) => ({
             key: `runner-spawn-${String((entry as { id?: unknown }).id)}`,
-            label: `Runner spawn · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`,
+            label: `${t('settings.plugins.contribution.runnerSpawn')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`,
             variant: 'success' as BadgeVariant
         })),
         ...(plugin.contributions.agent?.adapters ?? []).map((entry) => ({
             key: `agent-adapter-${String((entry as { id?: unknown }).id)}`,
-            label: `Agent adapter · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+            label: `${t('settings.plugins.contribution.agentAdapter')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         })),
         ...(plugin.contributions.agent?.capabilityProviders ?? []).map((entry) => ({
             key: `agent-capability-${String((entry as { id?: unknown }).id)}`,
-            label: `Agent capability · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+            label: `${t('settings.plugins.contribution.agentCapability')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         })),
         ...(plugin.contributions.voice?.providers ?? []).map((entry) => ({
             key: `voice-provider-${String((entry as { id?: unknown }).id)}`,
-            label: `Voice provider · ${contributionName(entry)}${contributionSupportSuffix(entry)}`,
+            label: `${t('settings.plugins.contribution.voiceProvider')} · ${contributionName(t, entry)}${contributionSupportSuffix(entry)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.deployment?.packs ?? []).map((entry) => ({
             key: `deployment-pack-${String((entry as { id?: unknown }).id)}`,
-            label: `Deployment pack · ${contributionName(entry)}${contributionSupportSuffix(entry)}`,
+            label: `${t('settings.plugins.contribution.deploymentPack')} · ${contributionName(t, entry)}${contributionSupportSuffix(entry)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.integration?.protocolBridges ?? []).map((entry) => ({
             key: `integration-protocol-${String((entry as { id?: unknown }).id)}`,
-            label: `Protocol bridge · ${contributionName(entry)}${contributionSupportSuffix(entry)}`,
+            label: `${t('settings.plugins.contribution.protocolBridge')} · ${contributionName(t, entry)}${contributionSupportSuffix(entry)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.web?.settingsPanels ?? []).map((entry) => ({
             key: `web-settings-${String((entry as { id?: unknown }).id)}`,
-            label: `Web settings · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+            label: `${t('settings.plugins.contribution.webSettings')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         })),
         ...(plugin.contributions.web?.newSessionFields ?? []).map((entry) => ({
             key: `web-new-session-${String((entry as { id?: unknown }).id)}`,
-            label: `Web new session · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+            label: `${t('settings.plugins.contribution.webNewSession')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         })),
         ...(plugin.contributions.web?.actions ?? []).map((entry) => ({
             key: `web-action-${String((entry as { id?: unknown }).id)}`,
-            label: `Web action · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+            label: `${t('settings.plugins.contribution.webAction')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         })),
         ...(plugin.contributions.web?.badges ?? []).map((entry) => ({
             key: `web-badge-${String((entry as { id?: unknown }).id)}`,
-            label: `Web badge · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+            label: `${t('settings.plugins.contribution.webBadge')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         }))
     ]
 
@@ -280,6 +275,90 @@ function ContributionsList(props: { plugin: PluginDetail; t: (key: string, param
         <div className="flex flex-wrap gap-2">
             {chips.map((chip) => <Chip key={chip.key} icon={<ActivityIcon />} label={chip.label} variant={chip.variant} />)}
         </div>
+    )
+}
+
+function secretPermissionLabel(
+    t: (key: string, params?: Record<string, string | number>) => string,
+    secret: PluginDetail['permissions']['secrets'][number]
+): string {
+    const parts = [
+        `${secret.name}: ${secret.present ? t('settings.plugins.secret.present') : t('settings.plugins.secret.missing')}`,
+        secret.required === false ? t('settings.plugins.permissions.optional') : t('settings.plugins.permissions.required')
+    ]
+    if (secret.lastChecked) {
+        parts.push(t('settings.plugins.permissions.checkedAt', { date: new Date(secret.lastChecked).toLocaleString() }))
+    }
+    return parts.join(' · ')
+}
+
+function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string }) {
+    const { plugin, t } = props
+    return (
+        <details className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-sm">
+            <summary className="cursor-pointer font-medium">{t('settings.plugins.detail.developerDetails')}</summary>
+            <div className="mt-3 space-y-4">
+                <div className="space-y-2">
+                    <KeyValue label={t('settings.plugins.detail.idLabel')} value={plugin.id} />
+                    <KeyValue label={t('settings.plugins.detail.targetLabel')} value={pluginTargetLabel(t, plugin)} />
+                    <KeyValue label={t('settings.plugins.detail.sourceLabel')} value={sourceLabel(t, plugin.source)} />
+                    <KeyValue label={t('settings.plugins.detail.rootLabel')} value={plugin.rootPath} />
+                    <KeyValue label={t('settings.plugins.detail.manifestLabel')} value={plugin.manifestPath} />
+                </div>
+
+                <div className="space-y-2">
+                    <div className="font-medium">{t('settings.plugins.detail.runtime')}</div>
+                    {plugin.runtimeEntryPaths.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.none')}</div> : plugin.runtimeEntryPaths.map((entry) => (
+                        <div key={`${entry.runtime}-${entry.realPath}`} className="rounded-lg border border-[var(--app-border)] p-3">
+                            <div className="mb-2 flex flex-wrap items-center gap-2">
+                                <Badge>{entry.runtime}</Badge>
+                                <Badge variant={runtimeActive(plugin, entry.runtime) ? 'success' : 'default'}>{runtimeActive(plugin, entry.runtime) ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')}</Badge>
+                            </div>
+                            <KeyValue label={entry.runtime === 'runner' ? t('settings.plugins.detail.runnerEntryLabel') : t('settings.plugins.detail.hubEntryLabel')} value={entry.entry} />
+                            <div className="mt-2"><KeyValue label={t('settings.plugins.detail.resolvedPathLabel')} value={entry.resolvedPath} /></div>
+                            <div className="mt-2"><KeyValue label={t('settings.plugins.detail.realPathLabel')} value={entry.realPath} /></div>
+                        </div>
+                    ))}
+                </div>
+
+                <div className="space-y-2">
+                    <div className="font-medium">{t('settings.plugins.detail.contributions')}</div>
+                    <ContributionsList plugin={plugin} t={t} />
+                </div>
+
+                <div className="space-y-2">
+                    <div className="font-medium">{t('settings.plugins.detail.permissions')}</div>
+                    <div>
+                        <div className="mb-1 font-medium text-[var(--app-hint)]">{t('settings.plugins.detail.networkLabel')} · {targetScopeLabel(t, plugin.target?.scope)}</div>
+                        {plugin.permissions.network.length === 0 ? <div className="text-[var(--app-hint)]">{t('settings.plugins.permissions.networkEmpty')}</div> : <div className="flex flex-wrap gap-2">{plugin.permissions.network.map((entry) => <Chip key={entry} label={entry} variant="warning" />)}</div>}
+                    </div>
+                    <div>
+                        <div className="mb-1 font-medium text-[var(--app-hint)]">{t('settings.plugins.detail.secretsLabel')} · {targetScopeLabel(t, plugin.target?.scope)}</div>
+                        {plugin.permissions.secrets.length === 0 ? <div className="text-[var(--app-hint)]">{t('settings.plugins.permissions.secretsEmpty')}</div> : (
+                            <div className="flex flex-wrap gap-2">
+                                {plugin.permissions.secrets.map((secret) => <Chip key={`${secret.configScope ?? plugin.target?.scope ?? 'local'}-${secret.name}`} label={secretPermissionLabel(t, secret)} variant={secret.present ? 'success' : 'warning'} />)}
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="space-y-2">
+                    <div className="font-medium">{t('settings.plugins.config.title')}</div>
+                    <div className="space-y-1 rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
+                        <div>{t('settings.plugins.config.scopeLabel')}: {plugin.configMetadata?.scope ?? plugin.configScope ?? targetScopeLabel(t)}</div>
+                        <div>{t('settings.plugins.detail.targetLabel')}: {plugin.configMetadata?.target.scope ?? plugin.target?.scope ?? targetScopeLabel(t)}</div>
+                        <div>{t('settings.plugins.detail.sourceLabel')}: {plugin.configMetadata?.source ?? t('settings.plugins.none')}</div>
+                        {plugin.configMetadata?.updatedAt ? <div>{t('settings.plugins.config.updatedLabel')}: {new Date(plugin.configMetadata.updatedAt).toLocaleString()}</div> : null}
+                    </div>
+                    <pre className="max-h-80 overflow-auto rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs">{JSON.stringify(plugin.config ?? {}, null, 2)}</pre>
+                </div>
+
+                <div className="space-y-2">
+                    <div className="font-medium">{t('settings.plugins.detail.manifestLabel')}</div>
+                    <pre className="max-h-80 overflow-auto rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs">{JSON.stringify(plugin.manifest ?? {}, null, 2)}</pre>
+                </div>
+            </div>
+        </details>
     )
 }
 
@@ -311,6 +390,7 @@ export default function PluginPage() {
     const issueCount = useMemo(() => plugin?.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length ?? 0, [plugin])
     const canEnablePlugin = plugin ? !['invalid', 'incompatible', 'blocked'].includes(plugin.status) : false
     const canDeletePlugin = plugin?.source === 'user-home'
+    const hasConfig = Boolean(plugin && (Object.keys(plugin.config ?? {}).length > 0 || dirtyConfig))
 
     const showReloadResult = (title: string, reloadResult: PluginReloadResult) => {
         setResult({
@@ -432,19 +512,17 @@ export default function PluginPage() {
                                             <div className="mt-1 text-sm text-[var(--app-hint)]">{t('settings.plugins.detail.meta', { id: plugin.id, version: plugin.version ?? t('settings.plugins.unknown'), status: t(`settings.plugins.status.${plugin.status}`) })}</div>
                                             {plugin.description ? <p className="mt-2 text-sm text-[var(--app-hint)]">{plugin.description}</p> : null}
                                             <div className="mt-3 flex flex-wrap gap-1.5">
-                                                <Chip label={pluginTargetLabel(plugin)} variant={plugin.target?.active === false ? 'warning' : 'default'} />
-                                                {plugin.target?.stale ? <Chip label="Stale" variant="warning" /> : null}
-                                                <Chip icon={<PowerIcon />} label={plugin.enabled ? t('settings.plugins.state.enabled') : t('settings.plugins.state.disabled')} variant={plugin.enabled ? 'success' : 'default'} />
-                                                <Chip icon={<ActivityIcon />} label={plugin.active ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')} variant={plugin.active ? 'success' : 'default'} />
+                                                <Chip label={pluginTargetLabel(t, plugin)} variant={plugin.target?.active === false ? 'warning' : 'default'} />
+                                                {plugin.target?.stale ? <Chip label={t('settings.plugins.target.stale')} variant="warning" /> : null}
                                                 <Chip icon={<FolderIcon />} label={sourceLabel(t, plugin.source)} />
-                                                <Chip icon={issueCount > 0 ? <AlertIcon /> : <CheckIcon />} label={issueCount > 0 ? t('settings.plugins.list.diagnostics', { count: issueCount }) : t('settings.plugins.list.noDiagnostics')} variant={issueCount > 0 ? 'warning' : 'success'} />
+                                                {issueCount > 0 ? <Chip icon={<AlertIcon />} label={t('settings.plugins.list.diagnostics', { count: issueCount })} variant="warning" /> : null}
                                             </div>
                                         </div>
                                     </div>
                                 </div>
                             </Card>
 
-                            <SectionCard title={t('settings.plugins.detail.actions')} description={t('settings.plugins.detail.actionsDescription')}>
+                            <SectionCard title={t('settings.plugins.detail.actions')}>
                                 <div className="flex flex-wrap gap-2">
                                     {plugin.enabled ? (
                                         <Button type="button" variant="destructive" disabled={actions.isPending} onClick={() => void disable()}>{t('settings.plugins.action.disable')}</Button>
@@ -455,42 +533,10 @@ export default function PluginPage() {
                                     <Button type="button" variant="destructive" disabled={actions.isPending || !canDeletePlugin} onClick={() => setDeleteDialogOpen(true)}>{t('settings.plugins.action.delete')}</Button>
                                 </div>
                                 {!plugin.enabled && !canEnablePlugin ? <div className="mt-2 text-sm text-[var(--app-hint)]">{t('settings.plugins.action.cannotEnableStatus', { status: t(`settings.plugins.status.${plugin.status}`) })}</div> : null}
-                                {!canDeletePlugin ? <div className="mt-2 text-sm text-[var(--app-hint)]">{t('settings.plugins.action.cannotDeleteSource', { source: sourceLabel(t, plugin.source) })}</div> : null}
                             </SectionCard>
-
-                            <SectionCard title={t('settings.plugins.detail.overview')}>
-                                <div className="space-y-2">
-                                    <KeyValue label={t('settings.plugins.detail.idLabel')} value={plugin.id} />
-                                    <KeyValue label="Target" value={pluginTargetLabel(plugin)} />
-                                    <KeyValue label={t('settings.plugins.detail.sourceLabel')} value={sourceLabel(t, plugin.source)} />
-                                    <KeyValue label={t('settings.plugins.detail.rootLabel')} value={plugin.rootPath} />
-                                    <KeyValue label={t('settings.plugins.detail.manifestLabel')} value={plugin.manifestPath} />
-                                </div>
-                            </SectionCard>
-
-                            <SectionCard title={t('settings.plugins.detail.runtime')} description={t('settings.plugins.detail.runtimeDescription')}>
-                                <div className="space-y-2">
-                                    {plugin.runtimeEntryPaths.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.none')}</div> : plugin.runtimeEntryPaths.map((entry) => (
-                                        <div key={`${entry.runtime}-${entry.realPath}`} className="rounded-lg border border-[var(--app-border)] p-3 text-sm">
-                                            <div className="mb-2 flex flex-wrap items-center gap-2">
-                                                <Badge>{entry.runtime}</Badge>
-                                                <Badge variant={runtimeActive(plugin, entry.runtime) ? 'success' : 'default'}>{runtimeActive(plugin, entry.runtime) ? t('settings.plugins.state.active') : t('settings.plugins.state.inactive')}</Badge>
-                                            </div>
-                                            <KeyValue label={entry.runtime === 'runner' ? 'Runner entry' : t('settings.plugins.detail.hubEntryLabel')} value={entry.entry} />
-                                            <div className="mt-2"><KeyValue label={t('settings.plugins.detail.resolvedPathLabel')} value={entry.resolvedPath} /></div>
-                                            <div className="mt-2"><KeyValue label={t('settings.plugins.detail.realPathLabel')} value={entry.realPath} /></div>
-                                        </div>
-                                    ))}
-                                </div>
-                            </SectionCard>
-
-                            <SectionCard title={t('settings.plugins.detail.contributions')}>
-                                <ContributionsList plugin={plugin} t={t} />
-                            </SectionCard>
-
 
                             {plugin.contributions.web?.settingsPanels?.length ? (
-                                <SectionCard title="Plugin-provided UI" description="Rendered from declarative descriptors only; browser plugin JavaScript is not executed.">
+                                <SectionCard title={t('settings.plugins.detail.pluginUi')}>
                                     <PluginDescriptorPanels
                                         contributions={plugin.contributions.web}
                                         config={plugin.config ?? {}}
@@ -501,38 +547,8 @@ export default function PluginPage() {
                                 </SectionCard>
                             ) : null}
 
-                            <SectionCard title={t('settings.plugins.detail.permissions')} description={t('settings.plugins.detail.permissionsDescription')}>
-                                <div className="space-y-3">
-                                    <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-3 text-sm text-[var(--app-badge-warning-text)]">
-                                        Plugin code runs as trusted code in the selected {plugin.target?.runtime ?? 'runtime'} target ({plugin.target?.scope ?? 'local'}). Permissions are advisory declarations for review, not sandbox enforcement.
-                                    </div>
-                                    <div>
-                                        <div className="mb-1 text-sm font-medium">{t('settings.plugins.detail.networkLabel')} · {plugin.target?.scope ?? 'local'}</div>
-                                        {plugin.permissions.network.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.permissions.networkEmpty')}</div> : <div className="flex flex-wrap gap-2">{plugin.permissions.network.map((entry) => <Chip key={entry} label={entry} variant="warning" />)}</div>}
-                                    </div>
-                                    <div>
-                                        <div className="mb-1 text-sm font-medium">{t('settings.plugins.detail.secretsLabel')} · {plugin.target?.scope ?? 'local'}</div>
-                                        {plugin.permissions.secrets.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.permissions.secretsEmpty')}</div> : (
-                                            <div className="flex flex-wrap gap-2">
-                                                {plugin.permissions.secrets.map((secret) => {
-                                                    const checked = secret.lastChecked ? new Date(secret.lastChecked).toLocaleString() : null
-                                                    const label = `${secret.name}: ${secret.present ? t('settings.plugins.secret.present') : t('settings.plugins.secret.missing')}${secret.required === false ? ' · optional' : ' · required'}${checked ? ` · checked ${checked}` : ''}`
-                                                    return <Chip key={`${secret.configScope ?? plugin.target?.scope ?? 'local'}-${secret.name}`} label={label} variant={secret.present ? 'success' : 'warning'} />
-                                                })}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            </SectionCard>
-
-                            <SectionCard title={t('settings.plugins.config.title')} description={t('settings.plugins.config.description')}>
+                            {hasConfig ? <SectionCard title={t('settings.plugins.config.title')}>
                                 <div className="space-y-2">
-                                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs text-[var(--app-hint)]">
-                                        <div>Config scope: {plugin.configMetadata?.scope ?? plugin.configScope ?? 'local'}</div>
-                                        <div>Target: {plugin.configMetadata?.target.scope ?? plugin.target?.scope ?? 'local'}</div>
-                                        <div>Source: {plugin.configMetadata?.source ?? 'empty'}</div>
-                                        {plugin.configMetadata?.updatedAt ? <div>Updated: {new Date(plugin.configMetadata.updatedAt).toLocaleString()}</div> : null}
-                                    </div>
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <label className="text-sm font-medium" htmlFor="plugin-config-json">{t('settings.plugins.config.textareaLabel')}</label>
                                         {dirtyConfig ? <Badge variant="warning">{t('settings.plugins.config.unsaved')}</Badge> : <Badge variant="success">{t('settings.plugins.config.saved')}</Badge>}
@@ -550,22 +566,19 @@ export default function PluginPage() {
                                         <Button type="button" variant="outline" disabled={!dirtyConfig} onClick={() => { setConfigText(initialConfigText); setConfigError(null) }}>{t('settings.plugins.config.reset')}</Button>
                                     </div>
                                 </div>
-                            </SectionCard>
+                            </SectionCard> : null}
 
-                            <SectionCard title={t('settings.plugins.diagnostics.title')}>
+                            {plugin.diagnostics.length > 0 ? <SectionCard title={t('settings.plugins.diagnostics.title')}>
                                 <DiagnosticsList plugin={plugin} t={t} />
-                            </SectionCard>
+                            </SectionCard> : null}
 
-                            <details className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-sm">
-                                <summary className="cursor-pointer font-medium">{t('settings.plugins.detail.developerDetails')}</summary>
-                                <pre className="mt-3 max-h-80 overflow-auto rounded-lg bg-[var(--app-subtle-bg)] p-3 text-xs">{JSON.stringify(plugin.manifest ?? {}, null, 2)}</pre>
-                            </details>
+                            <DeveloperDetails plugin={plugin} t={t} />
 
                             <ConfirmDialog
                                 isOpen={enableDialogOpen}
                                 onClose={() => setEnableDialogOpen(false)}
                                 title={t('settings.plugins.confirm.enable.title')}
-                                description={t('settings.plugins.confirm.enable.description')}
+                                description={t('settings.plugins.confirm.enable.description', { target: pluginTargetLabel(t, plugin) })}
                                 confirmLabel={t('settings.plugins.confirm.enable.confirm')}
                                 confirmingLabel={t('settings.plugins.confirm.enable.confirming')}
                                 onConfirm={enable}

@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState, type ReactNode } from 'react'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { useTranslation } from '@/lib/use-translation'
 import {
     CorePluginActionIdSchema,
     WebDescriptorComponentSchema,
@@ -87,6 +88,7 @@ function SchemaFormComponent(props: {
     onSaveConfig?: DescriptorConfigSaveHandler
 }) {
     const { component, config } = props
+    const { t, locale } = useTranslation()
     const [values, setValues] = useState<Record<string, unknown>>({})
     const [error, setError] = useState<string | null>(null)
     const [saving, setSaving] = useState(false)
@@ -101,7 +103,7 @@ function SchemaFormComponent(props: {
     const save = async () => {
         if (!props.onSaveConfig || props.disabled) return
         if (requiredMissing) {
-            setError(`${descriptorText(requiredMissing.label)} is required.`)
+            setError(t('settings.plugins.descriptor.required', { label: descriptorText(requiredMissing.label, locale) }))
             return
         }
         const nextConfig = { ...config }
@@ -127,13 +129,13 @@ function SchemaFormComponent(props: {
 
     return (
         <div className="space-y-3 rounded-lg border border-[var(--app-border)] p-3">
-            {component.title ? <div className="font-medium">{descriptorText(component.title)}</div> : null}
-            {component.description ? <div className="text-sm text-[var(--app-hint)]">{descriptorText(component.description)}</div> : null}
+            {component.title ? <div className="font-medium">{descriptorText(component.title, locale)}</div> : null}
+            {component.description ? <div className="text-sm text-[var(--app-hint)]">{descriptorText(component.description, locale)}</div> : null}
             <div className="space-y-3">
                 {component.fields.map((field) => {
                     const value = values[field.key]
-                    const label = descriptorText(field.label)
-                    const description = descriptorText(field.description)
+                    const label = descriptorText(field.label, locale)
+                    const description = descriptorText(field.description, locale)
                     return (
                         <label key={field.key} className="block space-y-1 text-sm">
                             <span className="font-medium">{label}{field.required ? ' *' : ''}</span>
@@ -143,7 +145,7 @@ function SchemaFormComponent(props: {
                                     type="password"
                                     value=""
                                     disabled
-                                    placeholder="Secret value is provided by the target runtime"
+                                    placeholder={t('settings.plugins.descriptor.secretPlaceholder')}
                                     className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-sm text-[var(--app-hint)]"
                                 />
                             ) : field.type === 'boolean' ? (
@@ -161,8 +163,8 @@ function SchemaFormComponent(props: {
                                     onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
                                     className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
                                 >
-                                    <option value="">Select…</option>
-                                    {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{descriptorText(option.label) || option.value}</option>)}
+                                    <option value="">{t('settings.plugins.descriptor.select')}</option>
+                                    {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{descriptorText(option.label, locale) || option.value}</option>)}
                                 </select>
                             ) : (
                                 <input
@@ -180,7 +182,7 @@ function SchemaFormComponent(props: {
             {error ? <div className="text-sm text-red-600">{error}</div> : null}
             {props.onSaveConfig ? (
                 <Button type="button" size="sm" disabled={props.disabled || saving || Boolean(requiredMissing)} onClick={() => void save()}>
-                    {saving ? 'Saving…' : descriptorText(component.submitLabel) || 'Save and reload'}
+                    {saving ? t('settings.plugins.config.saving') : descriptorText(component.submitLabel, locale) || t('settings.plugins.config.saveAndReload')}
                 </Button>
             ) : null}
         </div>
@@ -194,9 +196,10 @@ function DescriptorComponent(props: {
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
 }) {
+    const { t, locale } = useTranslation()
     const parsed = WebDescriptorComponentSchema.safeParse(props.component)
     if (!parsed.success) {
-        return <DescriptorError message="Invalid descriptor component." />
+        return <DescriptorError message={t('settings.plugins.descriptor.invalidComponent')} />
     }
     const component = parsed.data
     if (component.kind === 'text') {
@@ -207,17 +210,17 @@ function DescriptorComponent(props: {
                 : component.tone === 'muted'
                     ? 'text-[var(--app-hint)]'
                     : ''
-        return <div className={`text-sm ${tone}`}>{descriptorText(component.text)}</div>
+        return <div className={`text-sm ${tone}`}>{descriptorText(component.text, locale)}</div>
     }
     if (component.kind === 'badge') {
-        return <Badge variant={badgeVariant(component.variant)}>{descriptorText(component.label)}</Badge>
+        return <Badge variant={badgeVariant(component.variant)}>{descriptorText(component.label, locale)}</Badge>
     }
     if (component.kind === 'table') {
         return (
             <div className="overflow-x-auto rounded-lg border border-[var(--app-border)]">
                 <table className="min-w-full text-left text-sm">
                     <thead className="bg-[var(--app-subtle-bg)] text-xs text-[var(--app-hint)]">
-                        <tr>{component.columns.map((column) => <th key={column.key} className="px-3 py-2 font-medium">{descriptorText(column.label)}</th>)}</tr>
+                        <tr>{component.columns.map((column) => <th key={column.key} className="px-3 py-2 font-medium">{descriptorText(column.label, locale)}</th>)}</tr>
                     </thead>
                     <tbody>
                         {component.rows.map((row, index) => (
@@ -233,19 +236,19 @@ function DescriptorComponent(props: {
     if (component.kind === 'actionButton') {
         const action = CorePluginActionIdSchema.safeParse(component.actionId)
         if (!action.success) {
-            return <DescriptorError message="Unsupported action descriptor." />
+            return <DescriptorError message={t('settings.plugins.descriptor.unsupportedAction')} />
         }
         const run = async () => {
             if (!props.onAction) return
             if (component.confirm) {
-                const ok = window.confirm(`${descriptorText(component.confirm.title)}${component.confirm.description ? `\n\n${descriptorText(component.confirm.description)}` : ''}`)
+                const ok = window.confirm(`${descriptorText(component.confirm.title, locale)}${component.confirm.description ? `\n\n${descriptorText(component.confirm.description, locale)}` : ''}`)
                 if (!ok) return
             }
             await props.onAction(action.data)
         }
         return (
             <Button type="button" size="sm" variant={component.variant === 'danger' ? 'destructive' : component.variant === 'secondary' ? 'outline' : 'default'} disabled={props.disabled} onClick={() => void run()}>
-                {descriptorText(component.label)}
+                {descriptorText(component.label, locale)}
             </Button>
         )
     }
@@ -300,27 +303,28 @@ export function PluginSettingsPanels(props: {
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
 }) {
+    const { t, locale } = useTranslation()
     const parsed = useMemo(() => props.panels.map((panel) => parsePanelShell(panel)), [props.panels])
 
     return (
         <div className="space-y-3">
             {parsed.map((entry, index) => {
                 if (!entry.success) {
-                    return <DescriptorError key={`invalid-${index}`} message="Plugin settings panel descriptor failed validation." />
+                    return <DescriptorError key={`invalid-${index}`} message={t('settings.plugins.descriptor.invalidPanel')} />
                 }
                 const panel = entry
                 return (
-                    <DescriptorBoundary key={panel.id} fallback={<DescriptorError message="Plugin settings panel failed to render." />}>
+                    <DescriptorBoundary key={panel.id} fallback={<DescriptorError message={t('settings.plugins.descriptor.panelRenderFailed')} />}>
                         <div className="space-y-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
                             <div>
-                                <div className="font-medium">{descriptorText(panel.title)}</div>
-                                {panel.description ? <div className="mt-1 text-sm text-[var(--app-hint)]">{descriptorText(panel.description)}</div> : null}
+                                <div className="font-medium">{descriptorText(panel.title, locale)}</div>
+                                {panel.description ? <div className="mt-1 text-sm text-[var(--app-hint)]">{descriptorText(panel.description, locale)}</div> : null}
                             </div>
                             <div className="space-y-3">
                                 {panel.components.map((component, componentIndex) => {
                                     const parsedComponent = WebDescriptorComponentSchema.safeParse(component)
                                     if (!parsedComponent.success) {
-                                        return <DescriptorError key={`invalid-component-${componentIndex}`} message="Plugin descriptor component failed validation." />
+                                        return <DescriptorError key={`invalid-component-${componentIndex}`} message={t('settings.plugins.descriptor.componentValidationFailed')} />
                                     }
                                     return (
                                         <DescriptorComponent
