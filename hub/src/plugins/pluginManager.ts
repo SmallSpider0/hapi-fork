@@ -365,6 +365,7 @@ export class HubPluginManager {
                     kind: capability.kind,
                     displayName: capability.displayName,
                     description: capability.description,
+                    display: capability.display,
                     status: record.enabled === true ? aggregateCapabilityStatus(parts) : 'disabled',
                     target,
                     parts,
@@ -520,11 +521,22 @@ export class HubPluginManager {
             overwrite: options.overwrite === true
         })
         const pluginId = install.record.manifest!.id
+        const marketplaceInstall = options.installSource?.type === 'marketplace'
         await this.recordInstallState(pluginId, {
-            sourceType: 'uploaded-package',
+            sourceType: marketplaceInstall ? 'marketplace' : 'uploaded-package',
             checksum: install.checksum,
             packageFormat: install.packageFormat,
-            version: install.record.manifest!.version
+            version: install.record.manifest!.version,
+            ...(marketplaceInstall ? {
+                marketplace: {
+                    sourceUrl: options.installSource!.sourceUrl,
+                    pluginId: options.installSource!.pluginId,
+                    repo: options.installSource!.repo,
+                    version: options.installSource!.version,
+                    assetUrl: options.installSource!.assetUrl,
+                    checksum: install.checksum
+                }
+            } : {})
         }, options.enable === true)
 
         return await this.buildInstallResult({
@@ -1005,6 +1017,7 @@ export class HubPluginManager {
             name: record.manifest?.name,
             version: record.manifest?.version,
             description: record.manifest?.description,
+            display: record.manifest?.display,
             source: record.source,
             status: active && record.status === 'enabled' ? 'active' : record.status,
             enabled: record.enabled === true,

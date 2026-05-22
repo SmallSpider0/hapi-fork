@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import { PluginWebContributionsSchema } from './webDescriptors'
+import { PluginWebContributionsSchema, WebLocalizedTextSchema } from './webDescriptors'
 
 export const HAPI_PLUGIN_MANIFEST_FILE = 'hapi.plugin.json'
 export const HAPI_PLUGIN_API_VERSION = '0.1'
@@ -21,6 +21,17 @@ const ContributionIdSchema = z.string()
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must start with an alphanumeric character and contain only alphanumeric characters, dots, underscores, or dashes')
 
 const ContributionSupportStatusSchema = z.enum(['supported', 'unsupported', 'stub'])
+
+export const PluginLocalizedTextMetadataSchema = z.object({
+    name: WebLocalizedTextSchema.optional(),
+    description: WebLocalizedTextSchema.optional()
+}).strict()
+export type PluginLocalizedTextMetadata = z.infer<typeof PluginLocalizedTextMetadataSchema>
+
+export const PluginDisplayMetadataSchema = PluginLocalizedTextMetadataSchema.extend({
+    featureIntro: WebLocalizedTextSchema.optional()
+}).strict()
+export type PluginDisplayMetadata = z.infer<typeof PluginDisplayMetadataSchema>
 
 const RuntimeEntrySchema = z.object({
     entry: z.string().min(1)
@@ -50,13 +61,15 @@ const PluginInstallHintsSchema = z.object({
 
 const HubNotificationChannelContributionSchema = z.object({
     id: ContributionIdSchema,
-    displayName: z.string().min(1)
+    displayName: z.string().min(1),
+    display: PluginLocalizedTextMetadataSchema.optional()
 }).strict()
 
 export const HubMessageActionContributionSchema = z.object({
     id: ContributionIdSchema,
     displayName: z.string().min(1),
-    description: z.string().optional()
+    description: z.string().optional(),
+    display: PluginLocalizedTextMetadataSchema.optional()
 }).strict()
 export type HubMessageActionContributionDescriptor = z.infer<typeof HubMessageActionContributionSchema>
 
@@ -93,6 +106,7 @@ export const PluginCapabilitySchema = z.object({
     kind: PluginCapabilityKindSchema,
     displayName: z.string().min(1).optional(),
     description: z.string().optional(),
+    display: PluginLocalizedTextMetadataSchema.optional(),
     parts: z.object({
         web: PluginCapabilityPartSchema.optional(),
         hub: PluginCapabilityPartSchema.optional(),
@@ -111,6 +125,7 @@ const GenericContributionDescriptorSchema = z.object({
     id: ContributionIdSchema,
     displayName: z.string().min(1).optional(),
     description: z.string().optional(),
+    display: PluginLocalizedTextMetadataSchema.optional(),
     supportStatus: ContributionSupportStatusSchema.optional(),
     limitations: z.array(z.string().min(1)).max(20).optional()
 }).passthrough()
@@ -146,6 +161,7 @@ const PluginManifestLiteBaseSchema = z.object({
     version: SemverSchema,
     pluginApiVersion: z.string().min(1),
     description: z.string().optional(),
+    display: PluginDisplayMetadataSchema.optional(),
     capabilities: z.array(PluginCapabilitySchema).optional(),
     runtimes: z.object({
         hub: HubRuntimeSchema.optional(),

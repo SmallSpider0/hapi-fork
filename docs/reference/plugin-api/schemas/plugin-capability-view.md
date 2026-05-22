@@ -15,6 +15,7 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
 | `\\|k\\|i\\|n\\|d\\|` | yes | \\|`\\|c\\|h\\|a\\|t\\|.\\|c\\|o\\|m\\|p\\|o\\|s\\|e\\|r\\|.\\|m\\|e\\|s\\|s\\|a\\|g\\|e\\|A\\|c\\|t\\|i\\|o\\|n\\|`\\| \\||\\| \\|`\\|c\\|h\\|a\\|t\\|.\\|c\\|o\\|n\\|t\\|e\\|x\\|t\\|P\\|r\\|o\\|v\\|i\\|d\\|e\\|r\\|`\\| \\||\\| \\|`\\|n\\|o\\|t\\|i\\|f\\|i\\|c\\|a\\|t\\|i\\|o\\|n\\|.\\|c\\|h\\|a\\|n\\|n\\|e\\|l\\|`\\| \\||\\| \\|`\\|r\\|u\\|n\\|n\\|e\\|r\\|.\\|s\\|p\\|a\\|w\\|n\\|E\\|x\\|t\\|e\\|n\\|s\\|i\\|o\\|n\\|`\\| \\||\\| \\|`\\|a\\|g\\|e\\|n\\|t\\|.\\|a\\|d\\|a\\|p\\|t\\|e\\|r\\|`\\| \\||\\| \\|`\\|a\\|g\\|e\\|n\\|t\\|.\\|c\\|a\\|p\\|a\\|b\\|i\\|l\\|i\\|t\\|y\\|P\\|r\\|o\\|v\\|i\\|d\\|e\\|r\\|`\\| \\||\\| \\|`\\|s\\|e\\|t\\|t\\|i\\|n\\|g\\|s\\|.\\|p\\|a\\|n\\|e\\|l\\|`\\| \\||\\| \\|`\\|i\\|n\\|t\\|e\\|g\\|r\\|a\\|t\\|i\\|o\\|n\\|.\\|b\\|r\\|i\\|d\\|g\\|e\\|`\\| | \\|—\\| |
 | `\\|d\\|i\\|s\\|p\\|l\\|a\\|y\\|N\\|a\\|m\\|e\\|` | no | \\|s\\|t\\|r\\|i\\|n\\|g\\| | \\|—\\| |
 | `\\|d\\|e\\|s\\|c\\|r\\|i\\|p\\|t\\|i\\|o\\|n\\|` | no | \\|s\\|t\\|r\\|i\\|n\\|g\\| | \\|—\\| |
+| `\\|d\\|i\\|s\\|p\\|l\\|a\\|y\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|s\\|t\\|a\\|t\\|u\\|s\\|` | yes | \\|`\\|r\\|e\\|a\\|d\\|y\\|`\\| \\||\\| \\|`\\|p\\|a\\|r\\|t\\|i\\|a\\|l\\|`\\| \\||\\| \\|`\\|d\\|i\\|s\\|a\\|b\\|l\\|e\\|d\\|`\\| \\||\\| \\|`\\|m\\|i\\|s\\|s\\|i\\|n\\|g\\|-\\|t\\|a\\|r\\|g\\|e\\|t\\|`\\| \\||\\| \\|`\\|o\\|f\\|f\\|l\\|i\\|n\\|e\\|`\\| \\||\\| \\|`\\|f\\|a\\|i\\|l\\|e\\|d\\|`\\| \\||\\| \\|`\\|i\\|n\\|c\\|o\\|m\\|p\\|a\\|t\\|i\\|b\\|l\\|e\\|`\\| | \\|—\\| |
 | `\\|t\\|a\\|r\\|g\\|e\\|t\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|p\\|a\\|r\\|t\\|s\\|` | yes | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
@@ -60,6 +61,50 @@ JSON Schema: [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-v
         },
         "description": {
             "type": "string"
+        },
+        "display": {
+            "type": "object",
+            "properties": {
+                "name": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        {
+                            "type": "object",
+                            "propertyNames": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "additionalProperties": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        }
+                    ]
+                },
+                "description": {
+                    "anyOf": [
+                        {
+                            "type": "string",
+                            "minLength": 1
+                        },
+                        {
+                            "type": "object",
+                            "propertyNames": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "additionalProperties": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        }
+                    ]
+                }
+            },
+            "additionalProperties": false
         },
         "status": {
             "type": "string",

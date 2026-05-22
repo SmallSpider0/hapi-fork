@@ -1,13 +1,21 @@
 import { z } from 'zod'
 
 export const PluginInstallMetadataSchema = z.object({
-    sourceType: z.enum(['env', 'user-home', 'bundled', 'hub-local-path', 'runner-local-path', 'uploaded-package']),
+    sourceType: z.enum(['env', 'user-home', 'bundled', 'hub-local-path', 'runner-local-path', 'uploaded-package', 'marketplace']),
     sourcePath: z.string().min(1).optional(),
     checksum: z.string().min(1).optional(),
     packageFormat: z.enum(['tgz', 'zip']).optional(),
     version: z.string().min(1).optional(),
     installedAt: z.number().optional(),
-    updatedAt: z.number().optional()
+    updatedAt: z.number().optional(),
+    marketplace: z.object({
+        sourceUrl: z.string().min(1),
+        pluginId: z.string().min(1),
+        repo: z.string().min(1),
+        version: z.string().min(1),
+        assetUrl: z.string().min(1),
+        checksum: z.string().min(1)
+    }).strict().optional()
 }).strict()
 
 export type PluginInstallMetadata = z.infer<typeof PluginInstallMetadataSchema>

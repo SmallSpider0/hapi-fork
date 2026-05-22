@@ -121,6 +121,7 @@ function toLocalListItem(record: DiscoveredPluginRecord): PluginListItem {
         name: record.manifest?.name,
         version: record.manifest?.version,
         description: record.manifest?.description,
+        display: record.manifest?.display,
         source: record.source,
         status: record.status,
         enabled: record.enabled === true,

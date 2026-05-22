@@ -55,6 +55,50 @@ JSON Schema: [PluginCapabilitiesResponse](/docs/plugin-api/schemas/plugin-capabi
                     "description": {
                         "type": "string"
                     },
+                    "display": {
+                        "type": "object",
+                        "properties": {
+                            "name": {
+                                "anyOf": [
+                                    {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    {
+                                        "type": "object",
+                                        "propertyNames": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "additionalProperties": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
+                                    }
+                                ]
+                            },
+                            "description": {
+                                "anyOf": [
+                                    {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    {
+                                        "type": "object",
+                                        "propertyNames": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "additionalProperties": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
+                                    }
+                                ]
+                            }
+                        },
+                        "additionalProperties": false
+                    },
                     "status": {
                         "type": "string",
                         "enum": [

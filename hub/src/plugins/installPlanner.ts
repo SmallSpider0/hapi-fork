@@ -303,7 +303,8 @@ export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): 
             id: options.manifest.id,
             name: options.manifest.name,
             version: options.manifest.version,
-            ...(options.manifest.description ? { description: options.manifest.description } : {})
+            ...(options.manifest.description ? { description: options.manifest.description } : {}),
+            ...(options.manifest.display ? { display: options.manifest.display } : {})
         },
         source: {
             type: 'uploaded-package',

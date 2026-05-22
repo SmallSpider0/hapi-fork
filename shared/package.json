@@ -20,7 +20,8 @@
         "./plugins/bundledCore": "./src/plugins/bundledCore.ts",
         "./plugins/bundledExamples": "./src/plugins/bundledExamples.ts",
         "./plugins/foundation": "./src/plugins/foundation.ts",
-        "./plugins/admin": "./src/plugins/admin.ts"
+        "./plugins/admin": "./src/plugins/admin.ts",
+        "./plugins/marketplace": "./src/plugins/marketplace.ts"
     },
     "sideEffects": false,
     "dependencies": {
