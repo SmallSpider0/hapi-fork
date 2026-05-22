@@ -23,6 +23,7 @@ import {
 } from '@hapi/protocol/plugins/foundation'
 import { assertPluginConfigSafeForPersistence, PluginTargetScopeSchema, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
+import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
 
 function hasFlag(args: string[], flag: string): boolean {
@@ -61,16 +62,22 @@ function pluginId(record: DiscoveredPluginRecord): string {
 
 async function loadLocalRecords(): Promise<{ records: DiscoveredPluginRecord[]; state: PluginStateFile; parseError?: string }> {
     const stateResult = await readPluginState(getPluginStateFile(configuration.happyHomeDir))
-    const bundledPluginDirs = process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
-        ? undefined
-        : [await prepareBundledExamplePlugins(configuration.happyHomeDir)]
+    const bundledPluginDirs = [
+        await prepareBundledCorePlugins(configuration.happyHomeDir),
+        ...(process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
+            ? []
+            : [await prepareBundledExamplePlugins(configuration.happyHomeDir)])
+    ]
     const discovered = await discoverPlugins({
         hapiHome: configuration.happyHomeDir,
         envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
         bundledPluginDirs
     })
     return {
-        records: applyPluginState(discovered, stateResult.state, stateResult.failClosed),
+        records: applyPluginState(discovered, stateResult.state, {
+            failClosed: stateResult.failClosed,
+            defaultEnabledPluginIds: defaultEnabledBundledPluginIds
+        }),
         state: stateResult.state,
         parseError: stateResult.parseError
     }
@@ -496,7 +503,7 @@ async function runConfig(args: string[]): Promise<void> {
     if (!record) throw new Error(`Plugin not found or invalid: ${id}`)
     assertLocalRecordCanBeEnabled(record, id)
     const state = await readWritableState()
-    const entry = state.enabled[record.manifest.id] ?? { enabled: false }
+    const entry = state.enabled[record.manifest.id] ?? { enabled: record.enabled === true }
     if (sub === 'get') {
         const payload = { id: record.manifest.id, config: sanitizePluginConfigForView(entry.config, record.manifest.permissions?.secrets ?? []) ?? {} }
         console.log(hasFlag(args, '--json') ? JSON.stringify(payload, null, 2) : JSON.stringify(payload.config, null, 2))

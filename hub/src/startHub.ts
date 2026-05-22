@@ -222,6 +222,7 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         hapiHome: config.dataDir,
         publicUrl: config.publicUrl,
         env: process.env,
+        includeBundledCore: true,
         includeBundledExamples: true
     })
     await pluginManager.start()

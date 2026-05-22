@@ -113,6 +113,21 @@ describe('POST /api/sessions/:id/messages — #2 scheduledAt upper bound', () =>
         expect(response.status).toBe(200)
         expect(sentMessages).toHaveLength(1)
     })
+
+    it('accepts delivery.notBefore and forwards it alongside legacy scheduledAt compatibility', async () => {
+        const { app, sentMessages } = createApp({})
+
+        const notBefore = Date.now() + 60_000
+        const response = await app.request('/api/sessions/session-1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: 'hello', localId: 'local-delivery', delivery: { notBefore } })
+        })
+
+        expect(response.status).toBe(200)
+        expect(sentMessages).toHaveLength(1)
+        expect(sentMessages[0]?.payload).toMatchObject({ delivery: { notBefore } })
+    })
 })
 
 // ---------------------------------------------------------------------------

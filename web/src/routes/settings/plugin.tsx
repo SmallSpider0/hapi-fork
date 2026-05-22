@@ -264,6 +264,10 @@ function ContributionsList(props: { plugin: PluginDetail; t: (key: string, param
         ...(plugin.contributions.web?.badges ?? []).map((entry) => ({
             key: `web-badge-${String((entry as { id?: unknown }).id)}`,
             label: `${t('settings.plugins.contribution.webBadge')} · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
+        })),
+        ...(plugin.contributions.web?.composerActions ?? []).map((entry) => ({
+            key: `web-composer-action-${String((entry as { id?: unknown }).id)}`,
+            label: `${t('settings.plugins.contribution.webComposerAction')} · ${String((entry as { label?: unknown }).label ?? (entry as { id?: unknown }).id ?? t('settings.plugins.unknown'))}`
         }))
     ]
 

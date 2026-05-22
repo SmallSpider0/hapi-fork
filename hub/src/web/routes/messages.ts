@@ -76,6 +76,7 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             localId: parsed.data.localId,
             attachments: parsed.data.attachments,
             sentFrom: 'webapp',
+            delivery: parsed.data.delivery,
             scheduledAt: parsed.data.scheduledAt
         })
         return c.json({ ok: true })

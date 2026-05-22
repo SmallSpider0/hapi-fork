@@ -68,6 +68,11 @@ export interface PluginResolvedConfig {
     source: 'scoped' | 'legacy-default' | 'empty'
 }
 
+export interface ApplyPluginStateOptions {
+    failClosed?: boolean
+    defaultEnabledPluginIds?: Iterable<string>
+}
+
 export type PluginDirectoryInstallAction = 'installed' | 'overwritten'
 export type PluginPackageFormat = 'tgz' | 'zip'
 
@@ -456,8 +461,14 @@ export async function discoverPlugins(options: DiscoverPluginsOptions): Promise<
 export function applyPluginState(
     records: DiscoveredPluginRecord[],
     state: PluginStateFile,
-    failClosed = false
+    optionsOrFailClosed: boolean | ApplyPluginStateOptions = false
 ): DiscoveredPluginRecord[] {
+    const options = typeof optionsOrFailClosed === 'boolean'
+        ? { failClosed: optionsOrFailClosed }
+        : optionsOrFailClosed
+    const failClosed = options.failClosed === true
+    const defaultEnabledPluginIds = new Set(options.defaultEnabledPluginIds ?? [])
+
     return records.map((record) => {
         if (!record.manifest || record.status !== 'validated') {
             return { ...record, enabled: false }
@@ -468,7 +479,7 @@ export function applyPluginState(
         }
 
         const stateEntry = state.enabled[record.manifest.id]
-        const enabled = stateEntry?.enabled === true
+        const enabled = stateEntry?.enabled ?? defaultEnabledPluginIds.has(record.manifest.id)
         return {
             ...record,
             status: enabled ? 'enabled' : 'disabled',

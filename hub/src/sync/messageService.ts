@@ -349,9 +349,14 @@ export class MessageService {
             localId?: string | null
             attachments?: AttachmentMetadata[]
             sentFrom?: 'telegram-bot' | 'webapp'
+            delivery?: {
+                notBefore?: number | null
+            }
             scheduledAt?: number | null
         }
     ): Promise<void> {
+        const deliveryNotBefore = payload.delivery?.notBefore ?? payload.scheduledAt ?? null
+
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
         // internal callers).  Attachment paths live under the CLI session's
         // upload directory which `cleanupUploadDir` purges on session end; a
@@ -360,7 +365,7 @@ export class MessageService {
         // combination at the Zod layer, but enforcing it here keeps the rule in
         // one structural place — same pattern as `addMessage`'s scheduledAt +
         // !localId throw.
-        if (payload.scheduledAt != null && (payload.attachments?.length ?? 0) > 0) {
+        if (deliveryNotBefore != null && (payload.attachments?.length ?? 0) > 0) {
             throw new Error('sendMessage: scheduled messages with attachments are not supported')
         }
 
@@ -382,7 +387,7 @@ export class MessageService {
             sessionId,
             content,
             payload.localId ?? undefined,
-            payload.scheduledAt ?? null
+            deliveryNotBefore
         )
         this.onSessionActivity?.(sessionId, msg.createdAt)
 

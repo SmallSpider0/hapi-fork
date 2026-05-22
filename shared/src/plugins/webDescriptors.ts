@@ -150,11 +150,30 @@ export const WebBadgeDescriptorSchema = z.object({
 }).strict()
 export type WebBadgeDescriptor = z.infer<typeof WebBadgeDescriptorSchema>
 
+export const WebDeliveryDelayPresetSchema = z.object({
+    id: DescriptorIdSchema.optional(),
+    label: WebLocalizedTextSchema,
+    delayMs: z.number().int().positive().max(7 * 24 * 60 * 60 * 1000)
+}).strict()
+export type WebDeliveryDelayPreset = z.infer<typeof WebDeliveryDelayPresetSchema>
+
+export const WebComposerActionDescriptorSchema = z.object({
+    id: DescriptorIdSchema,
+    kind: z.literal('deliveryNotBefore'),
+    label: WebLocalizedTextSchema,
+    description: WebLocalizedTextSchema.optional(),
+    icon: z.enum(['clock']).default('clock'),
+    maxDelayMs: z.number().int().positive().max(7 * 24 * 60 * 60 * 1000).default(7 * 24 * 60 * 60 * 1000),
+    presets: z.array(WebDeliveryDelayPresetSchema).min(1).max(12)
+}).strict()
+export type WebComposerActionDescriptor = z.infer<typeof WebComposerActionDescriptorSchema>
+
 export const PluginWebContributionsSchema = z.object({
     settingsPanels: z.array(WebSettingsPanelDescriptorSchema).optional(),
     newSessionFields: z.array(WebNewSessionFieldDescriptorSchema).optional(),
     actions: z.array(WebActionDescriptorSchema).optional(),
-    badges: z.array(WebBadgeDescriptorSchema).optional()
+    badges: z.array(WebBadgeDescriptorSchema).optional(),
+    composerActions: z.array(WebComposerActionDescriptorSchema).optional()
 }).strict()
 export type PluginWebContributions = z.infer<typeof PluginWebContributionsSchema>
 

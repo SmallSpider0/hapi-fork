@@ -542,6 +542,7 @@ export default {
   'settings.plugins.contribution.webNewSession': 'Web 新建会话',
   'settings.plugins.contribution.webAction': 'Web 操作',
   'settings.plugins.contribution.webBadge': 'Web 标记',
+  'settings.plugins.contribution.webComposerAction': 'Web 输入框操作',
   'settings.plugins.descriptor.required': '请填写 {label}。',
   'settings.plugins.descriptor.secretPlaceholder': 'Secret value 由目标 runtime 提供',
   'settings.plugins.descriptor.select': '请选择…',

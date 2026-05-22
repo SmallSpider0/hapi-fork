@@ -12,6 +12,7 @@ JSON Schema: [PluginWebContributions](/docs/plugin-api/schemas/plugin-web-contri
 | `\\|n\\|e\\|w\\|S\\|e\\|s\\|s\\|i\\|o\\|n\\|F\\|i\\|e\\|l\\|d\\|s\\|` | no | \\|a\\|r\\|r\\|a\\|y\\|&lt;\\|o\\|b\\|j\\|e\\|c\\|t\\|&gt;\\| | \\|—\\| |
 | `\\|a\\|c\\|t\\|i\\|o\\|n\\|s\\|` | no | \\|a\\|r\\|r\\|a\\|y\\|&lt;\\|o\\|b\\|j\\|e\\|c\\|t\\|&gt;\\| | \\|—\\| |
 | `\\|b\\|a\\|d\\|g\\|e\\|s\\|` | no | \\|a\\|r\\|r\\|a\\|y\\|&lt;\\|o\\|b\\|j\\|e\\|c\\|t\\|&gt;\\| | \\|—\\| |
+| `\\|c\\|o\\|m\\|p\\|o\\|s\\|e\\|r\\|A\\|c\\|t\\|i\\|o\\|n\\|s\\|` | no | \\|a\\|r\\|r\\|a\\|y\\|&lt;\\|o\\|b\\|j\\|e\\|c\\|t\\|&gt;\\| | \\|—\\| |
 
 ## JSON Schema
 
@@ -855,6 +856,129 @@ JSON Schema: [PluginWebContributions](/docs/plugin-api/schemas/plugin-web-contri
                 "required": [
                     "id",
                     "label"
+                ],
+                "additionalProperties": false
+            }
+        },
+        "composerActions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "const": "deliveryNotBefore"
+                    },
+                    "label": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            {
+                                "type": "object",
+                                "propertyNames": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "additionalProperties": {
+                                    "type": "string",
+                                    "minLength": 1
+                                }
+                            }
+                        ]
+                    },
+                    "description": {
+                        "anyOf": [
+                            {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            {
+                                "type": "object",
+                                "propertyNames": {
+                                    "type": "string",
+                                    "minLength": 1
+                                },
+                                "additionalProperties": {
+                                    "type": "string",
+                                    "minLength": 1
+                                }
+                            }
+                        ]
+                    },
+                    "icon": {
+                        "default": "clock",
+                        "type": "string",
+                        "enum": [
+                            "clock"
+                        ]
+                    },
+                    "maxDelayMs": {
+                        "default": 604800000,
+                        "type": "integer",
+                        "exclusiveMinimum": 0,
+                        "maximum": 604800000
+                    },
+                    "presets": {
+                        "minItems": 1,
+                        "maxItems": 12,
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id": {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 128,
+                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                },
+                                "label": {
+                                    "anyOf": [
+                                        {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        {
+                                            "type": "object",
+                                            "propertyNames": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            },
+                                            "additionalProperties": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        }
+                                    ]
+                                },
+                                "delayMs": {
+                                    "type": "integer",
+                                    "exclusiveMinimum": 0,
+                                    "maximum": 604800000
+                                }
+                            },
+                            "required": [
+                                "label",
+                                "delayMs"
+                            ],
+                            "additionalProperties": false
+                        }
+                    }
+                },
+                "required": [
+                    "id",
+                    "kind",
+                    "label",
+                    "icon",
+                    "maxDelayMs",
+                    "presets"
                 ],
                 "additionalProperties": false
             }

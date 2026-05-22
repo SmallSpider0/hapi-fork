@@ -21,6 +21,7 @@ import { isQueuedForInvocation, mergeMessages } from '@/lib/messages'
 import { HappyComposer } from '@/components/AssistantChat/HappyComposer'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
 import { resolvePendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
+import { collectDeliveryNotBeforeComposerActions } from '@/components/AssistantChat/composerActions'
 import { HappyThread } from '@/components/AssistantChat/HappyThread'
 import { QueuedMessagesBar } from '@/components/AssistantChat/QueuedMessagesBar'
 import { useHappyRuntime } from '@/lib/assistant-runtime'
@@ -32,6 +33,7 @@ import { usePlatform } from '@/hooks/usePlatform'
 import { useSessionActions } from '@/hooks/mutations/useSessionActions'
 import { useCodexModels } from '@/hooks/queries/useCodexModels'
 import { useOpencodeModels } from '@/hooks/queries/useOpencodeModels'
+import { usePlugins } from '@/hooks/queries/usePlugins'
 import { useVoiceOptional } from '@/lib/voice-context'
 import { RealtimeVoiceSession, registerSessionStore, registerVoiceHooksStore, voiceHooks } from '@/realtime'
 import { isRemoteTerminalSupported } from '@/utils/terminalSupport'
@@ -121,7 +123,7 @@ export function SessionChat(props: {
     availableSlashCommands?: readonly SlashCommand[]
 }) {
     const { haptic } = usePlatform()
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
     const navigate = useNavigate()
     const sessionInactive = !props.session.active
     const terminalSupported = isRemoteTerminalSupported(props.session.metadata)
@@ -167,6 +169,16 @@ export function SessionChat(props: {
             label: opencodeModel.name ?? opencodeModel.modelId
         }))
     }, [agentFlavor, opencodeModelsState.availableModels])
+    const pluginState = usePlugins(props.api)
+    const composerWebContributions = useMemo(
+        () => pluginState.targets.flatMap((target) => target.webContributions ?? []),
+        [pluginState.targets]
+    )
+    const deliveryNotBeforeActions = useMemo(
+        () => collectDeliveryNotBeforeComposerActions(composerWebContributions, { locale }),
+        [composerWebContributions, locale]
+    )
+    const deliveryNotBeforeAction = deliveryNotBeforeActions[0] ?? null
     const {
         abortSession,
         switchSession,
@@ -595,6 +607,7 @@ export function SessionChat(props: {
                         pendingSchedule={pendingSchedule}
                         onSchedule={setPendingSchedule}
                         onClearSchedule={() => setPendingSchedule(null)}
+                        deliveryNotBeforeAction={deliveryNotBeforeAction}
                         permissionMode={props.session.permissionMode}
                         collaborationMode={codexCollaborationModeSupported ? props.session.collaborationMode : undefined}
                         threadGoal={reduced.latestGoal}

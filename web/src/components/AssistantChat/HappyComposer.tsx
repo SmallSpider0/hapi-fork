@@ -29,6 +29,7 @@ import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
+import type { DeliveryNotBeforeComposerAction } from '@/components/AssistantChat/composerActions'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { useTranslation } from '@/lib/use-translation'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
@@ -81,6 +82,7 @@ export function HappyComposer(props: {
     pendingSchedule?: PendingSchedule | null
     onSchedule?: (pending: PendingSchedule) => void
     onClearSchedule?: () => void
+    deliveryNotBeforeAction?: DeliveryNotBeforeComposerAction | null
 }) {
     const { t } = useTranslation()
     const {
@@ -119,7 +121,8 @@ export function HappyComposer(props: {
         onVoiceMicToggle,
         pendingSchedule: pendingScheduleProp,
         onSchedule: onScheduleProp,
-        onClearSchedule: onClearScheduleProp
+        onClearSchedule: onClearScheduleProp,
+        deliveryNotBeforeAction
     } = props
 
     // Use ?? so missing values fall back to default (destructuring defaults only handle undefined)
@@ -860,6 +863,7 @@ export function HappyComposer(props: {
                             pendingSchedule={pendingSchedule}
                             onSchedule={setPendingSchedule}
                             onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}
+                            deliveryNotBeforeAction={deliveryNotBeforeAction}
                             hasAttachments={hasAttachments}
                         />
                     </div>

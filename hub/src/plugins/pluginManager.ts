@@ -16,7 +16,8 @@ import type {
     PluginLocalDirectoryListResponse,
     PluginReloadItem,
     PluginReloadResult,
-    PluginTargetSummary
+    PluginTargetSummary,
+    PluginWebContributionView
 } from '@hapi/protocol/plugins'
 import {
     applyPluginState,
@@ -33,6 +34,7 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, hubPluginConfigScope, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
@@ -48,6 +50,7 @@ export interface HubPluginManagerOptions {
     env?: NodeJS.ProcessEnv
     watch?: boolean
     watchDebounceMs?: number
+    includeBundledCore?: boolean
     includeBundledExamples?: boolean
 }
 
@@ -219,6 +222,17 @@ export class HubPluginManager {
         return record ? this.toDetail(record) : null
     }
 
+    collectWebContributions(): PluginWebContributionView[] {
+        return this.records
+            .filter((record) => record.enabled === true && record.manifest?.contributions?.web)
+            .map((record) => ({
+                pluginId: record.manifest!.id,
+                pluginName: record.manifest!.name,
+                target: this.targetSummary().scope,
+                contributions: record.manifest!.contributions!.web!
+            }))
+    }
+
     getDiagnostics(): PluginDiagnosticView[] {
         const recordDiagnostics = this.records.flatMap((record) => {
             const id = pluginDisplayId(record)
@@ -280,7 +294,10 @@ export class HubPluginManager {
         assertDiscoveredRecordCanBeEnabled(record, id)
         assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
         const previous = state.enabled[record.manifest.id]
-        state.enabled[record.manifest.id] = setPluginScopedConfig(previous, hubPluginConfigScope(record.manifest.id), config)
+        const nextEntry = setPluginScopedConfig(previous, hubPluginConfigScope(record.manifest.id), config)
+        state.enabled[record.manifest.id] = previous === undefined && this.defaultEnabledPluginIds().includes(record.manifest.id)
+            ? { ...nextEntry, enabled: true }
+            : nextEntry
         await writePluginState(getPluginStateFile(this.options.hapiHome), state)
         return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
     }
@@ -527,7 +544,10 @@ export class HubPluginManager {
         const managerDiagnostics: PluginDiagnosticView[] = []
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
-        const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, stateResult.failClosed), stateResult.state)
+        const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
+            failClosed: stateResult.failClosed,
+            defaultEnabledPluginIds: this.defaultEnabledPluginIds()
+        }), stateResult.state)
 
         if (stateResult.parseError) {
             managerDiagnostics.push({
@@ -759,14 +779,19 @@ export class HubPluginManager {
 
     private async discoverPluginRecords(): Promise<DiscoveredPluginRecord[]> {
         const bundledDisabled = (this.options.env ?? process.env).HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
-        const bundledPluginDirs = this.options.includeBundledExamples && !bundledDisabled
-            ? [await prepareBundledExamplePlugins(this.options.hapiHome)]
-            : undefined
+        const bundledPluginDirs = [
+            ...(this.options.includeBundledCore === true ? [await prepareBundledCorePlugins(this.options.hapiHome)] : []),
+            ...(this.options.includeBundledExamples && !bundledDisabled ? [await prepareBundledExamplePlugins(this.options.hapiHome)] : [])
+        ]
         return await discoverPlugins({
             hapiHome: this.options.hapiHome,
             envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS,
             bundledPluginDirs
         })
+    }
+
+    private defaultEnabledPluginIds(): string[] {
+        return this.options.includeBundledCore === true ? defaultEnabledBundledPluginIds : []
     }
 
     private async readWritableState(): Promise<PluginStateFile> {
