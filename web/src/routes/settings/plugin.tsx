@@ -82,6 +82,20 @@ function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }
     return <Badge variant={props.variant ?? 'default'} className="gap-1 font-medium">{props.icon}{props.label}</Badge>
 }
 
+function contributionName(entry: unknown): string {
+    if (!entry || typeof entry !== 'object') return 'unknown'
+    const descriptor = entry as { id?: unknown; displayName?: unknown }
+    if (typeof descriptor.displayName === 'string') return descriptor.displayName
+    if (typeof descriptor.id === 'string') return descriptor.id
+    return 'unknown'
+}
+
+function contributionSupportSuffix(entry: unknown): string {
+    if (!entry || typeof entry !== 'object') return ''
+    const supportStatus = (entry as { supportStatus?: unknown }).supportStatus
+    return typeof supportStatus === 'string' ? ` · ${supportStatus}` : ''
+}
+
 function formatConfig(value: unknown): string {
     return JSON.stringify(value ?? {}, null, 2)
 }
@@ -224,6 +238,21 @@ function ContributionsList(props: { plugin: PluginDetail; t: (key: string, param
         ...(plugin.contributions.agent?.capabilityProviders ?? []).map((entry) => ({
             key: `agent-capability-${String((entry as { id?: unknown }).id)}`,
             label: `Agent capability · ${String((entry as { displayName?: unknown }).displayName ?? (entry as { id?: unknown }).id ?? 'unknown')}`
+        })),
+        ...(plugin.contributions.voice?.providers ?? []).map((entry) => ({
+            key: `voice-provider-${String((entry as { id?: unknown }).id)}`,
+            label: `Voice provider · ${contributionName(entry)}${contributionSupportSuffix(entry)}`,
+            variant: 'warning' as BadgeVariant
+        })),
+        ...(plugin.contributions.deployment?.packs ?? []).map((entry) => ({
+            key: `deployment-pack-${String((entry as { id?: unknown }).id)}`,
+            label: `Deployment pack · ${contributionName(entry)}${contributionSupportSuffix(entry)}`,
+            variant: 'warning' as BadgeVariant
+        })),
+        ...(plugin.contributions.integration?.protocolBridges ?? []).map((entry) => ({
+            key: `integration-protocol-${String((entry as { id?: unknown }).id)}`,
+            label: `Protocol bridge · ${contributionName(entry)}${contributionSupportSuffix(entry)}`,
+            variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.web?.settingsPanels ?? []).map((entry) => ({
             key: `web-settings-${String((entry as { id?: unknown }).id)}`,

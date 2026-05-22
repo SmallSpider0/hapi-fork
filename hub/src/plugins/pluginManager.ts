@@ -33,6 +33,7 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, hubPluginConfigScope, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
@@ -47,6 +48,7 @@ export interface HubPluginManagerOptions {
     env?: NodeJS.ProcessEnv
     watch?: boolean
     watchDebounceMs?: number
+    includeBundledExamples?: boolean
 }
 
 type ActivePluginInstance = {
@@ -524,10 +526,7 @@ export class HubPluginManager {
         const items: PluginReloadItem[] = []
         const managerDiagnostics: PluginDiagnosticView[] = []
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
-        const discovered = await discoverPlugins({
-            hapiHome: this.options.hapiHome,
-            envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS
-        })
+        const discovered = await this.discoverPluginRecords()
         const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, stateResult.failClosed), stateResult.state)
 
         if (stateResult.parseError) {
@@ -754,11 +753,20 @@ export class HubPluginManager {
     }
 
     private async findDiscoveredRecord(id: string): Promise<DiscoveredPluginRecord | null> {
-        const discovered = await discoverPlugins({
-            hapiHome: this.options.hapiHome,
-            envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS
-        })
+        const discovered = await this.discoverPluginRecords()
         return discovered.find((record) => pluginDisplayId(record) === id || record.manifest?.id === id) ?? null
+    }
+
+    private async discoverPluginRecords(): Promise<DiscoveredPluginRecord[]> {
+        const bundledDisabled = (this.options.env ?? process.env).HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
+        const bundledPluginDirs = this.options.includeBundledExamples && !bundledDisabled
+            ? [await prepareBundledExamplePlugins(this.options.hapiHome)]
+            : undefined
+        return await discoverPlugins({
+            hapiHome: this.options.hapiHome,
+            envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS,
+            bundledPluginDirs
+        })
     }
 
     private async readWritableState(): Promise<PluginStateFile> {
@@ -847,6 +855,9 @@ export class HubPluginManager {
                 notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
                 ...(record.manifest?.contributions?.runner ? { runner: record.manifest.contributions.runner } : {}),
                 ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
+                ...(record.manifest?.contributions?.voice ? { voice: record.manifest.contributions.voice } : {}),
+                ...(record.manifest?.contributions?.deployment ? { deployment: record.manifest.contributions.deployment } : {}),
+                ...(record.manifest?.contributions?.integration ? { integration: record.manifest.contributions.integration } : {}),
                 ...(record.manifest?.contributions?.web ? { web: record.manifest.contributions.web } : {})
             },
             runtimeEntryPaths: record.runtimeEntryPaths

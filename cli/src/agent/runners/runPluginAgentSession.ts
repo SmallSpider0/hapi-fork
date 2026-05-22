@@ -19,7 +19,8 @@ export async function runPluginAgentSession(opts: {
         hapiHome: configuration.happyHomeDir,
         machineId,
         envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
-        env: process.env
+        env: process.env,
+        includeBundledExamples: true
     })
 
     await manager.start()

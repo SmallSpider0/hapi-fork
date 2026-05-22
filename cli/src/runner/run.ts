@@ -165,7 +165,8 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       hapiHome: configuration.happyHomeDir,
       machineId,
       envPluginDirs: process.env.HAPI_PLUGIN_DIRS,
-      env: process.env
+      env: process.env,
+      includeBundledExamples: true
     });
     await runnerPluginManager.start();
 
@@ -244,7 +245,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
     const spawnSession = async (options: SpawnSessionOptions): Promise<SpawnSessionResult> => {
       logger.debugLargeJson('[RUNNER RUN] Spawning session', options);
 
-      const { directory, sessionId, machineId, approvedNewDirectoryCreation = true } = options;
+      const { directory, sessionId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
       const yolo = options.yolo === true;
       const sessionType = options.sessionType ?? 'simple';
@@ -445,21 +446,13 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
-        const pluginSpawnContext = RunnerSpawnContextSchema.parse({
-          machineId,
+        const pluginSpawnContext = buildRunnerPluginSpawnContext({
+          runnerMachineId: machineId,
+          options,
           agent,
-          directory,
           cwd: extensionPlan.cwd,
-          args: extensionPlan.displayArgs,
-          envKeys: Object.keys(extensionPlan.env).sort(),
-          ...(options.sessionType ? { sessionType: options.sessionType } : {}),
-          ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
-          ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
-          ...(options.model ? { model: options.model } : {}),
-          ...(options.effort ? { effort: options.effort } : {}),
-          ...(options.modelReasoningEffort ? { modelReasoningEffort: options.modelReasoningEffort } : {}),
-          ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
-          ...(options.yolo !== undefined ? { yolo: options.yolo } : {})
+          displayArgs: extensionPlan.displayArgs,
+          env: extensionPlan.env
         });
 
         // sessionId reserved for future use
@@ -1045,4 +1038,30 @@ export function buildCliArgs(
     args.push('--yolo');
   }
   return args;
+}
+
+export function buildRunnerPluginSpawnContext(args: {
+  runnerMachineId: string
+  options: SpawnSessionOptions
+  agent: string
+  cwd: string
+  displayArgs: string[]
+  env: Record<string, string | undefined>
+}) {
+  return RunnerSpawnContextSchema.parse({
+    machineId: args.runnerMachineId,
+    agent: args.agent,
+    directory: args.options.directory,
+    cwd: args.cwd,
+    args: args.displayArgs,
+    envKeys: Object.keys(args.env).filter((key) => typeof args.env[key] === 'string').sort(),
+    ...(args.options.sessionType ? { sessionType: args.options.sessionType } : {}),
+    ...(args.options.worktreeName ? { worktreeName: args.options.worktreeName } : {}),
+    ...(args.options.resumeSessionId ? { resumeSessionId: args.options.resumeSessionId } : {}),
+    ...(args.options.model ? { model: args.options.model } : {}),
+    ...(args.options.effort ? { effort: args.options.effort } : {}),
+    ...(args.options.modelReasoningEffort ? { modelReasoningEffort: args.options.modelReasoningEffort } : {}),
+    ...(args.options.permissionMode ? { permissionMode: args.options.permissionMode } : {}),
+    ...(args.options.yolo !== undefined ? { yolo: args.options.yolo } : {})
+  });
 }

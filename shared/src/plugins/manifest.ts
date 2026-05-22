@@ -20,6 +20,8 @@ const ContributionIdSchema = z.string()
     .max(128)
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must start with an alphanumeric character and contain only alphanumeric characters, dots, underscores, or dashes')
 
+const ContributionSupportStatusSchema = z.enum(['supported', 'unsupported', 'stub'])
+
 const RuntimeEntrySchema = z.object({
     entry: z.string().min(1)
 }).strict()
@@ -35,7 +37,9 @@ const HubNotificationChannelContributionSchema = z.object({
 const GenericContributionDescriptorSchema = z.object({
     id: ContributionIdSchema,
     displayName: z.string().min(1).optional(),
-    description: z.string().optional()
+    description: z.string().optional(),
+    supportStatus: ContributionSupportStatusSchema.optional(),
+    limitations: z.array(z.string().min(1)).max(20).optional()
 }).passthrough()
 
 const RunnerContributionSchema = z.object({
@@ -47,6 +51,18 @@ const RunnerContributionSchema = z.object({
 const AgentContributionSchema = z.object({
     adapters: z.array(GenericContributionDescriptorSchema).optional(),
     capabilityProviders: z.array(GenericContributionDescriptorSchema).optional()
+}).strict()
+
+const VoiceContributionSchema = z.object({
+    providers: z.array(GenericContributionDescriptorSchema).optional()
+}).strict()
+
+const DeploymentContributionSchema = z.object({
+    packs: z.array(GenericContributionDescriptorSchema).optional()
+}).strict()
+
+const IntegrationContributionSchema = z.object({
+    protocolBridges: z.array(GenericContributionDescriptorSchema).optional()
 }).strict()
 
 const WebContributionSchema = PluginWebContributionsSchema
@@ -67,6 +83,9 @@ const PluginManifestLiteBaseSchema = z.object({
         }).strict().optional(),
         runner: RunnerContributionSchema.optional(),
         agent: AgentContributionSchema.optional(),
+        voice: VoiceContributionSchema.optional(),
+        deployment: DeploymentContributionSchema.optional(),
+        integration: IntegrationContributionSchema.optional(),
         web: WebContributionSchema.optional()
     }).strict().optional(),
     config: z.object({

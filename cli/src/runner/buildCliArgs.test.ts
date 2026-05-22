@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { buildCliArgs } from './run'
+import { buildCliArgs, buildRunnerPluginSpawnContext } from './run'
 
 describe('buildCliArgs', () => {
     it('adds --permission-mode for valid permission mode', () => {
@@ -89,5 +89,46 @@ describe('buildCliArgs', () => {
             expect(args).toContain('--permission-mode')
             expect(args).toContain(mode)
         }
+    })
+
+    it('uses the runner identity for plugin spawn context when the request omits machineId', () => {
+        const context = buildRunnerPluginSpawnContext({
+            runnerMachineId: 'runner-1',
+            options: {
+                directory: '/repo',
+                agent: 'codex',
+                model: 'gpt-5.5'
+            },
+            agent: 'codex',
+            cwd: '/repo',
+            displayArgs: ['codex', '--model', 'gpt-5.5'],
+            env: { PATH: '/usr/bin', EMPTY: undefined }
+        })
+
+        expect(context).toMatchObject({
+            machineId: 'runner-1',
+            agent: 'codex',
+            directory: '/repo',
+            cwd: '/repo',
+            args: ['codex', '--model', 'gpt-5.5'],
+            envKeys: ['PATH'],
+            model: 'gpt-5.5'
+        })
+    })
+
+    it('does not trust machineId from spawn request options for plugin context', () => {
+        const context = buildRunnerPluginSpawnContext({
+            runnerMachineId: 'runner-1',
+            options: {
+                machineId: 'spoofed-runner',
+                directory: '/repo'
+            },
+            agent: 'claude',
+            cwd: '/repo',
+            displayArgs: ['claude'],
+            env: {}
+        })
+
+        expect(context.machineId).toBe('runner-1')
     })
 })

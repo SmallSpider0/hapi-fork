@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, readFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, rmSync, mkdirSync, writeFileSync, symlinkSync, readFileSync, statSync } from 'node:fs'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { tmpdir } from 'node:os'
@@ -15,6 +15,7 @@ import {
     RunnerEnvironmentProposalSchema,
     RunnerSpawnHookProposalSchema
 } from '@hapi/protocol/plugins'
+import { bundledExamplePlugins, getBundledExamplePluginsRoot, prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { SpawnSessionRequestSchema } from '@hapi/protocol/apiTypes'
 import {
     discoverPlugins,
@@ -174,6 +175,91 @@ describe('plugin foundation cold path', () => {
         const records = await discoverPlugins({ hapiHome })
 
         expect(records.map((record) => record.manifest?.id)).toEqual(['com.example.child'])
+    })
+
+    it('prepares and discovers bundled example plugins after user plugins', async () => {
+        const hapiHome = join(testDir, 'hapi-home')
+        const bundledRoot = await prepareBundledExamplePlugins(hapiHome)
+        const records = await discoverPlugins({ hapiHome, bundledPluginDirs: [bundledRoot] })
+
+        expect(records).toHaveLength(bundledExamplePlugins.length)
+        expect(records.map((record) => record.source)).toEqual(records.map(() => 'bundled'))
+        expect(records.map((record) => record.manifest?.id).sort()).toEqual(bundledExamplePlugins.map((plugin) => plugin.manifest.id).sort())
+        expect(records.every((record) => record.status === 'validated')).toBe(true)
+    })
+
+    it('prepares bundled example plugins idempotently without rewriting unchanged files', async () => {
+        const hapiHome = join(testDir, 'hapi-home')
+        const bundledRoot = await prepareBundledExamplePlugins(hapiHome)
+        const manifestPath = join(bundledRoot, 'com.hapi.examples.notification-logger', 'hapi.plugin.json')
+        const firstMtime = statSync(manifestPath).mtimeMs
+        await new Promise((resolve) => setTimeout(resolve, 20))
+
+        await prepareBundledExamplePlugins(hapiHome)
+
+        expect(statSync(manifestPath).mtimeMs).toBe(firstMtime)
+    })
+
+    it('lets user-home plugins override bundled example plugin ids', async () => {
+        const hapiHome = join(testDir, 'hapi-home')
+        const bundledRoot = await prepareBundledExamplePlugins(hapiHome)
+        const exampleId = bundledExamplePlugins[0]!.manifest.id
+        const userPlugin = join(hapiHome, 'plugins', exampleId)
+        mkdirSync(join(userPlugin, 'dist'), { recursive: true })
+        writeFileSync(join(userPlugin, 'dist/hub.js'), 'export function activate() {}')
+        writeManifest(userPlugin, validManifest({ id: exampleId }))
+
+        const records = await discoverPlugins({ hapiHome, bundledPluginDirs: [bundledRoot] })
+        const matches = records.filter((record) => record.manifest?.id === exampleId)
+
+        expect(matches).toHaveLength(2)
+        expect(matches[0]?.source).toBe('user-home')
+        expect(matches[0]?.status).toBe('validated')
+        expect(matches[1]?.source).toBe('bundled')
+        expect(matches[1]?.status).toBe('blocked')
+    })
+
+    it('refuses bundled example symbolic-link and non-directory output paths', async () => {
+        const hapiHome = join(testDir, 'hapi-home')
+        const bundledRoot = getBundledExamplePluginsRoot(hapiHome)
+        const outsideRoot = join(testDir, 'outside-bundled-root')
+        mkdirSync(hapiHome, { recursive: true })
+
+        writeFileSync(bundledRoot, 'not a directory')
+        await expect(prepareBundledExamplePlugins(hapiHome)).rejects.toThrow('non-directory')
+        rmSync(bundledRoot, { force: true })
+
+        mkdirSync(outsideRoot, { recursive: true })
+        symlinkSync(outsideRoot, bundledRoot, 'dir')
+
+        await expect(prepareBundledExamplePlugins(hapiHome)).rejects.toThrow('symbolic link')
+
+        rmSync(bundledRoot, { recursive: true, force: true })
+        mkdirSync(bundledRoot, { recursive: true })
+        writeFileSync(join(bundledRoot, bundledExamplePlugins[0]!.manifest.id), 'not a directory')
+        await expect(prepareBundledExamplePlugins(hapiHome)).rejects.toThrow('non-directory')
+        rmSync(join(bundledRoot, bundledExamplePlugins[0]!.manifest.id), { force: true })
+
+        const outsidePlugin = join(testDir, 'outside-bundled-plugin')
+        mkdirSync(outsidePlugin, { recursive: true })
+        symlinkSync(outsidePlugin, join(bundledRoot, bundledExamplePlugins[0]!.manifest.id), 'dir')
+
+        await expect(prepareBundledExamplePlugins(hapiHome)).rejects.toThrow('symbolic link')
+
+        rmSync(bundledRoot, { recursive: true, force: true })
+        const pluginRoot = join(bundledRoot, bundledExamplePlugins[0]!.manifest.id)
+        const outsideDist = join(testDir, 'outside-bundled-dist')
+        mkdirSync(pluginRoot, { recursive: true })
+        mkdirSync(outsideDist, { recursive: true })
+        symlinkSync(outsideDist, join(pluginRoot, 'dist'), 'dir')
+
+        await expect(prepareBundledExamplePlugins(hapiHome)).rejects.toThrow('symbolic link')
+
+        rmSync(bundledRoot, { recursive: true, force: true })
+        mkdirSync(pluginRoot, { recursive: true })
+        writeFileSync(join(pluginRoot, 'dist'), 'not a directory')
+
+        await expect(prepareBundledExamplePlugins(hapiHome)).rejects.toThrow('non-directory')
     })
 
     it('applies plugins.json enablement and config without changing invalid records', async () => {
@@ -373,6 +459,15 @@ describe('plugin multi-runtime schemas', () => {
                     adapters: [{ id: 'codex' }],
                     capabilityProviders: [{ id: 'caps' }]
                 },
+                voice: {
+                    providers: [{ id: 'voice', displayName: 'Voice Provider', supportStatus: 'unsupported' }]
+                },
+                deployment: {
+                    packs: [{ id: 'docker', displayName: 'Docker Pack', supportStatus: 'stub' }]
+                },
+                integration: {
+                    protocolBridges: [{ id: 'mcp', displayName: 'MCP Bridge', supportStatus: 'unsupported', limitations: ['No bridge runtime yet.'], protocol: 'mcp' }]
+                },
                 web: {
                     settingsPanels: [{
                         id: 'settings',
@@ -387,6 +482,18 @@ describe('plugin multi-runtime schemas', () => {
         }))
 
         expect(parsed.success).toBe(true)
+    })
+
+    it('rejects invalid generic contribution support status values', () => {
+        const parsed = PluginManifestLiteSchema.safeParse(validManifest({
+            contributions: {
+                voice: {
+                    providers: [{ id: 'voice', supportStatus: 'experimental' }]
+                }
+            }
+        }))
+
+        expect(parsed.success).toBe(false)
     })
 
     it('validates Runner extension proposal schemas', () => {

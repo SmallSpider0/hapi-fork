@@ -528,6 +528,7 @@ export default {
   'settings.plugins.secret.missing': '缺失',
   'settings.plugins.source.env': '环境变量',
   'settings.plugins.source.user-home': '用户目录',
+  'settings.plugins.source.bundled': '内置示例',
   'settings.plugins.diagnosticSeverity.info': '信息',
   'settings.plugins.diagnosticSeverity.warning': '警告',
   'settings.plugins.diagnosticSeverity.error': '错误',

@@ -187,7 +187,12 @@ describe('plugin admin routes', () => {
                 manifest: undefined,
                 config: { url: 'https://example.test' },
                 permissions: { network: ['https://example.test'], secrets: [{ name: 'TOKEN', present: false }] },
-                contributions: { notificationChannels: [] },
+                contributions: {
+                    notificationChannels: [],
+                    voice: { providers: [{ id: 'example-voice-provider', supportStatus: 'unsupported' }] },
+                    deployment: { packs: [{ id: 'example-docker-pack', supportStatus: 'stub' }] },
+                    integration: { protocolBridges: [{ id: 'example-mcp-bridge', protocol: 'mcp', supportStatus: 'unsupported' }] }
+                },
                 runtimeEntryPaths: []
             }),
             getDiagnostics: () => []
@@ -203,9 +208,12 @@ describe('plugin admin routes', () => {
 
         const detailResponse = await app.request('/api/plugins/com.example.plugin', { headers: { authorization: `Bearer ${auth}` } })
         expect(detailResponse.status).toBe(200)
-        const detail = await detailResponse.json() as { plugin: { target?: { scope: string }; permissions: { secrets: Array<{ name: string; present: boolean }> } } }
+        const detail = await detailResponse.json() as { plugin: { target?: { scope: string }; permissions: { secrets: Array<{ name: string; present: boolean }> }; contributions: { voice?: { providers?: Array<{ supportStatus?: string }> }; deployment?: { packs?: Array<{ supportStatus?: string }> }; integration?: { protocolBridges?: Array<{ protocol?: string }> } } } }
         expect(detail.plugin.target?.scope).toBe('hub')
         expect(detail.plugin.permissions.secrets).toEqual([expect.objectContaining({ name: 'TOKEN', present: false })])
+        expect(detail.plugin.contributions.voice?.providers?.[0]?.supportStatus).toBe('unsupported')
+        expect(detail.plugin.contributions.deployment?.packs?.[0]?.supportStatus).toBe('stub')
+        expect(detail.plugin.contributions.integration?.protocolBridges?.[0]?.protocol).toBe('mcp')
     })
 
     it('aggregates Hub and Runner plugin inventories without reading Runner paths directly', async () => {
