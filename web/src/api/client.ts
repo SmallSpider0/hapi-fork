@@ -26,6 +26,7 @@ import type {
     MachinePathsExistsResponse,
     OpencodeModelsResponse,
     AgentHistoryImportResponse,
+    PluginMessageActionRequest,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
@@ -34,6 +35,7 @@ import type {
     PluginDeleteResult,
     PluginDetailResponse,
     PluginEnableRequest,
+    PluginCapabilitiesResponse,
     PluginInstallLocalRequest,
     PluginInstallPackageRequest,
     PluginInstallResult,
@@ -57,6 +59,25 @@ function withPluginTarget(path: string, target?: PluginTargetScope): string {
     if (!target) return path
     const separator = path.includes('?') ? '&' : '?'
     return `${path}${separator}target=${encodeURIComponent(target)}`
+}
+
+export type PluginCapabilitiesQuery = {
+    target?: PluginTargetScope
+    sessionId?: string
+}
+
+function withPluginCapabilitiesQuery(path: string, query?: PluginCapabilitiesQuery): string {
+    const params = new URLSearchParams()
+    if (query?.target) {
+        params.set('target', query.target)
+    }
+    if (query?.sessionId) {
+        params.set('sessionId', query.sessionId)
+    }
+    const suffix = params.toString()
+    if (!suffix) return path
+    const separator = path.includes('?') ? '&' : '?'
+    return `${path}${separator}${suffix}`
 }
 
 function parseErrorCode(bodyText: string): string | undefined {
@@ -189,6 +210,10 @@ export class ApiClient {
 
     async getPlugin(pluginId: string, target?: PluginTargetScope): Promise<PluginDetailResponse> {
         return await this.request<PluginDetailResponse>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}`, target))
+    }
+
+    async getPluginCapabilities(query?: PluginCapabilitiesQuery): Promise<PluginCapabilitiesResponse> {
+        return await this.request<PluginCapabilitiesResponse>(withPluginCapabilitiesQuery('/api/plugins/capabilities', query))
     }
 
     async enablePlugin(pluginId: string, config?: Record<string, unknown>, target?: PluginTargetScope): Promise<PluginReloadResult> {
@@ -413,8 +438,7 @@ export class ApiClient {
         text: string,
         localId?: string | null,
         attachments?: AttachmentMetadata[],
-        scheduledAt?: number | null,
-        delivery?: { notBefore?: number | null }
+        pluginAction?: PluginMessageActionRequest
     ): Promise<void> {
         await this.request(`/api/sessions/${encodeURIComponent(sessionId)}/messages`, {
             method: 'POST',
@@ -422,8 +446,7 @@ export class ApiClient {
                 text,
                 localId: localId ?? undefined,
                 attachments: attachments ?? undefined,
-                delivery: delivery ?? (scheduledAt == null ? undefined : { notBefore: scheduledAt }),
-                scheduledAt: scheduledAt ?? undefined
+                pluginAction
             })
         })
     }

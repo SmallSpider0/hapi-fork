@@ -9,7 +9,8 @@
 
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { AgentHistoryImportResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
-import type { PluginDeleteResult, PluginDetailResponse, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallResult, PluginLocalDirectoryListResponse, PluginReloadResult, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
+import type { MessageSendPlan } from '@hapi/protocol/plugins'
+import type { PluginDeleteResult, PluginDetailResponse, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallResult, PluginLocalDirectoryListResponse, PluginReloadResult, RunnerPluginActionInvokeResponse, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
@@ -360,10 +361,7 @@ export class SyncEngine {
                 previewUrl?: string
             }>
             sentFrom?: 'telegram-bot' | 'webapp'
-            delivery?: {
-                notBefore?: number | null
-            }
-            scheduledAt?: number | null
+            plan?: MessageSendPlan
         }
     ): Promise<void> {
         await this.messageService.sendMessage(sessionId, payload)
@@ -965,6 +963,18 @@ export class SyncEngine {
 
     async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {
         return await this.rpcGateway.deleteRunnerPlugin(machineId, pluginId, reload)
+    }
+
+    async invokeRunnerPluginAction(machineId: string, payload: {
+        pluginId: string
+        capabilityId?: string
+        actionId: string
+        namespace: string
+        sessionId?: string
+        cwd?: string
+        payload?: unknown
+    }): Promise<RunnerPluginActionInvokeResponse> {
+        return await this.rpcGateway.invokeRunnerPluginAction(machineId, payload)
     }
 
     async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {

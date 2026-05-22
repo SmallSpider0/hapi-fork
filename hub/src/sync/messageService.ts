@@ -1,4 +1,5 @@
 import type { AttachmentMetadata, DecryptedMessage } from '@hapi/protocol/types'
+import type { MessageSendPlan } from '@hapi/protocol/plugins'
 import { isRedundantGoalStatusEventContent } from '@hapi/protocol/messages'
 import type { Server } from 'socket.io'
 import { randomUUID } from 'node:crypto'
@@ -349,13 +350,12 @@ export class MessageService {
             localId?: string | null
             attachments?: AttachmentMetadata[]
             sentFrom?: 'telegram-bot' | 'webapp'
-            delivery?: {
-                notBefore?: number | null
-            }
-            scheduledAt?: number | null
+            plan?: MessageSendPlan
         }
     ): Promise<void> {
-        const deliveryNotBefore = payload.delivery?.notBefore ?? payload.scheduledAt ?? null
+        const deliveryNotBefore = payload.plan?.type === 'messageDelivery'
+            ? payload.plan.delivery.notBefore ?? null
+            : null
 
         // Defence-in-depth invariant for non-REST callers (Telegram bot, MCP,
         // internal callers).  Attachment paths live under the CLI session's
@@ -367,6 +367,12 @@ export class MessageService {
         // !localId throw.
         if (deliveryNotBefore != null && (payload.attachments?.length ?? 0) > 0) {
             throw new Error('sendMessage: scheduled messages with attachments are not supported')
+        }
+        if (deliveryNotBefore != null && !payload.localId) {
+            throw new Error('sendMessage: scheduled messages require localId')
+        }
+        if (deliveryNotBefore != null && deliveryNotBefore > Date.now() + 7 * 24 * 60 * 60 * 1000) {
+            throw new Error('sendMessage: scheduled messages must be within 7 days from now')
         }
 
         const sentFrom = payload.sentFrom ?? 'webapp'

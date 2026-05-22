@@ -13,6 +13,7 @@ JSON Schema: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schem
 | `\\|v\\|e\\|r\\|s\\|i\\|o\\|n\\|` | yes | \\|s\\|t\\|r\\|i\\|n\\|g\\| | \\|—\\| |
 | `\\|p\\|l\\|u\\|g\\|i\\|n\\|A\\|p\\|i\\|V\\|e\\|r\\|s\\|i\\|o\\|n\\|` | yes | \\|c\\|o\\|n\\|s\\|t\\| \\|`\\|0\\|.\\|1\\|`\\| | \\|—\\| |
 | `\\|d\\|e\\|s\\|c\\|r\\|i\\|p\\|t\\|i\\|o\\|n\\|` | no | \\|s\\|t\\|r\\|i\\|n\\|g\\| | \\|—\\| |
+| `\\|c\\|a\\|p\\|a\\|b\\|i\\|l\\|i\\|t\\|i\\|e\\|s\\|` | no | \\|a\\|r\\|r\\|a\\|y\\|&lt;\\|o\\|b\\|j\\|e\\|c\\|t\\|&gt;\\| | \\|—\\| |
 | `\\|r\\|u\\|n\\|t\\|i\\|m\\|e\\|s\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|c\\|o\\|n\\|t\\|r\\|i\\|b\\|u\\|t\\|i\\|o\\|n\\|s\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
 | `\\|c\\|o\\|n\\|f\\|i\\|g\\|` | no | \\|o\\|b\\|j\\|e\\|c\\|t\\| | \\|—\\| |
@@ -46,6 +47,209 @@ JSON Schema: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schem
         },
         "description": {
             "type": "string"
+        },
+        "capabilities": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128,
+                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                    },
+                    "kind": {
+                        "type": "string",
+                        "enum": [
+                            "chat.composer.messageAction",
+                            "chat.contextProvider",
+                            "notification.channel",
+                            "runner.spawnExtension",
+                            "agent.adapter",
+                            "agent.capabilityProvider",
+                            "settings.panel",
+                            "integration.bridge"
+                        ]
+                    },
+                    "displayName": {
+                        "type": "string",
+                        "minLength": 1
+                    },
+                    "description": {
+                        "type": "string"
+                    },
+                    "parts": {
+                        "type": "object",
+                        "properties": {
+                            "web": {
+                                "type": "object",
+                                "properties": {
+                                    "required": {
+                                        "default": true,
+                                        "type": "boolean"
+                                    },
+                                    "target": {
+                                        "type": "string",
+                                        "enum": [
+                                            "hub",
+                                            "session-runner",
+                                            "selected-runner",
+                                            "all-runners"
+                                        ]
+                                    },
+                                    "contributions": {
+                                        "minItems": 1,
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 128
+                                                },
+                                                "id": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 128,
+                                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                }
+                                            },
+                                            "required": [
+                                                "type",
+                                                "id"
+                                            ],
+                                            "additionalProperties": false
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "required",
+                                    "contributions"
+                                ],
+                                "additionalProperties": false
+                            },
+                            "hub": {
+                                "type": "object",
+                                "properties": {
+                                    "required": {
+                                        "default": true,
+                                        "type": "boolean"
+                                    },
+                                    "target": {
+                                        "type": "string",
+                                        "enum": [
+                                            "hub",
+                                            "session-runner",
+                                            "selected-runner",
+                                            "all-runners"
+                                        ]
+                                    },
+                                    "contributions": {
+                                        "minItems": 1,
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 128
+                                                },
+                                                "id": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 128,
+                                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                }
+                                            },
+                                            "required": [
+                                                "type",
+                                                "id"
+                                            ],
+                                            "additionalProperties": false
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "required",
+                                    "contributions"
+                                ],
+                                "additionalProperties": false
+                            },
+                            "runner": {
+                                "type": "object",
+                                "properties": {
+                                    "required": {
+                                        "default": true,
+                                        "type": "boolean"
+                                    },
+                                    "target": {
+                                        "type": "string",
+                                        "enum": [
+                                            "hub",
+                                            "session-runner",
+                                            "selected-runner",
+                                            "all-runners"
+                                        ]
+                                    },
+                                    "contributions": {
+                                        "minItems": 1,
+                                        "type": "array",
+                                        "items": {
+                                            "type": "object",
+                                            "properties": {
+                                                "type": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 128
+                                                },
+                                                "id": {
+                                                    "type": "string",
+                                                    "minLength": 1,
+                                                    "maxLength": 128,
+                                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                }
+                                            },
+                                            "required": [
+                                                "type",
+                                                "id"
+                                            ],
+                                            "additionalProperties": false
+                                        }
+                                    }
+                                },
+                                "required": [
+                                    "required",
+                                    "contributions"
+                                ],
+                                "additionalProperties": false
+                            }
+                        },
+                        "additionalProperties": false
+                    },
+                    "compatibility": {
+                        "type": "object",
+                        "properties": {
+                            "minPluginVersion": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "sameVersionAcrossTargets": {
+                                "type": "boolean"
+                            }
+                        },
+                        "additionalProperties": false
+                    }
+                },
+                "required": [
+                    "id",
+                    "kind",
+                    "parts"
+                ],
+                "additionalProperties": false
+            }
         },
         "runtimes": {
             "type": "object",
@@ -99,6 +303,32 @@ JSON Schema: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schem
                                     "displayName": {
                                         "type": "string",
                                         "minLength": 1
+                                    }
+                                },
+                                "required": [
+                                    "id",
+                                    "displayName"
+                                ],
+                                "additionalProperties": false
+                            }
+                        },
+                        "messageActions": {
+                            "type": "array",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "id": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                    },
+                                    "displayName": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "description": {
+                                        "type": "string"
                                     }
                                 },
                                 "required": [
@@ -1324,7 +1554,13 @@ JSON Schema: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schem
                                     },
                                     "kind": {
                                         "type": "string",
-                                        "const": "deliveryNotBefore"
+                                        "const": "pluginMessageAction"
+                                    },
+                                    "capabilityId": {
+                                        "type": "string",
+                                        "minLength": 1,
+                                        "maxLength": 128,
+                                        "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
                                     },
                                     "label": {
                                         "anyOf": [
@@ -1371,56 +1607,304 @@ JSON Schema: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schem
                                             "clock"
                                         ]
                                     },
-                                    "maxDelayMs": {
-                                        "default": 604800000,
-                                        "type": "integer",
-                                        "exclusiveMinimum": 0,
-                                        "maximum": 604800000
+                                    "handler": {
+                                        "type": "object",
+                                        "properties": {
+                                            "position": {
+                                                "type": "string",
+                                                "enum": [
+                                                    "hub",
+                                                    "runner"
+                                                ]
+                                            },
+                                            "actionId": {
+                                                "type": "string",
+                                                "minLength": 1,
+                                                "maxLength": 128,
+                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                            }
+                                        },
+                                        "required": [
+                                            "position",
+                                            "actionId"
+                                        ],
+                                        "additionalProperties": false
                                     },
-                                    "presets": {
-                                        "minItems": 1,
-                                        "maxItems": 12,
-                                        "type": "array",
-                                        "items": {
-                                            "type": "object",
-                                            "properties": {
-                                                "id": {
-                                                    "type": "string",
-                                                    "minLength": 1,
-                                                    "maxLength": 128,
-                                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                    "ui": {
+                                        "oneOf": [
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "kind": {
+                                                        "type": "string",
+                                                        "const": "button"
+                                                    }
                                                 },
-                                                "label": {
-                                                    "anyOf": [
-                                                        {
-                                                            "type": "string",
-                                                            "minLength": 1
-                                                        },
-                                                        {
-                                                            "type": "object",
-                                                            "propertyNames": {
+                                                "required": [
+                                                    "kind"
+                                                ],
+                                                "additionalProperties": false
+                                            },
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "kind": {
+                                                        "type": "string",
+                                                        "const": "confirm"
+                                                    },
+                                                    "title": {
+                                                        "anyOf": [
+                                                            {
                                                                 "type": "string",
                                                                 "minLength": 1
                                                             },
-                                                            "additionalProperties": {
+                                                            {
+                                                                "type": "object",
+                                                                "propertyNames": {
+                                                                    "type": "string",
+                                                                    "minLength": 1
+                                                                },
+                                                                "additionalProperties": {
+                                                                    "type": "string",
+                                                                    "minLength": 1
+                                                                }
+                                                            }
+                                                        ]
+                                                    },
+                                                    "body": {
+                                                        "anyOf": [
+                                                            {
                                                                 "type": "string",
                                                                 "minLength": 1
+                                                            },
+                                                            {
+                                                                "type": "object",
+                                                                "propertyNames": {
+                                                                    "type": "string",
+                                                                    "minLength": 1
+                                                                },
+                                                                "additionalProperties": {
+                                                                    "type": "string",
+                                                                    "minLength": 1
+                                                                }
                                                             }
-                                                        }
-                                                    ]
+                                                        ]
+                                                    }
                                                 },
-                                                "delayMs": {
-                                                    "type": "integer",
-                                                    "exclusiveMinimum": 0,
-                                                    "maximum": 604800000
-                                                }
+                                                "required": [
+                                                    "kind",
+                                                    "title"
+                                                ],
+                                                "additionalProperties": false
                                             },
-                                            "required": [
-                                                "label",
-                                                "delayMs"
-                                            ],
-                                            "additionalProperties": false
-                                        }
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "kind": {
+                                                        "type": "string",
+                                                        "const": "delayPicker"
+                                                    },
+                                                    "maxDelayMs": {
+                                                        "default": 604800000,
+                                                        "type": "integer",
+                                                        "exclusiveMinimum": 0,
+                                                        "maximum": 604800000
+                                                    },
+                                                    "presets": {
+                                                        "minItems": 1,
+                                                        "maxItems": 12,
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "id": {
+                                                                    "type": "string",
+                                                                    "minLength": 1,
+                                                                    "maxLength": 128,
+                                                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                                                },
+                                                                "label": {
+                                                                    "anyOf": [
+                                                                        {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        {
+                                                                            "type": "object",
+                                                                            "propertyNames": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            },
+                                                                            "additionalProperties": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "delayMs": {
+                                                                    "type": "integer",
+                                                                    "exclusiveMinimum": 0,
+                                                                    "maximum": 604800000
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "label",
+                                                                "delayMs"
+                                                            ],
+                                                            "additionalProperties": false
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "kind",
+                                                    "maxDelayMs",
+                                                    "presets"
+                                                ],
+                                                "additionalProperties": false
+                                            },
+                                            {
+                                                "type": "object",
+                                                "properties": {
+                                                    "kind": {
+                                                        "type": "string",
+                                                        "const": "schemaForm"
+                                                    },
+                                                    "fields": {
+                                                        "minItems": 1,
+                                                        "maxItems": 50,
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "object",
+                                                            "properties": {
+                                                                "key": {
+                                                                    "type": "string",
+                                                                    "minLength": 1,
+                                                                    "maxLength": 128,
+                                                                    "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                                },
+                                                                "label": {
+                                                                    "anyOf": [
+                                                                        {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        {
+                                                                            "type": "object",
+                                                                            "propertyNames": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            },
+                                                                            "additionalProperties": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "description": {
+                                                                    "anyOf": [
+                                                                        {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        {
+                                                                            "type": "object",
+                                                                            "propertyNames": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            },
+                                                                            "additionalProperties": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            }
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "type": {
+                                                                    "default": "text",
+                                                                    "type": "string",
+                                                                    "enum": [
+                                                                        "text",
+                                                                        "number",
+                                                                        "boolean",
+                                                                        "select"
+                                                                    ]
+                                                                },
+                                                                "required": {
+                                                                    "type": "boolean"
+                                                                },
+                                                                "secret": {
+                                                                    "type": "boolean"
+                                                                },
+                                                                "defaultValue": {
+                                                                    "anyOf": [
+                                                                        {
+                                                                            "type": "string"
+                                                                        },
+                                                                        {
+                                                                            "type": "number"
+                                                                        },
+                                                                        {
+                                                                            "type": "boolean"
+                                                                        },
+                                                                        {
+                                                                            "type": "null"
+                                                                        }
+                                                                    ]
+                                                                },
+                                                                "options": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "object",
+                                                                        "properties": {
+                                                                            "value": {
+                                                                                "type": "string",
+                                                                                "minLength": 1
+                                                                            },
+                                                                            "label": {
+                                                                                "anyOf": [
+                                                                                    {
+                                                                                        "type": "string",
+                                                                                        "minLength": 1
+                                                                                    },
+                                                                                    {
+                                                                                        "type": "object",
+                                                                                        "propertyNames": {
+                                                                                            "type": "string",
+                                                                                            "minLength": 1
+                                                                                        },
+                                                                                        "additionalProperties": {
+                                                                                            "type": "string",
+                                                                                            "minLength": 1
+                                                                                        }
+                                                                                    }
+                                                                                ]
+                                                                            }
+                                                                        },
+                                                                        "required": [
+                                                                            "value"
+                                                                        ],
+                                                                        "additionalProperties": false
+                                                                    }
+                                                                }
+                                                            },
+                                                            "required": [
+                                                                "key",
+                                                                "label",
+                                                                "type"
+                                                            ],
+                                                            "additionalProperties": false
+                                                        }
+                                                    }
+                                                },
+                                                "required": [
+                                                    "kind",
+                                                    "fields"
+                                                ],
+                                                "additionalProperties": false
+                                            }
+                                        ]
                                     }
                                 },
                                 "required": [
@@ -1428,8 +1912,8 @@ JSON Schema: [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schem
                                     "kind",
                                     "label",
                                     "icon",
-                                    "maxDelayMs",
-                                    "presets"
+                                    "handler",
+                                    "ui"
                                 ],
                                 "additionalProperties": false
                             }

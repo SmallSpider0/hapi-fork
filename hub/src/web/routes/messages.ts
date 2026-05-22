@@ -1,10 +1,122 @@
 import { Hono } from 'hono'
-import { MessagesQuerySchema, SendMessageRequestSchema } from '@hapi/protocol'
-import type { SyncEngine } from '../../sync/syncEngine'
+import { MessagesQuerySchema, SendMessageRequestSchema, type PluginMessageActionRequest } from '@hapi/protocol'
+import type { AttachmentMetadata } from '@hapi/protocol/types'
+import type { Session, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
 import { requireSessionFromParam, requireSyncEngine } from './guards'
+import type { HubPluginManager } from '../../plugins/pluginManager'
+import type { MessageSendPlan } from '@hapi/protocol/plugins'
 
-export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Hono<WebAppEnv> {
+class PluginActionHttpError extends Error {
+    constructor(readonly status: 400 | 404 | 409 | 502 | 503, message: string) {
+        super(message)
+    }
+}
+
+function isMessageSendPlan(value: unknown): value is MessageSendPlan {
+    if (!value || typeof value !== 'object') {
+        return false
+    }
+    const record = value as Record<string, unknown>
+    if (record.type === 'immediate') {
+        return true
+    }
+    if (record.type !== 'messageDelivery') {
+        return false
+    }
+    const delivery = record.delivery
+    if (!delivery || typeof delivery !== 'object') {
+        return false
+    }
+    const notBefore = (delivery as Record<string, unknown>).notBefore
+    if (notBefore !== undefined && typeof notBefore !== 'number') {
+        return false
+    }
+    const source = record.source
+    if (!source || typeof source !== 'object') {
+        return false
+    }
+    const sourceRecord = source as Record<string, unknown>
+    return typeof sourceRecord.pluginId === 'string' && typeof sourceRecord.actionId === 'string'
+}
+
+async function resolveMessagePlan(options: {
+    engine: SyncEngine
+    manager: HubPluginManager | null
+    namespace: string
+    sessionId: string
+    session: Session
+    text: string
+    localId?: string
+    attachments: AttachmentMetadata[]
+    pluginAction?: PluginMessageActionRequest
+}): Promise<MessageSendPlan> {
+    const action = options.pluginAction
+    if (!action) {
+        return { type: 'immediate' }
+    }
+
+    if (action.position === 'hub') {
+        if (!options.manager) {
+            throw new PluginActionHttpError(503, 'Plugin manager is not ready')
+        }
+        const result = await options.manager.planMessageAction({
+            pluginId: action.pluginId,
+            capabilityId: action.capabilityId,
+            actionId: action.actionId,
+            namespace: options.namespace,
+            session: {
+                id: options.session.id,
+                namespace: options.session.namespace,
+                active: options.session.active,
+                metadata: options.session.metadata
+            },
+            text: options.text,
+            localId: options.localId,
+            attachments: options.attachments,
+            payload: action.payload
+        })
+        if (!result.ok) {
+            throw new PluginActionHttpError(result.code === 'plugin-action-not-active' ? 409 : 400, result.message)
+        }
+        return result.plan
+    }
+
+    const machineId = typeof options.session.metadata?.machineId === 'string'
+        ? options.session.metadata.machineId
+        : null
+    if (!machineId) {
+        throw new PluginActionHttpError(409, 'Runner plugin message action requires a session with machineId metadata.')
+    }
+    const machine = options.engine.getMachineByNamespace(machineId, options.namespace)
+    if (!machine) {
+        throw new PluginActionHttpError(404, 'Runner target not found for this session.')
+    }
+    if (!machine.active) {
+        throw new PluginActionHttpError(503, 'Runner target is offline.')
+    }
+    const response = await options.engine.invokeRunnerPluginAction(machine.id, {
+        pluginId: action.pluginId,
+        capabilityId: action.capabilityId,
+        actionId: action.actionId,
+        namespace: options.namespace,
+        sessionId: options.sessionId,
+        cwd: options.session.metadata?.path,
+        payload: action.payload
+    })
+    if (!response.ok) {
+        throw new PluginActionHttpError(response.code === 'plugin-action-not-active' ? 409 : 400, response.message)
+    }
+    if (!isMessageSendPlan(response.result)) {
+        throw new PluginActionHttpError(502, 'Runner plugin message action returned an invalid message plan.')
+    }
+    return response.result
+}
+
+export function createMessagesRoutes(
+    getSyncEngine: () => SyncEngine | null,
+    getPluginManager: () => HubPluginManager | null = () => null
+): Hono<WebAppEnv> {
     const app = new Hono<WebAppEnv>()
 
     app.get('/sessions/:id/messages', async (c) => {
@@ -71,13 +183,32 @@ export function createMessagesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             return c.json({ error: 'Message requires text or attachments' }, 400)
         }
 
+        let plan: MessageSendPlan
+        try {
+            plan = await resolveMessagePlan({
+                engine,
+                manager: getPluginManager(),
+                namespace: c.get('namespace'),
+                sessionId,
+                session: sessionResult.session,
+                text: parsed.data.text,
+                localId: parsed.data.localId,
+                attachments: parsed.data.attachments ?? [],
+                pluginAction: parsed.data.pluginAction
+            })
+        } catch (error) {
+            if (error instanceof PluginActionHttpError) {
+                return c.json({ error: error.message }, error.status)
+            }
+            return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+        }
+
         await engine.sendMessage(sessionId, {
             text: parsed.data.text,
             localId: parsed.data.localId,
             attachments: parsed.data.attachments,
             sentFrom: 'webapp',
-            delivery: parsed.data.delivery,
-            scheduledAt: parsed.data.scheduledAt
+            plan
         })
         return c.json({ ok: true })
     })

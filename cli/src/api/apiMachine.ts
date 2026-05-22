@@ -30,6 +30,8 @@ import {
     RunnerPluginsLocalDirectoryListRequestSchema,
     RunnerPluginsListRequestSchema,
     RunnerPluginsReloadRequestSchema,
+    RunnerPluginActionInvokeRequestSchema,
+    RunnerPluginActionInvokeResponseSchema,
     RunnerPluginUnsupportedInstallResultSchema
 } from '@hapi/protocol/plugins/admin'
 import type { RunnerState, Machine, MachineMetadata } from './types'
@@ -419,6 +421,11 @@ export class ApiMachineClient {
             const result = await manager.deletePlugin(request.pluginId, request.reload !== false)
             await publishInventory()
             return PluginDeleteResultSchema.parse(result)
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginActionInvoke, async (params: unknown) => {
+            const request = RunnerPluginActionInvokeRequestSchema.parse(params)
+            return RunnerPluginActionInvokeResponseSchema.parse(await manager.invokeAction(request))
         })
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerAgentHistoryImport, async (params: unknown) => {

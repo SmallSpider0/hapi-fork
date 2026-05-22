@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { PluginDiagnosticSchema, PluginStatusSchema } from './types'
-import { PluginManifestLiteSchema, PluginRuntimeNameSchema } from './manifest'
+import { PluginCapabilityKindSchema, PluginCapabilitySchema, PluginManifestLiteSchema, PluginRuntimeNameSchema } from './manifest'
 import { PluginInstallMetadataSchema } from './state'
 import { RunnerExtensionContributionSummarySchema } from './runnerExtensions'
 import { PluginWebContributionsSchema, PluginWebContributionViewSchema } from './webDescriptors'
@@ -100,6 +100,70 @@ export const PluginDiagnosticViewSchema = PluginDiagnosticSchema.extend({
 }).strict()
 export type PluginDiagnosticView = z.infer<typeof PluginDiagnosticViewSchema>
 
+export const PluginRuntimeContributionStateSchema = z.object({
+    pluginId: z.string().min(1),
+    target: PluginTargetSummarySchema,
+    runtime: PluginRuntimeNameSchema,
+    contributionType: z.string().min(1),
+    contributionId: z.string().min(1),
+    declared: z.boolean(),
+    registered: z.boolean(),
+    active: z.boolean(),
+    diagnostics: z.array(PluginDiagnosticViewSchema).default([])
+}).strict()
+export type PluginRuntimeContributionState = z.infer<typeof PluginRuntimeContributionStateSchema>
+
+export const PluginCapabilityStatusSchema = z.enum([
+    'ready',
+    'partial',
+    'disabled',
+    'missing-target',
+    'offline',
+    'failed',
+    'incompatible'
+])
+export type PluginCapabilityStatus = z.infer<typeof PluginCapabilityStatusSchema>
+
+export const PluginCapabilityPartStatusSchema = z.object({
+    status: PluginCapabilityStatusSchema,
+    target: PluginTargetSummarySchema.optional(),
+    required: z.boolean().optional(),
+    declared: z.boolean().optional(),
+    registered: z.boolean().optional(),
+    active: z.boolean().optional(),
+    diagnostics: z.array(PluginDiagnosticViewSchema).default([])
+}).strict()
+export type PluginCapabilityPartStatus = z.infer<typeof PluginCapabilityPartStatusSchema>
+
+export const PluginCapabilitySourceViewSchema = z.object({
+    pluginId: z.string().min(1),
+    pluginName: z.string().optional(),
+    pluginVersion: z.string().optional(),
+    target: PluginTargetSummarySchema,
+    capabilities: z.array(PluginCapabilitySchema).default([])
+}).strict()
+export type PluginCapabilitySourceView = z.infer<typeof PluginCapabilitySourceViewSchema>
+
+export const PluginCapabilityViewSchema = z.object({
+    pluginId: z.string().min(1),
+    pluginName: z.string().optional(),
+    pluginVersion: z.string().optional(),
+    capabilityId: z.string().min(1),
+    kind: PluginCapabilityKindSchema,
+    displayName: z.string().optional(),
+    description: z.string().optional(),
+    status: PluginCapabilityStatusSchema,
+    target: PluginTargetSummarySchema.optional(),
+    parts: z.object({
+        web: PluginCapabilityPartStatusSchema.optional(),
+        hub: PluginCapabilityPartStatusSchema.optional(),
+        runner: PluginCapabilityPartStatusSchema.optional()
+    }).strict(),
+    web: PluginWebContributionsSchema.optional(),
+    diagnostics: z.array(PluginDiagnosticViewSchema).default([])
+}).strict()
+export type PluginCapabilityView = z.infer<typeof PluginCapabilityViewSchema>
+
 export const PluginScopedConfigMetadataSchema = z.object({
     scope: PluginConfigScopeSchema,
     pluginId: z.string().min(1),
@@ -144,6 +208,11 @@ export const PluginDetailSchema = PluginListItemSchema.extend({
             id: z.string().min(1),
             displayName: z.string().min(1)
         }).strict()),
+        messageActions: z.array(z.object({
+            id: z.string().min(1),
+            displayName: z.string().min(1),
+            description: z.string().optional()
+        }).strict()).optional(),
         runner: z.object({
             environmentProviders: z.array(z.unknown()).optional(),
             commandResolvers: z.array(z.unknown()).optional(),
@@ -177,6 +246,9 @@ export const PluginTargetInventorySchema = z.object({
     target: PluginTargetSummarySchema,
     plugins: z.array(PluginListItemSchema),
     webContributions: z.array(PluginWebContributionViewSchema).optional(),
+    capabilitySources: z.array(PluginCapabilitySourceViewSchema).optional(),
+    contributionStates: z.array(PluginRuntimeContributionStateSchema).optional(),
+    capabilities: z.array(PluginCapabilityViewSchema).optional(),
     error: z.string().optional()
 }).strict()
 export type PluginTargetInventory = z.infer<typeof PluginTargetInventorySchema>
@@ -191,7 +263,10 @@ export const RunnerPluginInventorySchema = z.object({
         commandResolvers: z.array(RunnerExtensionContributionSummarySchema).default([]),
         spawnHooks: z.array(RunnerExtensionContributionSummarySchema).default([])
     }).strict().optional(),
-    webContributions: z.array(PluginWebContributionViewSchema).optional()
+    webContributions: z.array(PluginWebContributionViewSchema).optional(),
+    capabilitySources: z.array(PluginCapabilitySourceViewSchema).optional(),
+    contributionStates: z.array(PluginRuntimeContributionStateSchema).optional(),
+    capabilities: z.array(PluginCapabilityViewSchema).optional()
 }).strict()
 export type RunnerPluginInventory = z.infer<typeof RunnerPluginInventorySchema>
 
@@ -210,6 +285,35 @@ export const PluginDiagnosticsResponseSchema = z.object({
     diagnostics: z.array(PluginDiagnosticViewSchema)
 }).strict()
 export type PluginDiagnosticsResponse = z.infer<typeof PluginDiagnosticsResponseSchema>
+
+export const PluginCapabilitiesResponseSchema = z.object({
+    capabilities: z.array(PluginCapabilityViewSchema)
+}).strict()
+export type PluginCapabilitiesResponse = z.infer<typeof PluginCapabilitiesResponseSchema>
+
+export const RunnerPluginActionInvokeRequestSchema = z.object({
+    pluginId: z.string().min(1).max(128),
+    capabilityId: z.string().min(1).max(128).optional(),
+    actionId: z.string().min(1).max(128),
+    namespace: z.string().min(1),
+    sessionId: z.string().min(1).optional(),
+    cwd: z.string().min(1).optional(),
+    payload: z.unknown().optional()
+}).strict()
+export type RunnerPluginActionInvokeRequest = z.infer<typeof RunnerPluginActionInvokeRequestSchema>
+
+export const RunnerPluginActionInvokeResponseSchema = z.union([
+    z.object({
+        ok: z.literal(true),
+        result: z.unknown()
+    }).strict(),
+    z.object({
+        ok: z.literal(false),
+        code: z.string().min(1),
+        message: z.string().min(1)
+    }).strict()
+])
+export type RunnerPluginActionInvokeResponse = z.infer<typeof RunnerPluginActionInvokeResponseSchema>
 
 export const PluginReloadActionSchema = z.enum([
     'activated',

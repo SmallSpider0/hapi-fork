@@ -28,6 +28,14 @@ export const endpointCatalog: EndpointDoc[] = [
         responseSchema: 'PluginDiagnosticsResponse'
     },
     {
+        id: 'plugins.capabilities',
+        method: 'GET',
+        path: '/api/plugins/capabilities',
+        description: 'List user-facing plugin capabilities aggregated across Web, Hub, and Runner parts; pass sessionId to resolve session-runner parts for a chat surface.',
+        targetQuery: true,
+        responseSchema: 'PluginCapabilitiesResponse'
+    },
+    {
         id: 'plugins.reloadAll',
         method: 'POST',
         path: '/api/plugins/reload',

@@ -40,6 +40,7 @@ export const RPC_METHODS = {
     RunnerPluginsInstallLocal: 'runner.plugins.install-local',
     RunnerPluginsInstallPackage: 'runner.plugins.install-package',
     RunnerPluginsDelete: 'runner.plugins.delete',
+    RunnerPluginActionInvoke: 'runner.plugins.action.invoke',
     RunnerAgentHistoryImport: 'runner.agent.history.import'
 } as const
 

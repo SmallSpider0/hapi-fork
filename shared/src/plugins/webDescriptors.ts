@@ -157,14 +157,42 @@ export const WebDeliveryDelayPresetSchema = z.object({
 }).strict()
 export type WebDeliveryDelayPreset = z.infer<typeof WebDeliveryDelayPresetSchema>
 
+export const WebComposerActionHandlerSchema = z.object({
+    position: z.enum(['hub', 'runner']),
+    actionId: DescriptorIdSchema
+}).strict()
+export type WebComposerActionHandler = z.infer<typeof WebComposerActionHandlerSchema>
+
+export const WebComposerActionUiSchema = z.discriminatedUnion('kind', [
+    z.object({
+        kind: z.literal('button')
+    }).strict(),
+    z.object({
+        kind: z.literal('confirm'),
+        title: WebLocalizedTextSchema,
+        body: WebLocalizedTextSchema.optional()
+    }).strict(),
+    z.object({
+        kind: z.literal('delayPicker'),
+        maxDelayMs: z.number().int().positive().max(7 * 24 * 60 * 60 * 1000).default(7 * 24 * 60 * 60 * 1000),
+        presets: z.array(WebDeliveryDelayPresetSchema).min(1).max(12)
+    }).strict(),
+    z.object({
+        kind: z.literal('schemaForm'),
+        fields: z.array(WebSchemaFormFieldSchema).min(1).max(50)
+    }).strict()
+])
+export type WebComposerActionUi = z.infer<typeof WebComposerActionUiSchema>
+
 export const WebComposerActionDescriptorSchema = z.object({
     id: DescriptorIdSchema,
-    kind: z.literal('deliveryNotBefore'),
+    kind: z.literal('pluginMessageAction'),
+    capabilityId: DescriptorIdSchema.optional(),
     label: WebLocalizedTextSchema,
     description: WebLocalizedTextSchema.optional(),
     icon: z.enum(['clock']).default('clock'),
-    maxDelayMs: z.number().int().positive().max(7 * 24 * 60 * 60 * 1000).default(7 * 24 * 60 * 60 * 1000),
-    presets: z.array(WebDeliveryDelayPresetSchema).min(1).max(12)
+    handler: WebComposerActionHandlerSchema,
+    ui: WebComposerActionUiSchema
 }).strict()
 export type WebComposerActionDescriptor = z.infer<typeof WebComposerActionDescriptorSchema>
 

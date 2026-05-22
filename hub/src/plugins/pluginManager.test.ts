@@ -318,15 +318,32 @@ describe('HubPluginManager', () => {
         expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
             source: 'bundled',
             enabled: true,
-            active: false,
+            active: true,
             install: { sourceType: 'bundled' }
         })
         expect(webContributions).toEqual([
             expect.objectContaining({
                 pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
                 contributions: expect.objectContaining({
-                    composerActions: [expect.objectContaining({ id: 'schedule-send', kind: 'deliveryNotBefore' })]
+                    composerActions: [expect.objectContaining({ id: 'schedule-send', kind: 'pluginMessageAction' })]
                 })
+            })
+        ])
+        expect(manager.collectCapabilities()).toEqual([
+            expect.objectContaining({
+                pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+                capabilityId: 'schedule-send',
+                kind: 'chat.composer.messageAction',
+                status: 'ready'
+            })
+        ])
+        expect(manager.collectContributionStates()).toEqual([
+            expect.objectContaining({
+                pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+                contributionType: 'messageAction',
+                contributionId: 'schedule-send',
+                registered: true,
+                active: true
             })
         ])
 

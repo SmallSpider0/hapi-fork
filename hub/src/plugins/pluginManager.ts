@@ -4,6 +4,11 @@ import { pathToFileURL } from 'node:url'
 import { createHash } from 'node:crypto'
 import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type {
+    HubMessageActionInput,
+    HubMessageActionResult,
+    PluginCapabilityPart,
+    PluginCapabilityPartStatus,
+    PluginCapabilityView,
     PluginDeleteResult,
     PluginDetail,
     PluginDiagnosticView,
@@ -16,6 +21,7 @@ import type {
     PluginLocalDirectoryListResponse,
     PluginReloadItem,
     PluginReloadResult,
+    PluginRuntimeContributionState,
     PluginTargetSummary,
     PluginWebContributionView
 } from '@hapi/protocol/plugins'
@@ -40,7 +46,7 @@ import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plug
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
-import { PluginRegistryLite, redactText } from './registry'
+import { PluginRegistryLite, redactText, type RegisteredHubMessageAction } from './registry'
 import type { HubPluginModule } from './types'
 
 export interface HubPluginManagerOptions {
@@ -187,6 +193,63 @@ function reloadItemIsOk(item: PluginReloadItem): boolean {
     return !['invalid', 'failed', 'reload-failed', 'blocked', 'incompatible'].includes(item.status)
 }
 
+function aggregateCapabilityStatus(parts: {
+    web?: PluginCapabilityPartStatus
+    hub?: PluginCapabilityPartStatus
+    runner?: PluginCapabilityPartStatus
+}): PluginCapabilityView['status'] {
+    const required = Object.values(parts).filter((part) => part.required !== false)
+    if (required.length === 0) {
+        return 'ready'
+    }
+    const priority: PluginCapabilityView['status'][] = [
+        'disabled',
+        'failed',
+        'incompatible',
+        'offline',
+        'missing-target',
+        'partial'
+    ]
+    for (const status of priority) {
+        if (required.some((part) => part.status === status)) {
+            return status
+        }
+    }
+    return required.every((part) => part.status === 'ready') ? 'ready' : 'partial'
+}
+
+function webContributionsForPart(
+    record: DiscoveredPluginRecord,
+    part: PluginCapabilityPart
+): NonNullable<PluginCapabilityView['web']> | undefined {
+    const web = record.manifest?.contributions?.web
+    if (!web) {
+        return undefined
+    }
+
+    const result: NonNullable<PluginCapabilityView['web']> = {}
+    for (const contribution of part.contributions) {
+        if (contribution.type === 'settingsPanel') {
+            const match = web.settingsPanels?.find((entry) => entry.id === contribution.id)
+            if (match) result.settingsPanels = [...(result.settingsPanels ?? []), match]
+        } else if (contribution.type === 'newSessionField') {
+            const match = web.newSessionFields?.find((entry) => entry.id === contribution.id)
+            if (match) result.newSessionFields = [...(result.newSessionFields ?? []), match]
+        } else if (contribution.type === 'action') {
+            const match = web.actions?.find((entry) => entry.id === contribution.id)
+            if (match) result.actions = [...(result.actions ?? []), match]
+        } else if (contribution.type === 'badge') {
+            const match = web.badges?.find((entry) => entry.id === contribution.id)
+            if (match) result.badges = [...(result.badges ?? []), match]
+        } else if (contribution.type === 'composerAction') {
+            const match = web.composerActions?.find((entry) => entry.id === contribution.id)
+            if (match) result.composerActions = [...(result.composerActions ?? []), match]
+        }
+    }
+
+    return Object.keys(result).length > 0 ? result : undefined
+}
+
 export class HubPluginManager {
     private readonly activePlugins = new Map<string, ActivePluginInstance>()
     private records: DiscoveredPluginRecord[] = []
@@ -231,6 +294,126 @@ export class HubPluginManager {
                 target: this.targetSummary().scope,
                 contributions: record.manifest!.contributions!.web!
             }))
+    }
+
+    collectContributionStates(): PluginRuntimeContributionState[] {
+        const target = this.targetSummary()
+        return this.records
+            .filter((record) => record.manifest)
+            .flatMap((record) => {
+                const pluginId = record.manifest!.id
+                const registry = this.activePlugins.get(pluginId)?.registry
+                const registeredMessageActionIds = new Set((registry?.getMessageActions() ?? []).map((entry) => entry.id))
+                const enabled = record.enabled === true
+                const active = this.activePlugins.has(pluginId)
+                const diagnostics = [
+                    ...record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+                    ...(registry?.diagnostics.map((entry) => diagnosticView(pluginId, entry)) ?? [])
+                ]
+
+                const notificationStates = (record.manifest!.contributions?.hub?.notificationChannels ?? []).map((channel) => ({
+                    pluginId,
+                    target,
+                    runtime: 'hub' as const,
+                    contributionType: 'notificationChannel',
+                    contributionId: channel.id,
+                    declared: true,
+                    registered: active,
+                    active: enabled && active,
+                    diagnostics
+                }))
+                const messageActionStates = (record.manifest!.contributions?.hub?.messageActions ?? []).map((action) => ({
+                    pluginId,
+                    target,
+                    runtime: 'hub' as const,
+                    contributionType: 'messageAction',
+                    contributionId: action.id,
+                    declared: true,
+                    registered: registeredMessageActionIds.has(action.id),
+                    active: enabled && registeredMessageActionIds.has(action.id),
+                    diagnostics
+                }))
+                return [...notificationStates, ...messageActionStates]
+            })
+    }
+
+    collectCapabilities(): PluginCapabilityView[] {
+        const target = this.targetSummary()
+        return this.records
+            .filter((record) => record.manifest?.capabilities)
+            .flatMap((record) => record.manifest!.capabilities!.map((capability): PluginCapabilityView => {
+                const pluginId = record.manifest!.id
+                const parts = {
+                    ...(capability.parts.web ? { web: this.webPartStatus(record, capability.parts.web) } : {}),
+                    ...(capability.parts.hub ? { hub: this.hubPartStatus(record, capability.parts.hub) } : {}),
+                    ...(capability.parts.runner ? {
+                        runner: {
+                            status: 'missing-target' as const,
+                            required: capability.parts.runner.required,
+                            declared: true,
+                            registered: false,
+                            active: false,
+                            diagnostics: []
+                        }
+                    } : {})
+                }
+                return {
+                    pluginId,
+                    pluginName: record.manifest!.name,
+                    pluginVersion: record.manifest!.version,
+                    capabilityId: capability.id,
+                    kind: capability.kind,
+                    displayName: capability.displayName,
+                    description: capability.description,
+                    status: record.enabled === true ? aggregateCapabilityStatus(parts) : 'disabled',
+                    target,
+                    parts,
+                    ...(capability.parts.web ? { web: webContributionsForPart(record, capability.parts.web) } : {}),
+                    diagnostics: [
+                        ...record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+                        ...(this.activePlugins.get(pluginId)?.registry.diagnostics.map((entry) => diagnosticView(pluginId, entry)) ?? [])
+                    ]
+                }
+            }))
+    }
+
+    getHubMessageAction(pluginId: string, actionId: string): RegisteredHubMessageAction | null {
+        const instance = this.activePlugins.get(pluginId)
+        if (!instance) {
+            return null
+        }
+        return instance.registry.getMessageActions().find((entry) => entry.id === actionId) ?? null
+    }
+
+    async planMessageAction(args: {
+        pluginId: string
+        actionId: string
+        capabilityId?: string
+        namespace: string
+        session: HubMessageActionInput['session']
+        text: string
+        localId?: string
+        attachments: HubMessageActionInput['attachments']
+        payload: unknown
+    }): Promise<HubMessageActionResult> {
+        const action = this.getHubMessageAction(args.pluginId, args.actionId)
+        if (!action) {
+            return {
+                ok: false,
+                code: 'plugin-action-not-active',
+                message: `Plugin message action ${args.pluginId}:${args.actionId} is not active.`
+            }
+        }
+        return await action.contribution.plan({
+            namespace: args.namespace,
+            session: args.session,
+            text: args.text,
+            localId: args.localId,
+            attachments: args.attachments,
+            payload: args.payload,
+            capabilityId: args.capabilityId,
+            actionId: args.actionId
+        })
     }
 
     getDiagnostics(): PluginDiagnosticView[] {
@@ -878,6 +1061,7 @@ export class HubPluginManager {
             },
             contributions: {
                 notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
+                ...(record.manifest?.contributions?.hub?.messageActions ? { messageActions: record.manifest.contributions.hub.messageActions } : {}),
                 ...(record.manifest?.contributions?.runner ? { runner: record.manifest.contributions.runner } : {}),
                 ...(record.manifest?.contributions?.agent ? { agent: record.manifest.contributions.agent } : {}),
                 ...(record.manifest?.contributions?.voice ? { voice: record.manifest.contributions.voice } : {}),
@@ -897,6 +1081,104 @@ export class HubPluginManager {
             stale: false,
             displayName: 'Hub',
             updatedAt: Date.now()
+        }
+    }
+
+    private webPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
+        const declaredIds = new Set(part.contributions.map((entry) => `${entry.type}:${entry.id}`))
+        const registeredIds = new Set<string>()
+        const web = record.manifest?.contributions?.web
+        for (const contribution of part.contributions) {
+            const type = contribution.type
+            const id = contribution.id
+            const exists = type === 'settingsPanel'
+                ? Boolean(web?.settingsPanels?.some((entry) => entry.id === id))
+                : type === 'newSessionField'
+                    ? Boolean(web?.newSessionFields?.some((entry) => entry.id === id))
+                    : type === 'action'
+                        ? Boolean(web?.actions?.some((entry) => entry.id === id))
+                        : type === 'badge'
+                            ? Boolean(web?.badges?.some((entry) => entry.id === id))
+                            : type === 'composerAction'
+                                ? Boolean(web?.composerActions?.some((entry) => entry.id === id))
+                                : false
+            if (exists) {
+                registeredIds.add(`${type}:${id}`)
+            }
+        }
+        return {
+            status: record.enabled !== true
+                ? 'disabled'
+                : Array.from(declaredIds).every((id) => registeredIds.has(id))
+                    ? 'ready'
+                    : 'partial',
+            required: part.required,
+            declared: true,
+            registered: registeredIds.size === declaredIds.size,
+            active: record.enabled === true,
+            diagnostics: []
+        }
+    }
+
+    private hubPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
+        const pluginId = record.manifest?.id
+        const target = this.targetSummary()
+        if (!pluginId || record.enabled !== true) {
+            return {
+                status: 'disabled',
+                target,
+                required: part.required,
+                declared: true,
+                registered: false,
+                active: false,
+                diagnostics: []
+            }
+        }
+        if (!record.manifest?.runtimes?.hub) {
+            return {
+                status: 'missing-target',
+                target,
+                required: part.required,
+                declared: true,
+                registered: false,
+                active: false,
+                diagnostics: []
+            }
+        }
+        const instance = this.activePlugins.get(pluginId)
+        const diagnostics = [
+            ...record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+            ...(instance?.registry.diagnostics.map((entry) => diagnosticView(pluginId, entry)) ?? [])
+        ]
+        if (!instance) {
+            return {
+                status: record.status === 'failed' || record.status === 'reload-failed' ? 'failed' : 'partial',
+                target,
+                required: part.required,
+                declared: true,
+                registered: false,
+                active: false,
+                diagnostics
+            }
+        }
+        const actionIds = new Set(instance.registry.getMessageActions().map((entry) => entry.id))
+        const registered = part.contributions.every((contribution) => {
+            if (contribution.type === 'messageAction') {
+                return actionIds.has(contribution.id)
+            }
+            if (contribution.type === 'notificationChannel') {
+                return true
+            }
+            return false
+        })
+        return {
+            status: registered ? 'ready' : 'partial',
+            target,
+            required: part.required,
+            declared: true,
+            registered,
+            active: registered,
+            diagnostics
         }
     }
 

@@ -88,6 +88,9 @@ export type HubPluginContext = {
     notifications: {
         registerChannel(channel: PluginNotificationChannel): Disposable
     }
+    messages: {
+        registerAction(action: HubMessageActionContribution): Disposable
+    }
 }
 ```
 
@@ -120,6 +123,9 @@ export type RunnerPluginContext = {
         registerSpawnHook(hook: RunnerSpawnHookContribution): Disposable
         registerAgentAdapter(adapter: RunnerAgentAdapterContribution): Disposable
         registerAgentCapabilityProvider(provider: RunnerAgentCapabilityProviderContribution): Disposable
+    }
+    actions: {
+        register(action: RunnerPluginActionContribution): Disposable
     }
 }
 ```

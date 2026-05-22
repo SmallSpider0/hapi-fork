@@ -19,6 +19,9 @@ export type HubPluginContext = {
     notifications: {
         registerChannel(channel: PluginNotificationChannel): Disposable
     }
+    messages: {
+        registerAction(action: HubMessageActionContribution): Disposable
+    }
 }
 ```
 

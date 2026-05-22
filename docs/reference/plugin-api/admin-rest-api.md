@@ -10,6 +10,7 @@ OpenAPI JSON: [/docs/plugin-api/openapi.json](/docs/plugin-api/openapi.json)
 |---|---|---|---|---|---|
 | `GET` | `/api/plugins` | `target` | — | `PluginListResponse` | List Hub and/or Runner plugin inventory for the current namespace. |
 | `GET` | `/api/plugins/diagnostics` | `target` | — | `PluginDiagnosticsResponse` | List plugin diagnostics for Hub or Runner targets. |
+| `GET` | `/api/plugins/capabilities` | `target` | — | `PluginCapabilitiesResponse` | List user-facing plugin capabilities aggregated across Web, Hub, and Runner parts; pass sessionId to resolve session-runner parts for a chat surface. |
 | `POST` | `/api/plugins/reload` | `target` | — | `PluginReloadResult` | Reload all plugins on the selected target. |
 | `POST` | `/api/plugins/install-local` | `target` | `PluginInstallLocalRequest` | `PluginInstallResult` | Install a plugin from a target-local directory. |
 | `POST` | `/api/plugins/install-package` | `target` | `PluginInstallPackageRequest` | `PluginInstallResult` | Install a plugin from a tgz/zip package upload payload. |
