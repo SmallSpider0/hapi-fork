@@ -25,6 +25,7 @@ import {
     PluginLocalDirectoryListResponseSchema,
     PluginReloadResultSchema,
     RunnerPluginInventorySchema,
+    RunnerPluginActionInvokeResponseSchema,
     RunnerPluginUnsupportedInstallResultSchema,
     type PluginDeleteResult,
     type PluginDetailResponse,
@@ -34,6 +35,7 @@ import {
     type PluginLocalDirectoryListResponse,
     type PluginReloadResult,
     type RunnerPluginInventory,
+    type RunnerPluginActionInvokeResponse,
     type RunnerPluginUnsupportedInstallResult
 } from '@hapi/protocol/plugins/admin'
 import type { RpcRegistry } from '../socket/rpcRegistry'
@@ -318,6 +320,22 @@ export class RpcGateway {
     async deleteRunnerPlugin(machineId: string, pluginId: string, reload = true): Promise<PluginDeleteResult> {
         const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginsDelete, { pluginId, reload })
         return PluginDeleteResultSchema.parse(result)
+    }
+
+    async invokeRunnerPluginAction(
+        machineId: string,
+        payload: {
+            pluginId: string
+            capabilityId?: string
+            actionId: string
+            namespace: string
+            sessionId?: string
+            cwd?: string
+            payload?: unknown
+        }
+    ): Promise<RunnerPluginActionInvokeResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginActionInvoke, payload)
+        return RunnerPluginActionInvokeResponseSchema.parse(result)
     }
 
     async importRunnerAgentHistory(

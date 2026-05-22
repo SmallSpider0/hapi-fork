@@ -95,7 +95,7 @@ function createWebApp(options: {
     app.use('/api/*', createAuthMiddleware(options.jwtSecret))
     app.route('/api', createEventsRoutes(options.getSseManager, options.getSyncEngine, options.getVisibilityTracker))
     app.route('/api', createSessionsRoutes(options.getSyncEngine))
-    app.route('/api', createMessagesRoutes(options.getSyncEngine))
+    app.route('/api', createMessagesRoutes(options.getSyncEngine, options.getPluginManager))
     app.route('/api', createPermissionsRoutes(options.getSyncEngine))
     app.route('/api', createMachinesRoutes(options.getSyncEngine))
     app.route('/api', createGitRoutes(options.getSyncEngine))

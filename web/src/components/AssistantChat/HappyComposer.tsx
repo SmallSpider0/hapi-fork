@@ -5,6 +5,7 @@ import {
     type ClipboardEvent as ReactClipboardEvent,
     type FormEvent as ReactFormEvent,
     type KeyboardEvent as ReactKeyboardEvent,
+    type MutableRefObject,
     type SyntheticEvent as ReactSyntheticEvent,
     useCallback,
     useEffect,
@@ -29,7 +30,8 @@ import { Autocomplete } from '@/components/ChatInput/Autocomplete'
 import { StatusBar } from '@/components/AssistantChat/StatusBar'
 import { ComposerButtons } from '@/components/AssistantChat/ComposerButtons'
 import type { PendingSchedule } from '@/components/AssistantChat/ScheduleTimePicker'
-import type { DeliveryNotBeforeComposerAction } from '@/components/AssistantChat/composerActions'
+import type { PluginMessageComposerAction } from '@/components/AssistantChat/composerActions'
+import type { PendingPluginMessageAction } from '@/lib/assistant-runtime'
 import { AttachmentItem } from '@/components/AssistantChat/AttachmentItem'
 import { useTranslation } from '@/lib/use-translation'
 import { getModelOptionsForFlavor, getNextModelForFlavor } from './modelOptions'
@@ -82,7 +84,9 @@ export function HappyComposer(props: {
     pendingSchedule?: PendingSchedule | null
     onSchedule?: (pending: PendingSchedule) => void
     onClearSchedule?: () => void
-    deliveryNotBeforeAction?: DeliveryNotBeforeComposerAction | null
+    scheduleAction?: PluginMessageComposerAction | null
+    pluginMessageActions?: PluginMessageComposerAction[]
+    pendingPluginActionRef?: MutableRefObject<PendingPluginMessageAction | null>
 }) {
     const { t } = useTranslation()
     const {
@@ -122,7 +126,9 @@ export function HappyComposer(props: {
         pendingSchedule: pendingScheduleProp,
         onSchedule: onScheduleProp,
         onClearSchedule: onClearScheduleProp,
-        deliveryNotBeforeAction
+        scheduleAction,
+        pluginMessageActions = [],
+        pendingPluginActionRef
     } = props
 
     // Use ?? so missing values fall back to default (destructuring defaults only handle undefined)
@@ -536,6 +542,12 @@ export function HappyComposer(props: {
         // rejected send path.
     }, [api])
 
+    const handlePluginMessageAction = useCallback((action: PluginMessageComposerAction, payload?: unknown) => {
+        if (!pendingPluginActionRef || !canSend) return
+        pendingPluginActionRef.current = { action, payload }
+        api.composer().send()
+    }, [api, canSend, pendingPluginActionRef])
+
     const overlays = useMemo(() => {
         if (showSettings && (showCollaborationSettings || showPermissionSettings || showModelSettings || showModelReasoningEffortSettings || showEffortSettings)) {
             return (
@@ -863,7 +875,9 @@ export function HappyComposer(props: {
                             pendingSchedule={pendingSchedule}
                             onSchedule={setPendingSchedule}
                             onClearSchedule={isControlled ? onClearScheduleProp : () => setPendingScheduleLocal(null)}
-                            deliveryNotBeforeAction={deliveryNotBeforeAction}
+                            scheduleAction={scheduleAction}
+                            pluginMessageActions={pluginMessageActions}
+                            onPluginMessageAction={handlePluginMessageAction}
                             hasAttachments={hasAttachments}
                         />
                     </div>

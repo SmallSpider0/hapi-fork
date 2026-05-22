@@ -1,6 +1,7 @@
 import { Hono, type Context } from 'hono'
 import {
     parseRunnerPluginTargetScope,
+    PluginCapabilitiesResponseSchema,
     PluginConfigUpdateRequestSchema,
     PluginDeleteResultSchema,
     PluginDisableRequestSchema,
@@ -20,6 +21,8 @@ import {
     type PluginInstallResult,
     type PluginListItem,
     type PluginReloadResult,
+    type PluginCapabilityPartStatus,
+    type PluginCapabilityView,
     type PluginTargetActionResult,
     type PluginTargetInventory,
     type PluginTargetScope,
@@ -81,6 +84,16 @@ function parseTarget(c: Context<WebAppEnv>): PluginTargetScope | null | Response
     return parsed.data
 }
 
+function parseOptionalSessionId(c: Context<WebAppEnv>): string | null | Response {
+    const raw = c.req.query('sessionId')
+    if (raw === undefined) return null
+    const sessionId = raw.trim()
+    if (!sessionId) {
+        return c.json({ error: 'Invalid sessionId' }, 400)
+    }
+    return sessionId
+}
+
 function hubTargetSummary(): PluginTargetSummary {
     return {
         scope: 'hub',
@@ -124,6 +137,95 @@ function withTarget(plugin: PluginListItem, target: PluginTargetSummary): Plugin
     }
 }
 
+function aggregateCapabilityStatus(parts: PluginCapabilityView['parts']): PluginCapabilityView['status'] {
+    const required = Object.values(parts).filter((part): part is PluginCapabilityPartStatus => Boolean(part) && part.required !== false)
+    if (required.length === 0) {
+        return 'ready'
+    }
+    const priority: PluginCapabilityView['status'][] = ['disabled', 'failed', 'incompatible', 'offline', 'missing-target', 'partial']
+    for (const status of priority) {
+        if (required.some((part) => part.status === status)) {
+            return status
+        }
+    }
+    return required.every((part) => part.status === 'ready') ? 'ready' : 'partial'
+}
+
+function betterCapabilityPart(left: PluginCapabilityPartStatus | undefined, right: PluginCapabilityPartStatus | undefined): PluginCapabilityPartStatus | undefined {
+    if (!left) return right
+    if (!right) return left
+    if (left.status === 'missing-target' && right.status !== 'missing-target') return right
+    if (left.status !== 'ready' && right.status === 'ready') return right
+    if (left.active !== true && right.active === true) return right
+    return left
+}
+
+function mergeWebContributions(left: PluginCapabilityView['web'], right: PluginCapabilityView['web']): PluginCapabilityView['web'] {
+    if (!left) return right
+    if (!right) return left
+    return {
+        ...(left.settingsPanels || right.settingsPanels ? { settingsPanels: [...(left.settingsPanels ?? []), ...(right.settingsPanels ?? [])] } : {}),
+        ...(left.newSessionFields || right.newSessionFields ? { newSessionFields: [...(left.newSessionFields ?? []), ...(right.newSessionFields ?? [])] } : {}),
+        ...(left.actions || right.actions ? { actions: [...(left.actions ?? []), ...(right.actions ?? [])] } : {}),
+        ...(left.badges || right.badges ? { badges: [...(left.badges ?? []), ...(right.badges ?? [])] } : {}),
+        ...(left.composerActions || right.composerActions ? { composerActions: [...(left.composerActions ?? []), ...(right.composerActions ?? [])] } : {})
+    }
+}
+
+function mergeCapabilityViews(views: PluginCapabilityView[]): PluginCapabilityView[] {
+    const byKey = new Map<string, PluginCapabilityView>()
+    for (const view of views) {
+        const key = `${view.pluginId}:${view.capabilityId}`
+        const existing = byKey.get(key)
+        if (!existing) {
+            byKey.set(key, view)
+            continue
+        }
+        const parts = {
+            web: betterCapabilityPart(existing.parts.web, view.parts.web),
+            hub: betterCapabilityPart(existing.parts.hub, view.parts.hub),
+            runner: betterCapabilityPart(existing.parts.runner, view.parts.runner)
+        }
+        byKey.set(key, {
+            ...existing,
+            pluginName: existing.pluginName ?? view.pluginName,
+            pluginVersion: existing.pluginVersion ?? view.pluginVersion,
+            displayName: existing.displayName ?? view.displayName,
+            description: existing.description ?? view.description,
+            status: aggregateCapabilityStatus(parts),
+            target: undefined,
+            parts,
+            web: mergeWebContributions(existing.web, view.web),
+            diagnostics: [...existing.diagnostics, ...view.diagnostics]
+        })
+    }
+    return Array.from(byKey.values())
+}
+
+function withCapabilityTarget(capability: PluginCapabilityView, target: PluginTargetSummary): PluginCapabilityView {
+    const runnerPart = capability.parts.runner
+    const nextRunnerPart = runnerPart
+        ? {
+            ...runnerPart,
+            target,
+            ...(target.runtime === 'runner' && (!target.active || target.error) ? {
+                status: 'offline' as const,
+                active: false
+            } : {})
+        }
+        : undefined
+    const parts = {
+        ...capability.parts,
+        ...(nextRunnerPart ? { runner: nextRunnerPart } : {})
+    }
+    return {
+        ...capability,
+        target,
+        parts,
+        status: aggregateCapabilityStatus(parts)
+    }
+}
+
 function hubInventory(manager: HubPluginManager): PluginTargetInventory {
     const target = hubTargetSummary()
     return {
@@ -131,6 +233,12 @@ function hubInventory(manager: HubPluginManager): PluginTargetInventory {
         plugins: manager.listPlugins().map((plugin) => withTarget(plugin, target)),
         webContributions: typeof manager.collectWebContributions === 'function'
             ? manager.collectWebContributions()
+            : [],
+        contributionStates: typeof manager.collectContributionStates === 'function'
+            ? manager.collectContributionStates()
+            : [],
+        capabilities: typeof manager.collectCapabilities === 'function'
+            ? manager.collectCapabilities()
             : []
     }
 }
@@ -142,6 +250,8 @@ function cachedRunnerInventory(machine: Machine, error?: string): PluginTargetIn
         target,
         plugins: (inventory?.plugins ?? []).map((plugin) => withTarget(plugin, target)),
         ...(inventory?.webContributions ? { webContributions: inventory.webContributions } : {}),
+        ...(inventory?.contributionStates ? { contributionStates: inventory.contributionStates } : {}),
+        ...(inventory?.capabilities ? { capabilities: inventory.capabilities.map((capability) => withCapabilityTarget(capability, target)) } : {}),
         ...(target.error ? { error: target.error } : {})
     }
 }
@@ -151,7 +261,9 @@ function freshRunnerInventory(machine: Machine, inventory: RunnerPluginInventory
     return {
         target,
         plugins: inventory.plugins.map((plugin) => withTarget(plugin, target)),
-        webContributions: inventory.webContributions
+        webContributions: inventory.webContributions,
+        contributionStates: inventory.contributionStates,
+        capabilities: inventory.capabilities?.map((capability) => withCapabilityTarget(capability, target))
     }
 }
 
@@ -459,6 +571,68 @@ export function createPluginsRoutes(
         }
         const payload = PluginDiagnosticsResponseSchema.parse({ diagnostics: manager.getDiagnostics() })
         return c.json(payload)
+    })
+
+    app.get('/plugins/capabilities', async (c) => {
+        const manager = requirePluginManager(c, getPluginManager)
+        if (manager instanceof Response) {
+            return manager
+        }
+        const target = parseTarget(c)
+        if (target instanceof Response) return target
+        const sessionId = parseOptionalSessionId(c)
+        if (sessionId instanceof Response) return sessionId
+
+        if (target === 'hub') {
+            return c.json(PluginCapabilitiesResponseSchema.parse({
+                capabilities: typeof manager.collectCapabilities === 'function' ? manager.collectCapabilities() : []
+            }))
+        }
+
+        const engine = getSyncEngine()
+        const runnerMachineId = target ? parseRunnerPluginTargetScope(target) : null
+        if (runnerMachineId) {
+            if (!engine) {
+                return c.json(PluginCapabilitiesResponseSchema.parse({ capabilities: [] }))
+            }
+            const machine = engine.getMachineByNamespace(runnerMachineId, c.get('namespace'))
+            if (!machine) return c.json({ error: 'Runner target not found' }, 404)
+            const inventory = await loadRunnerInventory(engine, machine)
+            return c.json(PluginCapabilitiesResponseSchema.parse({ capabilities: inventory.capabilities ?? [] }))
+        }
+
+        if (sessionId && !target) {
+            const engine = requireSyncEngine(c, getSyncEngine)
+            if (engine instanceof Response) return engine
+            const session = engine.getSessionByNamespace(sessionId, c.get('namespace'))
+            if (!session) {
+                return c.json({ error: 'Session not found' }, 404)
+            }
+            const capabilities = typeof manager.collectCapabilities === 'function'
+                ? [...manager.collectCapabilities()]
+                : []
+            const sessionMachineId = typeof session.metadata?.machineId === 'string'
+                ? session.metadata.machineId
+                : null
+            if (sessionMachineId) {
+                const machine = engine.getMachineByNamespace(sessionMachineId, c.get('namespace'))
+                if (machine) {
+                    const inventory = await loadRunnerInventory(engine, machine)
+                    capabilities.push(...(inventory.capabilities ?? []))
+                }
+            }
+            return c.json(PluginCapabilitiesResponseSchema.parse({ capabilities: mergeCapabilityViews(capabilities) }))
+        }
+
+        const capabilities = target === 'all-runners' || typeof manager.collectCapabilities !== 'function'
+            ? []
+            : [...manager.collectCapabilities()]
+        if (engine && (!target || target === 'all-runners')) {
+            const machines = engine.getMachinesByNamespace(c.get('namespace'))
+            const inventories = await Promise.all(machines.map((machine) => loadRunnerInventory(engine, machine)))
+            capabilities.push(...inventories.flatMap((inventory) => inventory.capabilities ?? []))
+        }
+        return c.json(PluginCapabilitiesResponseSchema.parse({ capabilities: mergeCapabilityViews(capabilities) }))
     })
 
     app.post('/plugins/reload', async (c) => {

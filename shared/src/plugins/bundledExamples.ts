@@ -153,6 +153,33 @@ const spawnPolicyRuntime = `export function activate(ctx) {
 }
 `
 
+const crossRuntimeHub = `export function activate(ctx) {
+    ctx.messages.registerAction({
+        id: 'example-cross-runtime',
+        kind: 'chat.composer.messageAction',
+        async plan() {
+            return { ok: true, plan: { type: 'immediate' } };
+        }
+    });
+}
+`
+
+const crossRuntimeRunner = `export function activate(ctx) {
+    ctx.actions.register({
+        id: 'example-cross-runtime-context',
+        kind: 'chat.composer.messageAction',
+        run(input) {
+            return {
+                ok: true,
+                result: {
+                    text: \`Example runner context for \${input.cwd ?? input.sessionId ?? 'unknown session'}\`
+                }
+            };
+        }
+    });
+}
+`
+
 export const bundledExamplePlugins: BundledExamplePlugin[] = [
     {
         manifest: manifestBase({
@@ -282,19 +309,92 @@ export const bundledExamplePlugins: BundledExamplePlugin[] = [
                     badges: [{ id: 'descriptor-only', label: 'Descriptor-only', variant: 'success' }],
                     composerActions: [{
                         id: 'example-schedule-send',
-                        kind: 'deliveryNotBefore',
+                        kind: 'pluginMessageAction',
                         label: 'Example schedule send',
                         icon: 'clock',
-                        maxDelayMs: 10 * 60 * 1000,
-                        presets: [
-                            { id: 'example-plus-2m', label: '+2m', delayMs: 2 * 60 * 1000 },
-                            { id: 'example-plus-10m', label: '+10m', delayMs: 10 * 60 * 1000 }
-                        ]
+                        handler: { position: 'hub', actionId: 'example-schedule-send' },
+                        ui: {
+                            kind: 'delayPicker',
+                            maxDelayMs: 10 * 60 * 1000,
+                            presets: [
+                                { id: 'example-plus-2m', label: '+2m', delayMs: 2 * 60 * 1000 },
+                                { id: 'example-plus-10m', label: '+10m', delayMs: 10 * 60 * 1000 }
+                            ]
+                        }
                     }]
                 }
             }
         }),
         files: []
+    },
+    {
+        manifest: manifestBase({
+            id: 'com.hapi.examples.cross-runtime-action',
+            name: 'Example Cross Runtime Action',
+            description: 'Demonstrates one capability assembled from Web descriptor, Hub message action, and Runner action parts.',
+            capabilities: [{
+                id: 'example-cross-runtime',
+                kind: 'chat.composer.messageAction',
+                displayName: 'Example Cross Runtime Action',
+                description: 'Shows how a single capability can require Web, Hub, and Runner parts before becoming ready.',
+                parts: {
+                    web: {
+                        required: true,
+                        contributions: [{ type: 'composerAction', id: 'example-cross-runtime' }]
+                    },
+                    hub: {
+                        required: true,
+                        contributions: [{ type: 'messageAction', id: 'example-cross-runtime' }]
+                    },
+                    runner: {
+                        required: true,
+                        target: 'session-runner',
+                        contributions: [{ type: 'action', id: 'example-cross-runtime-context' }]
+                    }
+                }
+            }],
+            runtimes: {
+                hub: { entry: 'dist/hub.js' },
+                runner: { entry: 'dist/runner.js' }
+            },
+            contributions: {
+                hub: {
+                    messageActions: [{
+                        id: 'example-cross-runtime',
+                        displayName: 'Example Cross Runtime Action',
+                        description: 'Example Hub message-action handler for a cross-runtime capability.'
+                    }]
+                },
+                web: {
+                    settingsPanels: [{
+                        id: 'cross-runtime-action',
+                        title: 'Example Cross Runtime Action',
+                        components: [
+                            { kind: 'text', text: 'Enable this plugin on Hub and the session Runner to make the capability ready.', tone: 'info' },
+                            { kind: 'badge', label: 'Web + Hub + Runner', variant: 'success' }
+                        ]
+                    }],
+                    composerActions: [{
+                        id: 'example-cross-runtime',
+                        kind: 'pluginMessageAction',
+                        capabilityId: 'example-cross-runtime',
+                        label: 'Example cross-runtime action',
+                        description: 'Descriptor for a capability whose readiness depends on Hub and Runner handlers.',
+                        icon: 'clock',
+                        handler: { position: 'hub', actionId: 'example-cross-runtime' },
+                        ui: {
+                            kind: 'confirm',
+                            title: 'Run example cross-runtime action',
+                            body: 'This example demonstrates capability readiness; it sends immediately.'
+                        }
+                    }]
+                }
+            }
+        }),
+        files: [
+            { path: 'dist/hub.js', content: crossRuntimeHub },
+            { path: 'dist/runner.js', content: crossRuntimeRunner }
+        ]
     },
     {
         manifest: manifestBase({

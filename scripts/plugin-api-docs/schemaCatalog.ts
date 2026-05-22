@@ -6,6 +6,8 @@ import {
     AgentHistoryImportResultSchema,
     PluginConfigScopeSchema,
     PluginConfigUpdateRequestSchema,
+    PluginCapabilitiesResponseSchema,
+    PluginCapabilityViewSchema,
     PluginDeleteResultSchema,
     PluginDetailResponseSchema,
     PluginDiagnosticsResponseSchema,
@@ -91,6 +93,20 @@ export const schemaCatalog: SchemaDoc[] = [
         group: 'admin',
         description: 'Flattened plugin diagnostics response.',
         schema: PluginDiagnosticsResponseSchema
+    },
+    {
+        id: 'plugin-capabilities-response',
+        title: 'PluginCapabilitiesResponse',
+        group: 'admin',
+        description: 'Aggregated capability readiness across Web, Hub, and Runner parts.',
+        schema: PluginCapabilitiesResponseSchema
+    },
+    {
+        id: 'plugin-capability-view',
+        title: 'PluginCapabilityView',
+        group: 'admin',
+        description: 'One user-facing plugin capability with per-position part status and Web-safe descriptors.',
+        schema: PluginCapabilityViewSchema
     },
     {
         id: 'plugin-reload-result',

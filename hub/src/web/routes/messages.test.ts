@@ -1,27 +1,65 @@
 /**
  * Tests for the POST /sessions/:id/messages route.
- *
- * Covers:
- * - #2  server-side scheduledAt upper bound (7-day cap)
- * - #4  Zod error details exposed in response body (issues field)
+ * Public delayed-send contract is pluginAction only; legacy scheduledAt/delivery
+ * request fields are intentionally rejected by the strict request schema.
  */
 import { describe, expect, it } from 'bun:test'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
+import type { HubPluginManager } from '../../plugins/pluginManager'
 import { createMessagesRoutes } from './messages'
 
-// TS note: engine is cast to unknown→SyncEngine so test helpers don't need to
-// satisfy the full SyncEngine shape (only the subset the route under test uses).
+function createScheduleAction(notBefore: number) {
+    return {
+        pluginId: 'com.hapi.core.schedule-send',
+        capabilityId: 'schedule-send',
+        position: 'hub' as const,
+        actionId: 'schedule-send',
+        payload: { notBefore }
+    }
+}
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function createPluginManager() {
+    return {
+        planMessageAction: async (args: { localId?: string; attachments: unknown[]; payload: unknown }) => {
+            const payload = args.payload && typeof args.payload === 'object' && !Array.isArray(args.payload)
+                ? args.payload as Record<string, unknown>
+                : {}
+            const notBefore = payload.notBefore
+            if (typeof notBefore !== 'number' || !Number.isInteger(notBefore) || notBefore <= 0) {
+                return { ok: false as const, code: 'invalid-not-before', message: 'Schedule send requires payload.notBefore.' }
+            }
+            if (!args.localId) {
+                return { ok: false as const, code: 'missing-local-id', message: 'Scheduled messages require localId.' }
+            }
+            if (args.attachments.length > 0) {
+                return { ok: false as const, code: 'attachments-unsupported', message: 'Scheduled messages with attachments are not supported.' }
+            }
+            if (notBefore > Date.now() + 7 * 24 * 60 * 60 * 1000) {
+                return { ok: false as const, code: 'schedule-too-far', message: 'Schedule time must be within 7 days.' }
+            }
+            return {
+                ok: true as const,
+                plan: {
+                    type: 'messageDelivery' as const,
+                    delivery: { notBefore },
+                    source: {
+                        pluginId: 'com.hapi.core.schedule-send',
+                        capabilityId: 'schedule-send',
+                        actionId: 'schedule-send'
+                    }
+                }
+            }
+        }
+    } as unknown as HubPluginManager
+}
 
 function createApp(opts: {
     active?: boolean
     sendMessage?: (sessionId: string, payload: unknown) => Promise<void>
-}) {
+    pluginManager?: HubPluginManager | null
+} = {}) {
     const sentMessages: Array<{ sessionId: string; payload: unknown }> = []
     const sendMessage = opts.sendMessage ?? (async (sessionId: string, payload: unknown) => {
         sentMessages.push({ sessionId, payload })
@@ -31,7 +69,7 @@ function createApp(opts: {
         resolveSessionAccess: () => ({
             ok: true,
             sessionId: 'session-1',
-            session: { id: 'session-1', active: opts.active !== false }
+            session: { id: 'session-1', namespace: 'default', active: opts.active !== false, metadata: null }
         }),
         sendMessage,
         cancelQueuedMessage: async () => ({ status: 'cancelled' }),
@@ -43,182 +81,76 @@ function createApp(opts: {
         c.set('namespace', 'default')
         await next()
     })
-    app.route('/api', createMessagesRoutes(() => engine as SyncEngine))
+    app.route('/api', createMessagesRoutes(() => engine, () => opts.pluginManager ?? null))
 
     return { app, sentMessages }
 }
 
-// ---------------------------------------------------------------------------
-// #2 server-side scheduledAt upper bound
-// ---------------------------------------------------------------------------
-
-describe('POST /api/sessions/:id/messages — #2 scheduledAt upper bound', () => {
-    it('rejects scheduledAt more than 7 days in the future with 400 and clear message', async () => {
-        const { app } = createApp({})
-
-        const eightDaysMs = Date.now() + 8 * 24 * 60 * 60 * 1000
+describe('POST /api/sessions/:id/messages — pluginAction message plan', () => {
+    it('rejects legacy scheduledAt request fields with strict schema errors', async () => {
+        const { app } = createApp()
         const response = await app.request('/api/sessions/session-1/messages', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'hello', localId: 'local-1', scheduledAt: eightDaysMs })
+            body: JSON.stringify({ text: 'hello', localId: 'local-1', scheduledAt: Date.now() + 60_000 })
         })
 
         expect(response.status).toBe(400)
-        const body = await response.json() as { error: string; issues?: { _errors?: string[] } }
+        const body = await response.json() as { error: string; issues?: unknown }
         expect(body.error).toBe('Invalid body')
-        // #4: issues field must be present
-        expect(body.issues).toBeDefined()
-        // The 7-day message must appear somewhere in the issues
-        const issuesStr = JSON.stringify(body.issues)
-        expect(issuesStr).toContain('7 days')
+        expect(JSON.stringify(body.issues)).toContain('scheduledAt')
     })
 
-    it('accepts scheduledAt exactly at the 7-day boundary (inclusive)', async () => {
-        const { app, sentMessages } = createApp({})
-
-        // Use slightly less than 7 days to avoid flakiness at the exact boundary
-        const nearlySevenDays = Date.now() + 7 * 24 * 60 * 60 * 1000 - 1000
+    it('rejects legacy delivery.notBefore request fields with strict schema errors', async () => {
+        const { app } = createApp()
         const response = await app.request('/api/sessions/session-1/messages', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'hello', localId: 'local-2', scheduledAt: nearlySevenDays })
+            body: JSON.stringify({ text: 'hello', localId: 'local-2', delivery: { notBefore: Date.now() + 60_000 } })
         })
 
-        expect(response.status).toBe(200)
-        expect(sentMessages).toHaveLength(1)
+        expect(response.status).toBe(400)
+        const body = await response.json() as { error: string; issues?: unknown }
+        expect(body.error).toBe('Invalid body')
+        expect(JSON.stringify(body.issues)).toContain('delivery')
     })
 
-    it('accepts null scheduledAt (immediate send)', async () => {
-        const { app, sentMessages } = createApp({})
-
-        const response = await app.request('/api/sessions/session-1/messages', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'hello', localId: 'local-3', scheduledAt: null })
-        })
-
-        expect(response.status).toBe(200)
-        expect(sentMessages).toHaveLength(1)
-    })
-
-    it('accepts missing scheduledAt (immediate send)', async () => {
-        const { app, sentMessages } = createApp({})
-
-        const response = await app.request('/api/sessions/session-1/messages', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'hello' })
-        })
-
-        expect(response.status).toBe(200)
-        expect(sentMessages).toHaveLength(1)
-    })
-
-    it('accepts delivery.notBefore and forwards it alongside legacy scheduledAt compatibility', async () => {
-        const { app, sentMessages } = createApp({})
-
+    it('accepts a Hub pluginAction and forwards the plugin-produced delivery plan', async () => {
+        const { app, sentMessages } = createApp({ pluginManager: createPluginManager() })
         const notBefore = Date.now() + 60_000
         const response = await app.request('/api/sessions/session-1/messages', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'hello', localId: 'local-delivery', delivery: { notBefore } })
+            body: JSON.stringify({ text: 'hello', localId: 'local-3', pluginAction: createScheduleAction(notBefore) })
         })
 
         expect(response.status).toBe(200)
         expect(sentMessages).toHaveLength(1)
-        expect(sentMessages[0]?.payload).toMatchObject({ delivery: { notBefore } })
+        expect(sentMessages[0]?.payload).toMatchObject({
+            plan: {
+                type: 'messageDelivery',
+                delivery: { notBefore },
+                source: { pluginId: 'com.hapi.core.schedule-send', capabilityId: 'schedule-send', actionId: 'schedule-send' }
+            }
+        })
     })
-})
 
-// ---------------------------------------------------------------------------
-// #4 Zod error details in response body
-// ---------------------------------------------------------------------------
-
-describe('POST /api/sessions/:id/messages — #4 Zod error issues in response', () => {
-    it('returns issues when scheduledAt is set but localId is missing', async () => {
-        const { app } = createApp({})
-
-        const futureMs = Date.now() + 60_000
+    it('returns plugin handler validation errors without sending', async () => {
+        const { app, sentMessages } = createApp({ pluginManager: createPluginManager() })
         const response = await app.request('/api/sessions/session-1/messages', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 'hello', scheduledAt: futureMs })
+            body: JSON.stringify({ text: 'hello', pluginAction: createScheduleAction(Date.now() + 60_000) })
         })
 
         expect(response.status).toBe(400)
-        const body = await response.json() as { error: string; issues?: unknown }
-        expect(body.error).toBe('Invalid body')
-        expect(body.issues).toBeDefined()
-        const issuesStr = JSON.stringify(body.issues)
-        expect(issuesStr).toContain('localId')
-    })
-
-    it('returns issues with a non-string text field', async () => {
-        const { app } = createApp({})
-
-        const response = await app.request('/api/sessions/session-1/messages', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({ text: 123 })
-        })
-
-        expect(response.status).toBe(400)
-        const body = await response.json() as { error: string; issues?: unknown }
-        expect(body.error).toBe('Invalid body')
-        expect(body.issues).toBeDefined()
-    })
-})
-
-// ---------------------------------------------------------------------------
-// HAPI Bot R3 finding 3: scheduledAt + attachments rejected
-// ---------------------------------------------------------------------------
-
-describe('POST /api/sessions/:id/messages — scheduledAt + attachments rejected', () => {
-    it('rejects scheduledAt combined with non-empty attachments with 400', async () => {
-        const { app, sentMessages } = createApp({})
-
-        const futureMs = Date.now() + 60_000
-        const response = await app.request('/api/sessions/session-1/messages', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-                text: 'hello',
-                localId: 'local-att',
-                scheduledAt: futureMs,
-                attachments: [{ id: 'att-1', filename: 'a.png', mimeType: 'image/png', size: 10, path: '/tmp/a.png' }]
-            })
-        })
-
-        expect(response.status).toBe(400)
-        const body = await response.json() as { error: string; issues?: unknown }
-        expect(body.error).toBe('Invalid body')
-        const issuesStr = JSON.stringify(body.issues)
-        expect(issuesStr).toContain('attachments')
+        const body = await response.json() as { error: string }
+        expect(body.error).toContain('localId')
         expect(sentMessages).toHaveLength(0)
     })
 
-    it('accepts scheduledAt with empty attachments array', async () => {
-        const { app, sentMessages } = createApp({})
-
-        const futureMs = Date.now() + 60_000
-        const response = await app.request('/api/sessions/session-1/messages', {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify({
-                text: 'hello',
-                localId: 'local-att-2',
-                scheduledAt: futureMs,
-                attachments: []
-            })
-        })
-
-        expect(response.status).toBe(200)
-        expect(sentMessages).toHaveLength(1)
-    })
-
-    it('accepts immediate send with attachments (no scheduledAt)', async () => {
-        const { app, sentMessages } = createApp({})
-
+    it('keeps immediate sends and attachments independent from schedule plugin actions', async () => {
+        const { app, sentMessages } = createApp()
         const response = await app.request('/api/sessions/session-1/messages', {
             method: 'POST',
             headers: { 'content-type': 'application/json' },
@@ -230,5 +162,6 @@ describe('POST /api/sessions/:id/messages — scheduledAt + attachments rejected
 
         expect(response.status).toBe(200)
         expect(sentMessages).toHaveLength(1)
+        expect(sentMessages[0]?.payload).toMatchObject({ plan: { type: 'immediate' } })
     })
 })

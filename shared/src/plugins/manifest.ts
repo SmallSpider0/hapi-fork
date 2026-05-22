@@ -34,6 +34,60 @@ const HubNotificationChannelContributionSchema = z.object({
     displayName: z.string().min(1)
 }).strict()
 
+export const HubMessageActionContributionSchema = z.object({
+    id: ContributionIdSchema,
+    displayName: z.string().min(1),
+    description: z.string().optional()
+}).strict()
+export type HubMessageActionContributionDescriptor = z.infer<typeof HubMessageActionContributionSchema>
+
+export const PluginCapabilityKindSchema = z.enum([
+    'chat.composer.messageAction',
+    'chat.contextProvider',
+    'notification.channel',
+    'runner.spawnExtension',
+    'agent.adapter',
+    'agent.capabilityProvider',
+    'settings.panel',
+    'integration.bridge'
+])
+export type PluginCapabilityKind = z.infer<typeof PluginCapabilityKindSchema>
+
+export const PluginCapabilityPartTargetSchema = z.enum(['hub', 'session-runner', 'selected-runner', 'all-runners'])
+export type PluginCapabilityPartTarget = z.infer<typeof PluginCapabilityPartTargetSchema>
+
+export const PluginCapabilityPartContributionSchema = z.object({
+    type: z.string().min(1).max(128),
+    id: ContributionIdSchema
+}).strict()
+export type PluginCapabilityPartContribution = z.infer<typeof PluginCapabilityPartContributionSchema>
+
+export const PluginCapabilityPartSchema = z.object({
+    required: z.boolean().default(true),
+    target: PluginCapabilityPartTargetSchema.optional(),
+    contributions: z.array(PluginCapabilityPartContributionSchema).min(1)
+}).strict()
+export type PluginCapabilityPart = z.infer<typeof PluginCapabilityPartSchema>
+
+export const PluginCapabilitySchema = z.object({
+    id: ContributionIdSchema,
+    kind: PluginCapabilityKindSchema,
+    displayName: z.string().min(1).optional(),
+    description: z.string().optional(),
+    parts: z.object({
+        web: PluginCapabilityPartSchema.optional(),
+        hub: PluginCapabilityPartSchema.optional(),
+        runner: PluginCapabilityPartSchema.optional()
+    }).strict().refine((parts) => Boolean(parts.web || parts.hub || parts.runner), {
+        message: 'capability requires at least one part'
+    }),
+    compatibility: z.object({
+        minPluginVersion: z.string().min(1).optional(),
+        sameVersionAcrossTargets: z.boolean().optional()
+    }).strict().optional()
+}).strict()
+export type PluginCapability = z.infer<typeof PluginCapabilitySchema>
+
 const GenericContributionDescriptorSchema = z.object({
     id: ContributionIdSchema,
     displayName: z.string().min(1).optional(),
@@ -73,13 +127,15 @@ const PluginManifestLiteBaseSchema = z.object({
     version: SemverSchema,
     pluginApiVersion: z.string().min(1),
     description: z.string().optional(),
+    capabilities: z.array(PluginCapabilitySchema).optional(),
     runtimes: z.object({
         hub: HubRuntimeSchema.optional(),
         runner: RunnerRuntimeSchema.optional()
     }).strict().optional(),
     contributions: z.object({
         hub: z.object({
-            notificationChannels: z.array(HubNotificationChannelContributionSchema).optional()
+            notificationChannels: z.array(HubNotificationChannelContributionSchema).optional(),
+            messageActions: z.array(HubMessageActionContributionSchema).optional()
         }).strict().optional(),
         runner: RunnerContributionSchema.optional(),
         agent: AgentContributionSchema.optional(),

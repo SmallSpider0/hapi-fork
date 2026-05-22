@@ -1,7 +1,7 @@
 import type { PluginDiagnostic } from '@hapi/protocol/plugins'
 import type { NotificationChannel } from '../notifications/notificationTypes'
 import { PluginNotificationChannelAdapter } from './notificationAdapter'
-import type { Disposable, HubPluginContext, PluginLogger, PluginNotificationChannel } from './types'
+import type { Disposable, HubMessageActionContribution, HubPluginContext, PluginLogger, PluginNotificationChannel } from './types'
 
 type RegisteredNotificationChannel = {
     pluginId: string
@@ -10,8 +10,18 @@ type RegisteredNotificationChannel = {
     sanitizeError(error: unknown): Error
 }
 
+export type RegisteredHubMessageAction = {
+    type: 'messageAction'
+    pluginId: string
+    id: string
+    kind: HubMessageActionContribution['kind']
+    contribution: HubMessageActionContribution
+    disposed: boolean
+}
+
 export class PluginRegistryLite {
     private readonly notificationChannels: RegisteredNotificationChannel[] = []
+    private readonly messageActions: RegisteredHubMessageAction[] = []
     private readonly disposables: Disposable[] = []
     readonly diagnostics: PluginDiagnostic[] = []
 
@@ -55,6 +65,14 @@ export class PluginRegistryLite {
                     }
                     return this.registerNotificationChannel(args.pluginId, channel, Array.from(declaredSecrets), env)
                 }
+            },
+            messages: {
+                registerAction: (action: HubMessageActionContribution): Disposable => {
+                    if (!acceptingRegistrations) {
+                        throw new Error('Plugin message actions can only be registered during activate(ctx).')
+                    }
+                    return this.registerMessageAction(args.pluginId, validateMessageAction(action))
+                }
             }
         }
 
@@ -84,6 +102,12 @@ export class PluginRegistryLite {
         ))
     }
 
+    getMessageActions(): RegisteredHubMessageAction[] {
+        return this.messageActions
+            .filter((entry) => !entry.disposed)
+            .map((entry) => ({ ...entry }))
+    }
+
     async dispose(): Promise<void> {
         for (const disposable of [...this.disposables].reverse()) {
             try {
@@ -93,6 +117,7 @@ export class PluginRegistryLite {
             }
         }
         this.disposables.length = 0
+        this.messageActions.length = 0
     }
 
     getDisposableCount(): number {
@@ -147,6 +172,36 @@ export class PluginRegistryLite {
         return disposable
     }
 
+    private registerMessageAction(pluginId: string, action: HubMessageActionContribution): Disposable {
+        const entry: RegisteredHubMessageAction = {
+            type: 'messageAction',
+            pluginId,
+            id: action.id,
+            kind: action.kind,
+            contribution: action,
+            disposed: false
+        }
+        this.messageActions.push(entry)
+
+        const disposable: Disposable = {
+            dispose: async () => {
+                if (entry.disposed) {
+                    return
+                }
+                entry.disposed = true
+                const index = this.messageActions.indexOf(entry)
+                if (index >= 0) {
+                    this.messageActions.splice(index, 1)
+                }
+                if (typeof action.dispose === 'function') {
+                    await action.dispose()
+                }
+            }
+        }
+        this.disposables.push(disposable)
+        return disposable
+    }
+
     private createLogger(pluginId: string, declaredSecrets: string[], env: NodeJS.ProcessEnv): PluginLogger {
         const redactArgs = (args: unknown[]) => args.map((arg) => redactUnknown(arg, declaredSecrets, env))
         return {
@@ -156,6 +211,22 @@ export class PluginRegistryLite {
             error: (message, ...args) => console.error(`[plugin:${pluginId}] ${redactText(message, declaredSecrets, env)}`, ...redactArgs(args))
         }
     }
+}
+
+function validateMessageAction(action: HubMessageActionContribution): HubMessageActionContribution {
+    if (!action || typeof action !== 'object') {
+        throw new Error('messageAction contribution must be an object.')
+    }
+    if (typeof action.id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(action.id)) {
+        throw new Error('messageAction contribution id must contain only alphanumeric characters, dots, underscores, or dashes.')
+    }
+    if (action.kind !== 'chat.composer.messageAction') {
+        throw new Error('messageAction kind must be chat.composer.messageAction.')
+    }
+    if (typeof action.plan !== 'function') {
+        throw new Error('messageAction plan must be a function.')
+    }
+    return action
 }
 
 export function sanitizeError(error: unknown, declaredSecrets: string[], env: NodeJS.ProcessEnv = process.env): Error {

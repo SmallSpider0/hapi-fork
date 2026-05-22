@@ -3,6 +3,9 @@ import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from '
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import type {
+    PluginCapabilityPart,
+    PluginCapabilityPartStatus,
+    PluginCapabilityView,
     PluginDeleteResult,
     PluginDetail,
     PluginDiagnosticView,
@@ -14,9 +17,12 @@ import type {
     PluginListItem,
     PluginReloadItem,
     PluginReloadResult,
+    PluginRuntimeContributionState,
     PluginTargetSummary,
     PluginWebContributionView,
     RunnerPluginInventory,
+    RunnerPluginActionInvokeRequest,
+    RunnerPluginActionInvokeResponse,
     RunnerPluginUnsupportedInstallResult
 } from '@hapi/protocol/plugins'
 import {
@@ -78,7 +84,7 @@ type ActiveRunnerPluginInstance = {
 }
 
 type ReloadReason = 'startup' | 'manual' | 'state-change'
-type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter' | 'agentCapabilityProvider'>
+type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter' | 'agentCapabilityProvider' | 'action'>
 const BUILTIN_AGENT_IDS = new Set(builtinAgentDescriptors().map((descriptor) => descriptor.id))
 const DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS = 1000
 
@@ -213,6 +219,63 @@ function reloadItemIsOk(item: PluginReloadItem): boolean {
     return !['invalid', 'failed', 'reload-failed', 'blocked', 'incompatible'].includes(item.status)
 }
 
+function aggregateCapabilityStatus(parts: {
+    web?: PluginCapabilityPartStatus
+    hub?: PluginCapabilityPartStatus
+    runner?: PluginCapabilityPartStatus
+}): PluginCapabilityView['status'] {
+    const required = Object.values(parts).filter((part) => part.required !== false)
+    if (required.length === 0) {
+        return 'ready'
+    }
+    const priority: PluginCapabilityView['status'][] = [
+        'disabled',
+        'failed',
+        'incompatible',
+        'offline',
+        'missing-target',
+        'partial'
+    ]
+    for (const status of priority) {
+        if (required.some((part) => part.status === status)) {
+            return status
+        }
+    }
+    return required.every((part) => part.status === 'ready') ? 'ready' : 'partial'
+}
+
+function webContributionsForPart(
+    record: DiscoveredPluginRecord,
+    part: PluginCapabilityPart
+): NonNullable<PluginCapabilityView['web']> | undefined {
+    const web = record.manifest?.contributions?.web
+    if (!web) {
+        return undefined
+    }
+
+    const result: NonNullable<PluginCapabilityView['web']> = {}
+    for (const contribution of part.contributions) {
+        if (contribution.type === 'settingsPanel') {
+            const match = web.settingsPanels?.find((entry) => entry.id === contribution.id)
+            if (match) result.settingsPanels = [...(result.settingsPanels ?? []), match]
+        } else if (contribution.type === 'newSessionField') {
+            const match = web.newSessionFields?.find((entry) => entry.id === contribution.id)
+            if (match) result.newSessionFields = [...(result.newSessionFields ?? []), match]
+        } else if (contribution.type === 'action') {
+            const match = web.actions?.find((entry) => entry.id === contribution.id)
+            if (match) result.actions = [...(result.actions ?? []), match]
+        } else if (contribution.type === 'badge') {
+            const match = web.badges?.find((entry) => entry.id === contribution.id)
+            if (match) result.badges = [...(result.badges ?? []), match]
+        } else if (contribution.type === 'composerAction') {
+            const match = web.composerActions?.find((entry) => entry.id === contribution.id)
+            if (match) result.composerActions = [...(result.composerActions ?? []), match]
+        }
+    }
+
+    return Object.keys(result).length > 0 ? result : undefined
+}
+
 function isPathInside(parentPath: string, childPath: string): boolean {
     const rel = relative(parentPath, childPath)
     return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
@@ -280,7 +343,129 @@ export class RunnerPluginManager {
                 commandResolvers: this.collectContributionSummaries('commandResolver'),
                 spawnHooks: this.collectContributionSummaries('spawnHook')
             },
-            webContributions: this.collectWebContributions()
+            webContributions: this.collectWebContributions(),
+            contributionStates: this.collectContributionStates(),
+            capabilities: this.collectCapabilities()
+        }
+    }
+
+    collectContributionStates(): PluginRuntimeContributionState[] {
+        const target = this.targetSummary()
+        return this.records
+            .filter((record) => record.manifest)
+            .flatMap((record) => {
+                const pluginId = record.manifest!.id
+                const registry = this.activePlugins.get(pluginId)?.registry
+                const enabled = record.enabled === true
+                const diagnostics = [
+                    ...record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+                    ...(registry?.diagnostics.map((entry) => diagnosticView(pluginId, entry)) ?? [])
+                ]
+                const makeState = (type: string, id: string, registered: boolean): PluginRuntimeContributionState => ({
+                    pluginId,
+                    target,
+                    runtime: 'runner',
+                    contributionType: type,
+                    contributionId: id,
+                    declared: true,
+                    registered,
+                    active: enabled && registered,
+                    diagnostics
+                })
+
+                const states: PluginRuntimeContributionState[] = []
+                for (const contribution of record.manifest!.contributions?.runner?.environmentProviders ?? []) {
+                    states.push(makeState('environmentProvider', contribution.id, Boolean(registry?.getEnvironmentProviders().some((entry) => entry.id === contribution.id))))
+                }
+                for (const contribution of record.manifest!.contributions?.runner?.commandResolvers ?? []) {
+                    states.push(makeState('commandResolver', contribution.id, Boolean(registry?.getCommandResolvers().some((entry) => entry.id === contribution.id))))
+                }
+                for (const contribution of record.manifest!.contributions?.runner?.spawnHooks ?? []) {
+                    states.push(makeState('spawnHook', contribution.id, Boolean(registry?.getSpawnHooks().some((entry) => entry.id === contribution.id))))
+                }
+                for (const contribution of record.manifest!.contributions?.agent?.adapters ?? []) {
+                    states.push(makeState('agentAdapter', contribution.id, Boolean(registry?.getAgentAdapters().some((entry) => entry.id === contribution.id))))
+                }
+                for (const contribution of record.manifest!.contributions?.agent?.capabilityProviders ?? []) {
+                    states.push(makeState('agentCapabilityProvider', contribution.id, Boolean(registry?.getAgentCapabilityProviders().some((entry) => entry.id === contribution.id))))
+                }
+                const actionIds = new Set(record.manifest!.capabilities
+                    ?.flatMap((capability) => capability.parts.runner?.contributions ?? [])
+                    .filter((contribution) => contribution.type === 'action')
+                    .map((contribution) => contribution.id) ?? [])
+                for (const actionId of actionIds) {
+                    states.push(makeState('action', actionId, Boolean(registry?.getActions().some((entry) => entry.id === actionId))))
+                }
+                return states
+            })
+    }
+
+    collectCapabilities(): PluginCapabilityView[] {
+        const target = this.targetSummary()
+        return this.records
+            .filter((record) => record.manifest?.capabilities)
+            .flatMap((record) => record.manifest!.capabilities!.map((capability): PluginCapabilityView => {
+                const pluginId = record.manifest!.id
+                const parts = {
+                    ...(capability.parts.web ? { web: this.webPartStatus(record, capability.parts.web) } : {}),
+                    ...(capability.parts.hub ? {
+                        hub: {
+                            status: 'missing-target' as const,
+                            required: capability.parts.hub.required,
+                            declared: true,
+                            registered: false,
+                            active: false,
+                            diagnostics: []
+                        }
+                    } : {}),
+                    ...(capability.parts.runner ? { runner: this.runnerPartStatus(record, capability.parts.runner) } : {})
+                }
+                return {
+                    pluginId,
+                    pluginName: record.manifest!.name,
+                    pluginVersion: record.manifest!.version,
+                    capabilityId: capability.id,
+                    kind: capability.kind,
+                    displayName: capability.displayName,
+                    description: capability.description,
+                    status: record.enabled === true ? aggregateCapabilityStatus(parts) : 'disabled',
+                    target,
+                    parts,
+                    ...(capability.parts.web ? { web: webContributionsForPart(record, capability.parts.web) } : {}),
+                    diagnostics: [
+                        ...record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+                        ...(this.activePlugins.get(pluginId)?.registry.diagnostics.map((entry) => diagnosticView(pluginId, entry)) ?? [])
+                    ]
+                }
+            }))
+    }
+
+    async invokeAction(args: RunnerPluginActionInvokeRequest): Promise<RunnerPluginActionInvokeResponse> {
+        const instance = this.activePlugins.get(args.pluginId)
+        const action = instance?.registry.getActions().find((entry) => entry.id === args.actionId)
+        if (!action) {
+            return {
+                ok: false,
+                code: 'plugin-action-not-active',
+                message: `Runner plugin action ${args.pluginId}:${args.actionId} is not active on ${this.options.machineId}.`
+            }
+        }
+        try {
+            return await action.contribution.run({
+                namespace: args.namespace,
+                machineId: this.options.machineId,
+                sessionId: args.sessionId,
+                cwd: args.cwd,
+                payload: args.payload,
+                capabilityId: args.capabilityId,
+                actionId: args.actionId
+            })
+        } catch (error) {
+            return {
+                ok: false,
+                code: 'plugin-action-failed',
+                message: errorMessage(error)
+            }
         }
     }
 
@@ -1224,6 +1409,115 @@ export class RunnerPluginManager {
             }))
     }
 
+    private webPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
+        const declaredIds = new Set(part.contributions.map((entry) => `${entry.type}:${entry.id}`))
+        const registeredIds = new Set<string>()
+        const web = record.manifest?.contributions?.web
+        for (const contribution of part.contributions) {
+            const type = contribution.type
+            const id = contribution.id
+            const exists = type === 'settingsPanel'
+                ? Boolean(web?.settingsPanels?.some((entry) => entry.id === id))
+                : type === 'newSessionField'
+                    ? Boolean(web?.newSessionFields?.some((entry) => entry.id === id))
+                    : type === 'action'
+                        ? Boolean(web?.actions?.some((entry) => entry.id === id))
+                        : type === 'badge'
+                            ? Boolean(web?.badges?.some((entry) => entry.id === id))
+                            : type === 'composerAction'
+                                ? Boolean(web?.composerActions?.some((entry) => entry.id === id))
+                                : false
+            if (exists) {
+                registeredIds.add(`${type}:${id}`)
+            }
+        }
+        return {
+            status: record.enabled !== true
+                ? 'disabled'
+                : Array.from(declaredIds).every((id) => registeredIds.has(id))
+                    ? 'ready'
+                    : 'partial',
+            required: part.required,
+            declared: true,
+            registered: registeredIds.size === declaredIds.size,
+            active: record.enabled === true,
+            diagnostics: []
+        }
+    }
+
+    private runnerPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
+        const pluginId = record.manifest?.id
+        const target = this.targetSummary()
+        if (!pluginId || record.enabled !== true) {
+            return {
+                status: 'disabled',
+                target,
+                required: part.required,
+                declared: true,
+                registered: false,
+                active: false,
+                diagnostics: []
+            }
+        }
+        if (!record.manifest?.runtimes?.runner) {
+            return {
+                status: 'missing-target',
+                target,
+                required: part.required,
+                declared: true,
+                registered: false,
+                active: false,
+                diagnostics: []
+            }
+        }
+        const instance = this.activePlugins.get(pluginId)
+        const diagnostics = [
+            ...record.diagnostics.map((entry) => diagnosticView(pluginId, entry)),
+            ...(instance?.registry.diagnostics.map((entry) => diagnosticView(pluginId, entry)) ?? [])
+        ]
+        if (!instance) {
+            return {
+                status: record.status === 'failed' || record.status === 'reload-failed' ? 'failed' : 'partial',
+                target,
+                required: part.required,
+                declared: true,
+                registered: false,
+                active: false,
+                diagnostics
+            }
+        }
+        const registered = part.contributions.every((contribution) => {
+            if (contribution.type === 'environmentProvider') {
+                return instance.registry.getEnvironmentProviders().some((entry) => entry.id === contribution.id)
+            }
+            if (contribution.type === 'commandResolver') {
+                return instance.registry.getCommandResolvers().some((entry) => entry.id === contribution.id)
+            }
+            if (contribution.type === 'spawnHook') {
+                return instance.registry.getSpawnHooks().some((entry) => entry.id === contribution.id)
+            }
+            if (contribution.type === 'agentAdapter') {
+                return instance.registry.getAgentAdapters().some((entry) => entry.id === contribution.id)
+            }
+            if (contribution.type === 'agentCapabilityProvider') {
+                return instance.registry.getAgentCapabilityProviders().some((entry) => entry.id === contribution.id)
+            }
+            if (contribution.type === 'action') {
+                return instance.registry.getActions().some((entry) => entry.id === contribution.id)
+            }
+            return false
+        })
+        return {
+            status: registered ? 'ready' : 'partial',
+            target,
+            required: part.required,
+            declared: true,
+            registered,
+            active: registered,
+            diagnostics
+        }
+    }
+
 
     private toListItem(record: DiscoveredPluginRecord): PluginListItem {
         const id = pluginDisplayId(record)
@@ -1332,6 +1626,7 @@ export class RunnerPluginManager {
             },
             contributions: {
                 notificationChannels: record.manifest?.contributions?.hub?.notificationChannels ?? [],
+                ...(record.manifest?.contributions?.hub?.messageActions ? { messageActions: record.manifest.contributions.hub.messageActions } : {}),
                 ...(manifestRunnerContributions || activeRunnerContributions ? {
                     runner: {
                         ...(manifestRunnerContributions ?? {}),

@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugin } from '@/hooks/queries/usePlugin'
+import { usePluginCapabilities } from '@/hooks/queries/usePluginCapabilities'
 import { usePluginActions } from '@/hooks/mutations/usePluginActions'
 import { useTranslation } from '@/lib/use-translation'
 import { Button } from '@/components/ui/button'
@@ -11,7 +12,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { PluginDescriptorPanels, type DescriptorActionHandler } from '@/components/plugins/DescriptorRenderer'
-import { PluginTargetScopeSchema, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import { PluginTargetScopeSchema, type PluginCapabilityView, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
 type ResultState = {
@@ -203,6 +204,68 @@ function DiagnosticsList(props: { plugin: PluginDetail; t: (key: string, params?
     )
 }
 
+function capabilityStatusVariant(status: string): BadgeVariant {
+    if (status === 'ready') return 'success'
+    if (['partial', 'missing-target', 'offline', 'disabled'].includes(status)) return 'warning'
+    if (['failed', 'incompatible'].includes(status)) return 'destructive'
+    return 'default'
+}
+
+function capabilityPartLabel(part: 'web' | 'hub' | 'runner'): string {
+    if (part === 'web') return 'WEB'
+    if (part === 'hub') return 'HUB'
+    return 'RUNNER'
+}
+
+function CapabilitiesList(props: {
+    capabilities: PluginCapabilityView[]
+    loading: boolean
+    t: (key: string, params?: Record<string, string | number>) => string
+}) {
+    const { capabilities, loading, t } = props
+    if (loading && capabilities.length === 0) {
+        return <LoadingState label={t('settings.plugins.capabilities.loading')} className="p-2" />
+    }
+    if (capabilities.length === 0) {
+        return <div className="rounded-lg bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">{t('settings.plugins.capabilities.empty')}</div>
+    }
+    return (
+        <div className="space-y-2">
+            {capabilities.map((capability) => (
+                <div key={`${capability.pluginId}-${capability.capabilityId}`} className="rounded-lg border border-[var(--app-border)] p-3 text-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                            <div className="font-medium">{capability.displayName ?? capability.capabilityId}</div>
+                            <div className="break-all text-xs text-[var(--app-hint)]">{capability.kind} · {capability.capabilityId}</div>
+                            {capability.description ? <div className="mt-1 text-sm text-[var(--app-hint)]">{capability.description}</div> : null}
+                        </div>
+                        <Badge variant={capabilityStatusVariant(capability.status)}>{capability.status}</Badge>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                        {(['web', 'hub', 'runner'] as const).map((partName) => {
+                            const part = capability.parts[partName]
+                            if (!part) return null
+                            const suffix = part.target?.scope ? ` · ${part.target.scope}` : ''
+                            return (
+                                <Chip
+                                    key={partName}
+                                    label={`${capabilityPartLabel(partName)} · ${part.status}${suffix}`}
+                                    variant={capabilityStatusVariant(part.status)}
+                                />
+                            )
+                        })}
+                    </div>
+                    {capability.diagnostics.length > 0 ? (
+                        <div className="mt-2 text-xs text-[var(--app-hint)]">
+                            {capability.diagnostics.slice(0, 2).map((diagnostic) => diagnostic.message).join(' · ')}
+                        </div>
+                    ) : null}
+                </div>
+            ))}
+        </div>
+    )
+}
+
 function ContributionsList(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string }) {
     const { plugin, t } = props
     const chips: Array<{ key: string; label: string; variant?: BadgeVariant }> = [
@@ -375,6 +438,7 @@ export default function PluginPage() {
     const navigate = useNavigate()
     const { t } = useTranslation()
     const { plugin, isLoading, error } = usePlugin(api, pluginId, target)
+    const capabilityState = usePluginCapabilities(api, { target })
     const actions = usePluginActions(api)
     const [configText, setConfigText] = useState('{}')
     const [initialConfigText, setInitialConfigText] = useState('{}')
@@ -395,6 +459,10 @@ export default function PluginPage() {
     const canEnablePlugin = plugin ? !['invalid', 'incompatible', 'blocked'].includes(plugin.status) : false
     const canDeletePlugin = plugin?.source === 'user-home'
     const hasConfig = Boolean(plugin && (Object.keys(plugin.config ?? {}).length > 0 || dirtyConfig))
+    const pluginCapabilities = useMemo(
+        () => capabilityState.capabilities.filter((capability) => capability.pluginId === plugin?.id),
+        [capabilityState.capabilities, plugin?.id]
+    )
 
     const showReloadResult = (title: string, reloadResult: PluginReloadResult) => {
         setResult({
@@ -550,6 +618,10 @@ export default function PluginPage() {
                                     />
                                 </SectionCard>
                             ) : null}
+
+                            <SectionCard title={t('settings.plugins.capabilities.title')}>
+                                <CapabilitiesList capabilities={pluginCapabilities} loading={capabilityState.isLoading} t={t} />
+                            </SectionCard>
 
                             {hasConfig ? <SectionCard title={t('settings.plugins.config.title')}>
                                 <div className="space-y-2">

@@ -2,6 +2,8 @@ import type { AgentFlavor } from '../modes'
 import type { AgentCapabilityProviderResult, AgentHistoryImportResult } from './agentCapabilities'
 import type { AgentDescriptor } from './agentDescriptors'
 import type { PluginNotificationEvent } from './notifications'
+import type { AttachmentMetadata, Session } from '../types'
+import type { PluginCapabilityKind } from './manifest'
 import type {
     RunnerCommandResolverProposal,
     RunnerEnvironmentProposal,
@@ -44,6 +46,77 @@ export type PluginNotificationChannel = {
     dispose?(): void | Promise<void>
 }
 
+/** Narrow session reference passed to plugin action handlers. */
+export type PluginSessionRef = Pick<Session, 'id' | 'namespace' | 'active' | 'metadata'>
+
+/** Attachment reference passed to plugin action handlers. */
+export type PluginAttachmentRef = AttachmentMetadata
+
+/** Internal core-owned message send plan returned by plugin action handlers. */
+export type MessageSendPlan =
+    | { type: 'immediate' }
+    | {
+        type: 'messageDelivery'
+        delivery: {
+            notBefore?: number
+        }
+        source: {
+            pluginId: string
+            capabilityId?: string
+            actionId: string
+        }
+        payload?: unknown
+    }
+
+/** Hub message action input. Core owns auth/session lookup and passes a narrow DTO. */
+export type HubMessageActionInput = {
+    namespace: string
+    session: PluginSessionRef
+    text: string
+    localId?: string
+    attachments: PluginAttachmentRef[]
+    payload: unknown
+    capabilityId?: string
+    actionId: string
+}
+
+/** Result returned by a Hub message action handler. */
+export type HubMessageActionResult =
+    | { ok: true; plan: MessageSendPlan }
+    | { ok: false; code: string; message: string }
+
+/** Hub message action contribution registered by a Hub plugin. */
+export type HubMessageActionContribution = {
+    id: string
+    kind: Extract<PluginCapabilityKind, 'chat.composer.messageAction'>
+    plan(input: HubMessageActionInput): MaybePromise<HubMessageActionResult>
+    dispose?: () => void | Promise<void>
+}
+
+/** Runner generic plugin action input. */
+export type RunnerPluginActionInput = {
+    namespace: string
+    machineId: string
+    sessionId?: string
+    cwd?: string
+    payload: unknown
+    capabilityId?: string
+    actionId: string
+}
+
+/** Runner generic plugin action result. */
+export type RunnerPluginActionResult =
+    | { ok: true; result: unknown }
+    | { ok: false; code: string; message: string }
+
+/** Runner generic action contribution registered by a Runner plugin. */
+export type RunnerPluginActionContribution = {
+    id: string
+    kind: PluginCapabilityKind
+    run(input: RunnerPluginActionInput): MaybePromise<RunnerPluginActionResult>
+    dispose?: () => void | Promise<void>
+}
+
 /** Context passed to a Hub runtime plugin activate(ctx) function. */
 export type HubPluginContext = {
     pluginId: string
@@ -52,6 +125,9 @@ export type HubPluginContext = {
     secrets: PluginSecretReader
     notifications: {
         registerChannel(channel: PluginNotificationChannel): Disposable
+    }
+    messages: {
+        registerAction(action: HubMessageActionContribution): Disposable
     }
 }
 
@@ -129,6 +205,9 @@ export type RunnerPluginContext = {
         registerSpawnHook(hook: RunnerSpawnHookContribution): Disposable
         registerAgentAdapter(adapter: RunnerAgentAdapterContribution): Disposable
         registerAgentCapabilityProvider(provider: RunnerAgentCapabilityProviderContribution): Disposable
+    }
+    actions: {
+        register(action: RunnerPluginActionContribution): Disposable
     }
 }
 

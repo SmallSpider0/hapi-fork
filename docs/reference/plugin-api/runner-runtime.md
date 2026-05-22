@@ -24,6 +24,9 @@ export type RunnerPluginContext = {
         registerAgentAdapter(adapter: RunnerAgentAdapterContribution): Disposable
         registerAgentCapabilityProvider(provider: RunnerAgentCapabilityProviderContribution): Disposable
     }
+    actions: {
+        register(action: RunnerPluginActionContribution): Disposable
+    }
 }
 ```
 

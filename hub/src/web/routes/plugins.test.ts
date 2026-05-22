@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
-import type { PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginCapabilityView, PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
@@ -237,6 +237,83 @@ describe('plugin admin routes', () => {
         expect(payload.plugins.find((entry) => entry.id === runnerPlugin.id)?.target).toMatchObject({ scope: 'runner:runner-1', runtime: 'runner', active: true })
         expect(payload.targets.map((entry) => entry.target.scope).sort()).toEqual(['hub', 'runner:runner-1'])
         expect(calls).toEqual(['rpc:runner-1'])
+    })
+
+    it('resolves capability readiness against the current session runner when sessionId is provided', async () => {
+        const hubCapability: PluginCapabilityView = {
+            pluginId: 'com.example.cross',
+            pluginName: 'Cross Runtime',
+            pluginVersion: '0.1.0',
+            capabilityId: 'cross',
+            kind: 'chat.composer.messageAction',
+            status: 'missing-target',
+            target: { scope: 'hub', runtime: 'hub', active: true, stale: false },
+            parts: {
+                web: { status: 'ready', required: true, declared: true, registered: true, active: true, diagnostics: [] },
+                hub: { status: 'ready', required: true, declared: true, registered: true, active: true, diagnostics: [] },
+                runner: { status: 'missing-target', required: true, declared: true, registered: false, active: false, diagnostics: [] }
+            },
+            web: {
+                composerActions: [{
+                    id: 'cross',
+                    kind: 'pluginMessageAction',
+                    label: 'Cross',
+                    icon: 'clock',
+                    handler: { position: 'hub', actionId: 'cross' },
+                    ui: { kind: 'button' }
+                }]
+            },
+            diagnostics: []
+        }
+        const runnerCapability: PluginCapabilityView = {
+            ...hubCapability,
+            target: { scope: 'runner:runner-other', runtime: 'runner', machineId: 'runner-other', active: true, stale: false },
+            parts: {
+                runner: { status: 'ready', required: true, declared: true, registered: true, active: true, diagnostics: [] },
+                hub: { status: 'missing-target', required: true, declared: true, registered: false, active: false, diagnostics: [] },
+                web: { status: 'ready', required: true, declared: true, registered: true, active: true, diagnostics: [] }
+            }
+        }
+        const sessionRunner = makeMachine('runner-session', true, [])
+        const otherRunner = makeMachine('runner-other', true, [])
+        sessionRunner.runnerState!.pluginInventory = {
+            machineId: 'runner-session',
+            updatedAt: 1234,
+            plugins: [],
+            diagnostics: [],
+            capabilities: []
+        }
+        otherRunner.runnerState!.pluginInventory = {
+            machineId: 'runner-other',
+            updatedAt: 1234,
+            plugins: [],
+            diagnostics: [],
+            capabilities: [runnerCapability]
+        }
+        const app = createApp(
+            { collectCapabilities: () => [hubCapability] } as never,
+            {
+                getSessionByNamespace: (sessionId: string) => sessionId === 'session-1'
+                    ? { id: 'session-1', namespace: 'default', active: true, metadata: { machineId: 'runner-session' } }
+                    : undefined,
+                getMachineByNamespace: (machineId: string) => machineId === 'runner-session' ? sessionRunner : undefined,
+                getMachinesByNamespace: () => [sessionRunner, otherRunner],
+                listRunnerPlugins: async (machineId: string) => machineId === 'runner-other'
+                    ? otherRunner.runnerState!.pluginInventory!
+                    : sessionRunner.runnerState!.pluginInventory!
+            } as never
+        )
+        const auth = await token()
+
+        const globalResponse = await app.request('/api/plugins/capabilities', { headers: { authorization: `Bearer ${auth}` } })
+        const sessionResponse = await app.request('/api/plugins/capabilities?sessionId=session-1', { headers: { authorization: `Bearer ${auth}` } })
+
+        expect(globalResponse.status).toBe(200)
+        expect(sessionResponse.status).toBe(200)
+        const globalPayload = await globalResponse.json() as { capabilities: PluginCapabilityView[] }
+        const sessionPayload = await sessionResponse.json() as { capabilities: PluginCapabilityView[] }
+        expect(globalPayload.capabilities[0]?.status).toBe('ready')
+        expect(sessionPayload.capabilities[0]?.status).toBe('missing-target')
     })
 
     it('returns stale cached Runner inventory while a Runner is offline', async () => {

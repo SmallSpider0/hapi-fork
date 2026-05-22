@@ -11,6 +11,7 @@ import type {
     RunnerEnvironmentProviderContribution,
     RunnerPluginContext,
     RunnerPluginModule,
+    RunnerPluginActionContribution,
     RunnerSpawnHookContribution
 } from '@hapi/protocol/plugins'
 
@@ -23,13 +24,14 @@ export type {
     RunnerAgentCapabilityProviderContribution,
     RunnerCommandResolverContribution,
     RunnerEnvironmentProviderContribution,
+    RunnerPluginActionContribution,
     RunnerPluginContext,
     RunnerPluginModule,
     RunnerSpawnHookContribution
 } from '@hapi/protocol/plugins'
 
 export type RegisteredRuntimeContribution<T = unknown> = {
-    type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider'
+    type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider' | 'action'
     pluginId: string
     id: string
     priority: number
@@ -91,6 +93,9 @@ export class RunnerPluginRegistry {
                 registerSpawnHook: (hook: unknown): Disposable => register('spawnHook', hook),
                 registerAgentAdapter: (adapter: unknown): Disposable => register('agentAdapter', adapter),
                 registerAgentCapabilityProvider: (provider: unknown): Disposable => register('agentCapabilityProvider', provider)
+            },
+            actions: {
+                register: (action: unknown): Disposable => register('action', action)
             }
         }
 
@@ -145,6 +150,10 @@ export class RunnerPluginRegistry {
 
     getAgentCapabilityProviders(): RegisteredRuntimeContribution<RunnerAgentCapabilityProviderContribution>[] {
         return this.getContributionsByType('agentCapabilityProvider')
+    }
+
+    getActions(): RegisteredRuntimeContribution<RunnerPluginActionContribution>[] {
+        return this.getContributionsByType('action')
     }
 
     async disposeFrom(startIndex: number): Promise<void> {
@@ -277,6 +286,14 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
         }
         if (candidate.provide === undefined && candidate.importHistory === undefined) {
             throw new Error('agentCapabilityProvider must define provide or importHistory.')
+        }
+    }
+    if (type === 'action') {
+        if (typeof candidate.kind !== 'string' || candidate.kind.trim().length === 0) {
+            throw new Error('action kind must be a non-empty string.')
+        }
+        if (typeof candidate.run !== 'function') {
+            throw new Error('action run must be a function.')
         }
     }
     return contribution as T
