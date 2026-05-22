@@ -547,6 +547,7 @@ export default {
   'settings.plugins.source.bundled': 'bundled',
   'settings.plugins.target.local': 'Local',
   'settings.plugins.target.allRunners': 'All runners',
+  'settings.plugins.target.count': '{count} targets',
   'settings.plugins.target.stale': 'Stale',
   'settings.plugins.contribution.hubNotification': 'Hub notification',
   'settings.plugins.contribution.runnerEnv': 'Runner env',

@@ -13,6 +13,19 @@ import type { PluginInstallPlanResponse, PluginInstallResult, PluginListItem, Pl
 
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
+export type PluginDisplayGroup = {
+    id: string
+    name?: string
+    version?: string
+    description?: string
+    source: PluginListItem['source']
+    status: PluginListItem['status']
+    enabled: boolean
+    active: boolean
+    diagnostics: PluginListItem['diagnostics']
+    plugins: PluginListItem[]
+    primary: PluginListItem
+}
 type ResultState = {
     title: string
     lines: string[]
@@ -42,6 +55,10 @@ function pluginHasIssue(plugin: PluginListItem): boolean {
     return plugin.diagnostics.some((diagnostic) => diagnostic.severity === 'error' || diagnostic.severity === 'warning') || ['invalid', 'failed', 'reload-failed', 'blocked', 'incompatible'].includes(plugin.status)
 }
 
+function pluginGroupHasIssue(group: PluginDisplayGroup): boolean {
+    return group.diagnostics.some((diagnostic) => diagnostic.severity === 'error' || diagnostic.severity === 'warning') || ['invalid', 'failed', 'reload-failed', 'blocked', 'incompatible'].includes(group.status)
+}
+
 function sourceLabel(t: (key: string) => string, source: string): string {
     return t(`settings.plugins.source.${source}`)
 }
@@ -63,16 +80,113 @@ function Chip(props: { icon?: ReactNode; label: string; variant?: BadgeVariant }
     return <Badge variant={props.variant ?? 'default'} className="gap-1 font-medium">{props.icon}{props.label}</Badge>
 }
 
-function pluginMeta(t: (key: string, params?: Record<string, string | number>) => string, plugin: PluginListItem, issueCount: number): string {
+function uniqueStrings(values: string[]): string[] {
+    return Array.from(new Set(values.filter(Boolean)))
+}
+
+function groupTargetLabel(t: (key: string, params?: Record<string, string | number>) => string, group: PluginDisplayGroup): string {
+    const labels = uniqueStrings(group.plugins.map((plugin) => pluginTargetLabel(t, plugin)))
+    if (labels.length <= 2) return labels.join(' + ')
+    return t('settings.plugins.target.count', { count: labels.length })
+}
+
+function groupSourceLabel(t: (key: string) => string, group: PluginDisplayGroup): string {
+    return uniqueStrings(group.plugins.map((plugin) => sourceLabel(t, plugin.source))).join(' + ')
+}
+
+function groupVersionLabel(t: (key: string) => string, group: PluginDisplayGroup): string {
+    const versions = uniqueStrings(group.plugins.map((plugin) => plugin.version ?? ''))
+    if (versions.length === 0) return t('settings.plugins.unknown')
+    return versions.join(' + ')
+}
+
+function pluginMeta(t: (key: string, params?: Record<string, string | number>) => string, group: PluginDisplayGroup, issueCount: number): string {
     const parts = [
-        plugin.version ?? t('settings.plugins.unknown'),
-        sourceLabel(t, plugin.source),
-        pluginTargetLabel(t, plugin)
+        groupVersionLabel(t, group),
+        groupSourceLabel(t, group),
+        groupTargetLabel(t, group)
     ]
     if (issueCount > 0) {
         parts.push(t('settings.plugins.list.diagnostics', { count: issueCount }))
     }
     return parts.join(' · ')
+}
+
+const PLUGIN_STATUS_RANK: Record<PluginListItem['status'], number> = {
+    invalid: 100,
+    failed: 95,
+    'reload-failed': 94,
+    blocked: 90,
+    incompatible: 85,
+    degraded: 80,
+    active: 70,
+    enabled: 60,
+    validated: 50,
+    discovered: 40,
+    disabled: 10
+}
+
+function pluginStatusRank(status: PluginListItem['status']): number {
+    return PLUGIN_STATUS_RANK[status] ?? 0
+}
+
+function isHubDescriptorMirror(plugin: PluginListItem): boolean {
+    return plugin.target?.scope === 'hub'
+        && !plugin.runtimes.hub
+        && Boolean(plugin.runtimes.runner)
+}
+
+function primaryPluginRank(plugin: PluginListItem): number {
+    return (plugin.active ? 1000 : 0)
+        + (plugin.enabled ? 500 : 0)
+        + pluginStatusRank(plugin.status)
+        + (isHubDescriptorMirror(plugin) ? -100 : 0)
+        + (plugin.target?.runtime === 'runner' ? 10 : 0)
+}
+
+function comparePluginsForDisplay(left: PluginListItem, right: PluginListItem): number {
+    return right.id.localeCompare(left.id)
+        || (right.target?.scope ?? '').localeCompare(left.target?.scope ?? '')
+}
+
+function comparePluginGroupsForDisplay(left: PluginDisplayGroup, right: PluginDisplayGroup): number {
+    return left.id.localeCompare(right.id)
+}
+
+export function groupPluginListForDisplay(plugins: PluginListItem[]): PluginDisplayGroup[] {
+    const grouped = new Map<string, PluginListItem[]>()
+    for (const plugin of plugins) {
+        const existing = grouped.get(plugin.id)
+        if (existing) {
+            existing.push(plugin)
+        } else {
+            grouped.set(plugin.id, [plugin])
+        }
+    }
+
+    return Array.from(grouped.entries())
+        .map(([id, entries]) => {
+            const sorted = [...entries].sort((left, right) =>
+                primaryPluginRank(right) - primaryPluginRank(left)
+                    || (left.target?.scope ?? '').localeCompare(right.target?.scope ?? '')
+            )
+            const primary = sorted[0]!
+            const worst = [...sorted].sort((left, right) => pluginStatusRank(right.status) - pluginStatusRank(left.status))[0] ?? primary
+            return {
+                id,
+                name: primary.name ?? sorted.find((plugin) => plugin.name)?.name,
+                version: primary.version ?? sorted.find((plugin) => plugin.version)?.version,
+                description: primary.description ?? sorted.find((plugin) => plugin.description)?.description,
+                source: primary.source,
+                status: worst.status,
+                enabled: sorted.some((plugin) => plugin.enabled),
+                active: sorted.some((plugin) => plugin.active),
+                diagnostics: sorted.flatMap((plugin) => plugin.diagnostics),
+                plugins: sorted.sort(comparePluginsForDisplay),
+                primary
+            }
+        })
+        .sort(comparePluginGroupsForDisplay)
 }
 
 function formatReloadLines(t: (key: string, params?: Record<string, string | number>) => string, result?: PluginReloadResult): string[] {
@@ -123,12 +237,12 @@ function ResultCard(props: { result: ResultState; onDismiss: () => void }) {
 }
 
 function PluginCard(props: {
-    plugin: PluginListItem
+    group: PluginDisplayGroup
     onClick: () => void
     t: (key: string, params?: Record<string, string | number>) => string
 }) {
-    const { plugin, t } = props
-    const issueCount = plugin.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length
+    const { group, t } = props
+    const issueCount = group.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length
     return (
         <button
             type="button"
@@ -139,12 +253,23 @@ function PluginCard(props: {
             <div className="min-w-0 flex-1 space-y-2">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                     <div className="min-w-0">
-                        <div className="truncate font-medium">{plugin.name ?? plugin.id}</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{pluginMeta(t, plugin, issueCount)}</div>
+                        <div className="truncate font-medium">{group.name ?? group.id}</div>
+                        <div className="truncate text-xs text-[var(--app-hint)]">{pluginMeta(t, group, issueCount)}</div>
                     </div>
-                    <Badge variant={statusVariant(plugin.status)}>{t(`settings.plugins.status.${plugin.status}`)}</Badge>
+                    <Badge variant={statusVariant(group.status)}>{t(`settings.plugins.status.${group.status}`)}</Badge>
                 </div>
-                {plugin.description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{plugin.description}</div> : null}
+                {group.description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{group.description}</div> : null}
+                {group.plugins.length > 1 ? (
+                    <div className="flex flex-wrap gap-1">
+                        {group.plugins.map((plugin) => (
+                            <Chip
+                                key={`${group.id}-${plugin.target?.scope ?? 'local'}`}
+                                label={pluginTargetLabel(t, plugin)}
+                                variant={plugin.active ? 'success' : plugin.enabled ? 'warning' : 'default'}
+                            />
+                        ))}
+                    </div>
+                ) : null}
                 {issueCount > 0 ? <div><Chip icon={<AlertIcon />} label={t('settings.plugins.list.diagnostics', { count: issueCount })} variant="warning" /></div> : null}
             </div>
         </button>
@@ -261,23 +386,25 @@ export default function PluginsPage() {
     const [packageFile, setPackageFile] = useState<File | null>(null)
     const [installPlan, setInstallPlan] = useState<PluginInstallPlanResponse | null>(null)
 
+    const pluginGroups = useMemo(() => groupPluginListForDisplay(plugins), [plugins])
+
     useEffect(() => {
         setInstallPlan(null)
     }, [packageFile, enableAfterInstall, overwriteLocal])
 
     const counts = useMemo(() => ({
-        all: plugins.length,
-        active: plugins.filter((plugin) => plugin.active).length,
-        enabled: plugins.filter((plugin) => plugin.enabled).length,
-        issues: plugins.filter(pluginHasIssue).length
-    }), [plugins])
+        all: pluginGroups.length,
+        active: pluginGroups.filter((group) => group.active).length,
+        enabled: pluginGroups.filter((group) => group.enabled).length,
+        issues: pluginGroups.filter(pluginGroupHasIssue).length
+    }), [pluginGroups])
 
-    const filtered = useMemo(() => plugins.filter((plugin) => {
-        if (filter === 'active') return plugin.active
-        if (filter === 'enabled') return plugin.enabled
-        if (filter === 'issues') return pluginHasIssue(plugin)
+    const filtered = useMemo(() => pluginGroups.filter((group) => {
+        if (filter === 'active') return group.active
+        if (filter === 'enabled') return group.enabled
+        if (filter === 'issues') return pluginGroupHasIssue(group)
         return true
-    }), [filter, plugins])
+    }), [filter, pluginGroups])
 
     const runWithResult = async (work: () => Promise<ResultState>) => {
         try {
@@ -420,12 +547,16 @@ export default function PluginsPage() {
                     {isLoading ? <LoadingState label={t('settings.plugins.loading')} className="p-2" /> : null}
                     {!isLoading && filtered.length === 0 ? <EmptyState filtered={filter !== 'all'} t={t} /> : null}
                     <div className="space-y-2">
-                        {filtered.map((plugin) => (
+                        {filtered.map((group) => (
                             <PluginCard
-                                key={`${plugin.target?.scope ?? 'local'}-${plugin.id}-${plugin.manifestPath}`}
-                                plugin={plugin}
+                                key={group.id}
+                                group={group}
                                 t={t}
-                                onClick={() => navigate({ to: '/settings/plugins/$pluginId', params: { pluginId: plugin.id }, search: plugin.target?.scope ? { target: plugin.target.scope } : {} })}
+                                onClick={() => navigate({
+                                    to: '/settings/plugins/$pluginId',
+                                    params: { pluginId: group.id },
+                                    search: group.primary.target?.scope ? { target: group.primary.target.scope } : {}
+                                })}
                             />
                         ))}
                     </div>
