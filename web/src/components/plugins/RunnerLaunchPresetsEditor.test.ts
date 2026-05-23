@@ -1,6 +1,10 @@
-import { describe, expect, it } from 'vitest'
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
+import { describe, expect, it, vi } from 'vitest'
+import { I18nProvider } from '@/lib/i18n-context'
 import { builtinAgentDescriptors } from '@hapi/protocol/plugins'
 import {
+    RunnerLaunchPresetsEditor,
     commonPermissionModesForAgents,
     parseRunnerLaunchPresetConfig,
     resolveRunnerLaunchPresetDrafts,
@@ -9,6 +13,24 @@ import {
 } from './RunnerLaunchPresetsEditor'
 
 describe('RunnerLaunchPresetsEditor helpers', () => {
+    it('renders an expanded editable draft when config is empty', () => {
+        render(createElement(
+            I18nProvider,
+            null,
+            createElement(RunnerLaunchPresetsEditor, {
+                config: {},
+                machines: [],
+                onConfigChange: vi.fn()
+            })
+        ))
+
+        expect(screen.getByText('No saved presets yet; the first preset draft is expanded below. Set any default and save/reload from the top-right to apply.')).toBeInTheDocument()
+        expect(screen.getByText('If')).toBeInTheDocument()
+        expect(screen.getByText('Then default to')).toBeInTheDocument()
+        expect(screen.getByText('Model')).toBeInTheDocument()
+        expect(screen.getByText('Permission mode')).toBeInTheDocument()
+    })
+
     it('stores all-agent/all-workspace mode as empty scope instead of copying every option', () => {
         const presets: RunnerLaunchPresetDraft[] = [{
             id: 'all-default',
