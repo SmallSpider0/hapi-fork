@@ -9,6 +9,7 @@ export const RunnerExtensionContributionIdSchema = z.string()
 export const RunnerExtensionPrioritySchema = z.number().int().min(-1000).max(1000).default(0)
 
 export const RunnerSpawnPhaseSchema = z.enum([
+    'spawnOptions',
     'environment',
     'command',
     'beforeSpawn',
@@ -31,9 +32,42 @@ export const RunnerSpawnContextSchema = z.object({
     effort: z.string().optional(),
     modelReasoningEffort: z.string().optional(),
     permissionMode: z.string().optional(),
-    yolo: z.boolean().optional()
+    yolo: z.boolean().optional(),
+    pluginFields: z.record(z.string(), z.unknown()).optional()
 }).strict()
 export type RunnerSpawnContext = z.infer<typeof RunnerSpawnContextSchema>
+
+export const RunnerSpawnOptionsContextSchema = z.object({
+    machineId: z.string().min(1),
+    agent: z.string().min(1),
+    directory: z.string().min(1),
+    cwd: z.string().min(1),
+    sessionType: z.enum(['simple', 'worktree']).optional(),
+    worktreeName: z.string().optional(),
+    resumeSessionId: z.string().optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    modelReasoningEffort: z.string().optional(),
+    permissionMode: z.string().optional(),
+    yolo: z.boolean().optional(),
+    pluginFields: z.record(z.string(), z.unknown()).optional()
+}).strict()
+export type RunnerSpawnOptionsContext = z.infer<typeof RunnerSpawnOptionsContextSchema>
+
+export const RunnerSpawnOptionDefaultsSchema = z.object({
+    model: z.string().min(1).optional(),
+    effort: z.string().min(1).optional(),
+    modelReasoningEffort: z.string().min(1).optional(),
+    permissionMode: z.string().min(1).optional(),
+    yolo: z.boolean().optional()
+}).strict()
+export type RunnerSpawnOptionDefaults = z.infer<typeof RunnerSpawnOptionDefaultsSchema>
+
+export const RunnerSpawnOptionsProviderProposalSchema = z.object({
+    options: RunnerSpawnOptionDefaultsSchema.optional(),
+    diagnostics: z.array(PluginDiagnosticSchema).optional()
+}).strict()
+export type RunnerSpawnOptionsProviderProposal = z.infer<typeof RunnerSpawnOptionsProviderProposalSchema>
 
 export const RunnerEnvironmentProposalSchema = z.object({
     env: z.record(z.string(), z.string()).optional(),
@@ -69,7 +103,7 @@ export type RunnerSpawnHookProposal = z.infer<typeof RunnerSpawnHookProposalSche
 export const RunnerExtensionContributionSummarySchema = z.object({
     pluginId: z.string().min(1),
     id: RunnerExtensionContributionIdSchema,
-    type: z.enum(['environmentProvider', 'commandResolver', 'spawnHook']),
+    type: z.enum(['spawnOptionsProvider', 'environmentProvider', 'commandResolver', 'spawnHook']),
     displayName: z.string().optional(),
     description: z.string().optional(),
     priority: z.number().int().optional(),
@@ -102,3 +136,25 @@ export const RunnerResolvedSpawnPlanSchema = z.object({
     blocked: z.object({ reason: z.string().min(1) }).strict().optional()
 }).strict()
 export type RunnerResolvedSpawnPlan = z.infer<typeof RunnerResolvedSpawnPlanSchema>
+
+export const RunnerResolvedSpawnOptionsSchema = z.object({
+    options: z.object({
+        directory: z.string().min(1),
+        agent: z.string().min(1).optional(),
+        sessionId: z.string().optional(),
+        resumeSessionId: z.string().optional(),
+        approvedNewDirectoryCreation: z.boolean().optional(),
+        model: z.string().optional(),
+        effort: z.string().optional(),
+        modelReasoningEffort: z.string().optional(),
+        permissionMode: z.string().optional(),
+        yolo: z.boolean().optional(),
+        token: z.string().optional(),
+        sessionType: z.enum(['simple', 'worktree']).optional(),
+        worktreeName: z.string().optional(),
+        pluginFields: z.record(z.string(), z.unknown()).optional()
+    }).strict(),
+    diagnostics: z.array(RunnerExtensionDiagnosticSchema),
+    audit: z.array(RunnerExtensionAuditEventSchema)
+}).strict()
+export type RunnerResolvedSpawnOptions = z.infer<typeof RunnerResolvedSpawnOptionsSchema>

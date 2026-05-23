@@ -131,6 +131,7 @@ const GenericContributionDescriptorSchema = z.object({
 }).passthrough()
 
 const RunnerContributionSchema = z.object({
+    spawnOptionsProviders: z.array(GenericContributionDescriptorSchema).optional(),
     environmentProviders: z.array(GenericContributionDescriptorSchema).optional(),
     commandResolvers: z.array(GenericContributionDescriptorSchema).optional(),
     spawnHooks: z.array(GenericContributionDescriptorSchema).optional()

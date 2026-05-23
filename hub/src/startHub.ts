@@ -16,6 +16,7 @@ import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
 import { ServerChanChannel } from './serverchan/channel'
 import { HubPluginManager } from './plugins/pluginManager'
+import { HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID } from '@hapi/protocol/plugins/bundledCore'
 import QRCode from 'qrcode'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
@@ -200,24 +201,6 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         new PushNotificationChannel(pushService, sseManager, visibilityTracker, config.publicUrl)
     ]
 
-    if (config.serverChanSendKey && config.serverChanNotification) {
-        notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
-    }
-
-    // Initialize Telegram bot (optional)
-    if (config.telegramEnabled && config.telegramBotToken) {
-        happyBot = new HappyBot({
-            syncEngine,
-            botToken: config.telegramBotToken,
-            publicUrl: config.publicUrl,
-            store
-        })
-        // Only add to notification channels if notifications are enabled
-        if (config.telegramNotification) {
-            notificationChannels.push(happyBot)
-        }
-    }
-
     pluginManager = new HubPluginManager({
         hapiHome: config.dataDir,
         publicUrl: config.publicUrl,
@@ -236,6 +219,30 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             console.log(message)
         }
     }
+
+    const serverChanPluginEnabled = pluginManager.getPlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)?.enabled === true
+    if (config.serverChanSendKey && config.serverChanNotification) {
+        if (serverChanPluginEnabled) {
+            console.log('[Hub] ServerChan: legacy env notification channel skipped because ServerChan Notifier plugin is enabled.')
+        } else {
+            notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
+        }
+    }
+
+    // Initialize Telegram bot (optional)
+    if (config.telegramEnabled && config.telegramBotToken) {
+        happyBot = new HappyBot({
+            syncEngine,
+            botToken: config.telegramBotToken,
+            publicUrl: config.publicUrl,
+            store
+        })
+        // Only add to notification channels if notifications are enabled
+        if (config.telegramNotification) {
+            notificationChannels.push(happyBot)
+        }
+    }
+
     notificationChannels.push(pluginManager.getNotificationChannel())
 
     notificationHub = new NotificationHub(syncEngine, notificationChannels)

@@ -7,9 +7,9 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { Hono } from 'hono'
 import { SignJWT } from 'jose'
-import type { PluginCapabilityView, PluginDeleteResult, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginCapabilityView, PluginDeleteResult, PluginInstallResult, PluginListItem, PluginNotificationFilterOptionsResponse, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
-import type { Machine, SyncEngine } from '../../sync/syncEngine'
+import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import { PluginMarketplaceService } from '../../plugins/marketplaceService'
 import { createAuthMiddleware, type WebAppEnv } from '../middleware/auth'
@@ -80,6 +80,27 @@ function makeMachine(id: string, active: boolean, plugins: PluginListItem[] = [r
             }
         },
         runnerStateVersion: 1
+    }
+}
+
+function makeSession(id: string, path: string, flavor: string, updatedAt = 1000): Session {
+    return {
+        id,
+        namespace: 'default',
+        seq: 1,
+        createdAt: 0,
+        updatedAt,
+        active: true,
+        activeAt: updatedAt,
+        metadata: { path, host: 'host', flavor },
+        metadataVersion: 1,
+        agentState: null,
+        agentStateVersion: 1,
+        thinking: false,
+        thinkingAt: 0,
+        model: null,
+        modelReasoningEffort: null,
+        effort: null
     }
 }
 
@@ -240,6 +261,31 @@ describe('plugin admin routes', () => {
         expect(detail.plugin.contributions.voice?.providers?.[0]?.supportStatus).toBe('unsupported')
         expect(detail.plugin.contributions.deployment?.packs?.[0]?.supportStatus).toBe('stub')
         expect(detail.plugin.contributions.integration?.protocolBridges?.[0]?.protocol).toBe('mcp')
+    })
+
+    it('returns notification filter options from recent namespace sessions', async () => {
+        const app = createApp(
+            { listPlugins: () => [] } as never,
+            {
+                getSessionsByNamespace: (namespace: string) => namespace === 'default'
+                    ? [
+                        makeSession('session-1', '/repo/hapi', 'codex', 3000),
+                        makeSession('session-2', '/repo/hapi', 'codex', 2000),
+                        makeSession('session-3', '/repo/other', 'claude', 1000)
+                    ]
+                    : []
+            } as never
+        )
+
+        const response = await app.request('/api/plugins/notification-filter-options', {
+            headers: { authorization: `Bearer ${await token()}` }
+        })
+
+        expect(response.status).toBe(200)
+        const payload = await response.json() as PluginNotificationFilterOptionsResponse
+        expect(payload.namespaces[0]).toMatchObject({ value: 'default', count: 3 })
+        expect(payload.agents.map((entry) => entry.value)).toEqual(['Codex', 'Claude'])
+        expect(payload.workspaces[0]).toMatchObject({ value: '/repo/hapi', count: 2 })
     })
 
     it('aggregates Hub and Runner plugin inventories without reading Runner paths directly', async () => {

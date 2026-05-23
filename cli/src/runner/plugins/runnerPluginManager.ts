@@ -61,15 +61,17 @@ import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
 import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
 import type { AgentBackendFactory } from '@/agent/types'
 import {
+    resolveRunnerPluginSpawnOptions,
     resolveRunnerPluginSpawnPlan,
     runRunnerPluginAfterSpawnHooks,
     runRunnerPluginExitHooks,
     type RegisteredRunnerContribution,
     type RunnerCommandResolverContribution,
     type RunnerEnvironmentProviderContribution,
+    type RunnerSpawnOptionsProviderContribution,
     type RunnerSpawnHookContribution
 } from './runnerExtensionPipeline'
-import type { AgentCapabilityProviderResult, AgentCapabilityProviderSnapshot, AgentHistoryImportResult, AgentDescriptor, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
+import type { AgentCapabilityProviderResult, AgentCapabilityProviderSnapshot, AgentHistoryImportResult, AgentDescriptor, RunnerResolvedSpawnOptions, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
 
 export interface RunnerPluginManagerOptions {
     hapiHome: string
@@ -93,6 +95,7 @@ type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribut
 const BUILTIN_AGENT_IDS = new Set(builtinAgentDescriptors().map((descriptor) => descriptor.id))
 const DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS = 1000
 const RUNNER_SUPPORTED_EXTENSION_POINTS = [
+    'runner.spawnOptionsProvider',
     'runner.environmentProvider',
     'runner.commandResolver',
     'runner.spawnHook',
@@ -365,6 +368,7 @@ export class RunnerPluginManager {
             plugins: this.listPlugins(),
             diagnostics: this.getDiagnostics(),
             extensions: {
+                spawnOptionsProviders: this.collectContributionSummaries('spawnOptionsProvider'),
                 environmentProviders: this.collectContributionSummaries('environmentProvider'),
                 commandResolvers: this.collectContributionSummaries('commandResolver'),
                 spawnHooks: this.collectContributionSummaries('spawnHook')
@@ -400,6 +404,9 @@ export class RunnerPluginManager {
                 })
 
                 const states: PluginRuntimeContributionState[] = []
+                for (const contribution of record.manifest!.contributions?.runner?.spawnOptionsProviders ?? []) {
+                    states.push(makeState('spawnOptionsProvider', contribution.id, Boolean(registry?.getSpawnOptionsProviders().some((entry) => entry.id === contribution.id))))
+                }
                 for (const contribution of record.manifest!.contributions?.runner?.environmentProviders ?? []) {
                     states.push(makeState('environmentProvider', contribution.id, Boolean(registry?.getEnvironmentProviders().some((entry) => entry.id === contribution.id))))
                 }
@@ -601,6 +608,30 @@ export class RunnerPluginManager {
             environmentProviders: this.collectEnvironmentProviders(),
             commandResolvers: this.collectCommandResolvers(),
             spawnHooks: this.collectSpawnHooks()
+        })
+        this.recordSpawnDiagnostics([
+            ...result.diagnostics,
+            ...result.audit.map((entry) => ({
+                severity: 'info' as const,
+                code: 'runner-extension-audit',
+                pluginId: entry.pluginId,
+                message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${entry.message}`
+            }))
+        ])
+        return result
+    }
+
+    async resolveSpawnOptions(args: {
+        options: SpawnSessionOptions
+        agent: string
+        cwd: string
+    }): Promise<RunnerResolvedSpawnOptions> {
+        const result = await resolveRunnerPluginSpawnOptions({
+            machineId: this.options.machineId,
+            options: args.options,
+            agent: args.agent,
+            cwd: args.cwd,
+            spawnOptionsProviders: this.collectSpawnOptionsProviders()
         })
         this.recordSpawnDiagnostics([
             ...result.diagnostics,
@@ -1405,6 +1436,10 @@ export class RunnerPluginManager {
         return this.collectRegistryContributions((registry) => registry.getEnvironmentProviders())
     }
 
+    private collectSpawnOptionsProviders(): RegisteredRunnerContribution<RunnerSpawnOptionsProviderContribution>[] {
+        return this.collectRegistryContributions((registry) => registry.getSpawnOptionsProviders())
+    }
+
     private collectCommandResolvers(): RegisteredRunnerContribution<RunnerCommandResolverContribution>[] {
         return this.collectRegistryContributions((registry) => registry.getCommandResolvers())
     }
@@ -1440,11 +1475,13 @@ export class RunnerPluginManager {
 
     private collectContributionSummaries(type: RunnerExtensionRuntimeContributionType) {
         return Array.from(this.activePlugins.values()).flatMap((instance) => {
-            const entries = type === 'environmentProvider'
-                ? instance.registry.getEnvironmentProviders()
-                : type === 'commandResolver'
-                    ? instance.registry.getCommandResolvers()
-                    : instance.registry.getSpawnHooks()
+            const entries = type === 'spawnOptionsProvider'
+                ? instance.registry.getSpawnOptionsProviders()
+                : type === 'environmentProvider'
+                    ? instance.registry.getEnvironmentProviders()
+                    : type === 'commandResolver'
+                        ? instance.registry.getCommandResolvers()
+                        : instance.registry.getSpawnHooks()
             return entries.map((entry) => ({
                 pluginId: entry.pluginId,
                 id: entry.id,
@@ -1544,6 +1581,9 @@ export class RunnerPluginManager {
             }
         }
         const registered = part.contributions.every((contribution) => {
+            if (contribution.type === 'spawnOptionsProvider') {
+                return instance.registry.getSpawnOptionsProviders().some((entry) => entry.id === contribution.id)
+            }
             if (contribution.type === 'environmentProvider') {
                 return instance.registry.getEnvironmentProviders().some((entry) => entry.id === contribution.id)
             }
@@ -1627,6 +1667,12 @@ export class RunnerPluginManager {
         const sanitizedConfig = sanitizePluginConfigForView(record.config, declaredSecrets)
         const configScope = record.manifest && record.status !== 'blocked' ? runnerPluginConfigScope(this.options.machineId, record.manifest.id) : undefined
         const activeRunnerContributions = activeInstance ? {
+            spawnOptionsProviders: activeInstance.registry.getSpawnOptionsProviders().map((entry) => ({
+                id: entry.id,
+                pluginId: entry.pluginId,
+                priority: entry.priority,
+                active: true
+            })),
             environmentProviders: activeInstance.registry.getEnvironmentProviders().map((entry) => ({
                 id: entry.id,
                 pluginId: entry.pluginId,
@@ -1689,6 +1735,10 @@ export class RunnerPluginManager {
                     runner: {
                         ...(manifestRunnerContributions ?? {}),
                         ...(activeRunnerContributions ? {
+                            spawnOptionsProviders: [
+                                ...(manifestRunnerContributions?.spawnOptionsProviders ?? []),
+                                ...activeRunnerContributions.spawnOptionsProviders
+                            ],
                             environmentProviders: [
                                 ...(manifestRunnerContributions?.environmentProviders ?? []),
                                 ...activeRunnerContributions.environmentProviders

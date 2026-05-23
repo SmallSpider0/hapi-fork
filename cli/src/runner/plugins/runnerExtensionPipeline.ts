@@ -5,17 +5,24 @@ import type { PluginDiagnostic } from '@hapi/protocol/plugins'
 import {
     RunnerCommandResolverProposalSchema,
     RunnerEnvironmentProposalSchema,
+    RunnerResolvedSpawnOptionsSchema,
     RunnerSpawnContextSchema,
     RunnerSpawnHookProposalSchema,
+    RunnerSpawnOptionsContextSchema,
+    RunnerSpawnOptionsProviderProposalSchema,
     type RunnerCommandResolverProposal,
     type RunnerCommandResolverContribution,
     type RunnerEnvironmentProposal,
     type RunnerEnvironmentProviderContribution,
+    type RunnerResolvedSpawnOptions,
     type RunnerExtensionAuditEvent,
     type RunnerResolvedSpawnPlan,
+    type RunnerSpawnOptionDefaults,
     type RunnerSpawnContext,
     type RunnerSpawnHookContribution,
-    type RunnerSpawnHookProposal
+    type RunnerSpawnHookProposal,
+    type RunnerSpawnOptionsContext,
+    type RunnerSpawnOptionsProviderContribution
 } from '@hapi/protocol/plugins'
 
 const DEFAULT_EXTENSION_TIMEOUT_MS = 1000
@@ -32,6 +39,7 @@ type MaybePromise<T> = T | Promise<T>
 export type {
     RunnerCommandResolverContribution,
     RunnerEnvironmentProviderContribution,
+    RunnerSpawnOptionsProviderContribution,
     RunnerSpawnHookContribution
 } from '@hapi/protocol/plugins'
 
@@ -62,6 +70,15 @@ export type ResolveRunnerSpawnPlanInput = {
     spawnHooks: RegisteredRunnerContribution<RunnerSpawnHookContribution>[]
     timeoutMs?: number
     pathDelimiter?: string
+}
+
+export type ResolveRunnerSpawnOptionsInput = {
+    machineId: string
+    options: SpawnSessionOptions
+    agent: string
+    cwd: string
+    spawnOptionsProviders: RegisteredRunnerContribution<RunnerSpawnOptionsProviderContribution>[]
+    timeoutMs?: number
 }
 
 function contributionSort<T>(left: RegisteredRunnerContribution<T>, right: RegisteredRunnerContribution<T>): number {
@@ -144,8 +161,47 @@ function buildContext(input: ResolveRunnerSpawnPlanInput, plan: RunnerSpawnBaseP
         ...(input.options.effort ? { effort: input.options.effort } : {}),
         ...(input.options.modelReasoningEffort ? { modelReasoningEffort: input.options.modelReasoningEffort } : {}),
         ...(input.options.permissionMode ? { permissionMode: input.options.permissionMode } : {}),
-        ...(input.options.yolo !== undefined ? { yolo: input.options.yolo } : {})
+        ...(input.options.yolo !== undefined ? { yolo: input.options.yolo } : {}),
+        ...(input.options.pluginFields ? { pluginFields: input.options.pluginFields } : {})
     })
+}
+
+function buildOptionsContext(input: ResolveRunnerSpawnOptionsInput, options: SpawnSessionOptions): RunnerSpawnOptionsContext {
+    return RunnerSpawnOptionsContextSchema.parse({
+        machineId: input.machineId,
+        agent: input.agent,
+        directory: options.directory,
+        cwd: input.cwd,
+        ...(options.sessionType ? { sessionType: options.sessionType } : {}),
+        ...(options.worktreeName ? { worktreeName: options.worktreeName } : {}),
+        ...(options.resumeSessionId ? { resumeSessionId: options.resumeSessionId } : {}),
+        ...(options.model ? { model: options.model } : {}),
+        ...(options.effort ? { effort: options.effort } : {}),
+        ...(options.modelReasoningEffort ? { modelReasoningEffort: options.modelReasoningEffort } : {}),
+        ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+        ...(options.yolo !== undefined ? { yolo: options.yolo } : {}),
+        ...(options.pluginFields ? { pluginFields: options.pluginFields } : {})
+    })
+}
+
+function applySpawnOptionsProposal(args: {
+    entry: { pluginId: string; id: string }
+    options: SpawnSessionOptions
+    proposal: RunnerSpawnOptionDefaults
+    audit: RunnerExtensionAuditEvent[]
+}): void {
+    const source = contributionLabel(args.entry)
+    for (const [key, value] of Object.entries(args.proposal) as Array<[keyof RunnerSpawnOptionDefaults, unknown]>) {
+        if (value === undefined) continue
+        ;(args.options as unknown as Record<string, unknown>)[key] = value
+        args.audit.push({
+            phase: 'spawnOptions',
+            pluginId: args.entry.pluginId,
+            contributionId: args.entry.id,
+            field: `options.${key}`,
+            message: `${source} set launch option ${key}`
+        })
+    }
 }
 
 function applyEnvPatch(args: {
@@ -323,6 +379,40 @@ async function runBeforeSpawnHooks(input: ResolveRunnerSpawnPlanInput, state: {
         }
     }
     return {}
+}
+
+export async function resolveRunnerPluginSpawnOptions(input: ResolveRunnerSpawnOptionsInput): Promise<RunnerResolvedSpawnOptions> {
+    const options: SpawnSessionOptions = { ...input.options, agent: input.agent }
+    const diagnostics: PluginDiagnostic[] = []
+    const audit: RunnerExtensionAuditEvent[] = []
+    const timeoutMs = input.timeoutMs ?? DEFAULT_EXTENSION_TIMEOUT_MS
+
+    for (const entry of [...input.spawnOptionsProviders].sort(contributionSort)) {
+        if (!entry.contribution.provide) continue
+        const source = contributionLabel(entry)
+        try {
+            const context = buildOptionsContext(input, options)
+            const parsed = RunnerSpawnOptionsProviderProposalSchema.parse(await withTimeout(entry.contribution.provide(context), timeoutMs, source))
+            for (const pluginDiagnostic of parsed.diagnostics ?? []) {
+                diagnostics.push({
+                    ...pluginDiagnostic,
+                    pluginId: entry.pluginId
+                } as PluginDiagnostic & { pluginId: string })
+            }
+            if (parsed.options) {
+                applySpawnOptionsProposal({
+                    entry,
+                    options,
+                    proposal: parsed.options,
+                    audit
+                })
+            }
+        } catch (error) {
+            diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-spawn-options-failed', `${source} spawn options provider failed: ${error instanceof Error ? error.message : String(error)}`))
+        }
+    }
+
+    return RunnerResolvedSpawnOptionsSchema.parse({ options, diagnostics, audit })
 }
 
 export async function resolveRunnerPluginSpawnPlan(input: ResolveRunnerSpawnPlanInput): Promise<RunnerResolvedSpawnPlan> {

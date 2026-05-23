@@ -8,8 +8,6 @@ import type { Locale } from '@/lib/i18n-context'
 
 type PluginDisplaySource = Pick<PluginListItem, 'id' | 'name' | 'description' | 'display'>
 
-type Translate = (key: string, params?: Record<string, string | number>) => string
-
 export function localizedText(value: unknown, locale: Locale): string {
     const parsed = WebLocalizedTextSchema.safeParse(value)
     if (parsed.success) return localizeWebText(parsed.data, locale)
@@ -60,35 +58,10 @@ export function localizedContributionName(options: {
 
 export function pluginFeatureIntroMarkdown(
     plugin: PluginDetail,
-    capabilities: PluginCapabilityView[],
-    locale: Locale,
-    t: Translate
+    locale: Locale
 ): string {
     const explicitIntro = localizedText(plugin.display?.featureIntro, locale).trim()
     if (explicitIntro) return explicitIntro
 
-    const lines: string[] = []
-    const description = localizedPluginDescription(plugin, locale)
-    if (description) {
-        lines.push(description)
-    }
-
-    const uniqueCapabilities = new Map<string, PluginCapabilityView>()
-    for (const capability of capabilities) {
-        if (capability.pluginId !== plugin.id) continue
-        if (!uniqueCapabilities.has(capability.capabilityId)) {
-            uniqueCapabilities.set(capability.capabilityId, capability)
-        }
-    }
-
-    if (uniqueCapabilities.size > 0) {
-        lines.push(`### ${t('settings.plugins.detail.featureIntro.capabilities')}`)
-        for (const capability of uniqueCapabilities.values()) {
-            const name = localizedCapabilityName(capability, locale)
-            const capabilityDescription = localizedCapabilityDescription(capability, locale)
-            lines.push(`- **${name}**${capabilityDescription ? ` — ${capabilityDescription}` : ''}`)
-        }
-    }
-
-    return lines.join('\n\n')
+    return localizedPluginDescription(plugin, locale) ?? ''
 }

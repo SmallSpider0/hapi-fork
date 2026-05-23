@@ -63,6 +63,55 @@ describe('machines routes', () => {
         expect(calls).toEqual([{ machineId: 'machine-1', directory: '/repo', agent: 'vendor:example-agent' }])
     })
 
+    it('resolves Runner launch presets through the selected machine', async () => {
+        const machine = createMachine()
+        const calls: unknown[] = []
+        const engine = {
+            getMachine: () => machine,
+            getMachineByNamespace: () => machine,
+            invokeRunnerPluginAction: async (_machineId: string, payload: unknown) => {
+                calls.push(payload)
+                return {
+                    ok: true,
+                    result: {
+                        options: { permissionMode: 'yolo', modelReasoningEffort: 'xhigh' },
+                        matchedRules: [{ id: 'codex-repo', label: 'Codex repo' }],
+                        diagnostics: []
+                    }
+                }
+            }
+        } as Partial<SyncEngine>
+
+        const app = new Hono<WebAppEnv>()
+        app.use('*', async (c, next) => {
+            c.set('namespace', 'default')
+            await next()
+        })
+        app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
+
+        const response = await app.request('/api/machines/machine-1/launch-presets/resolve', {
+            method: 'POST',
+            body: JSON.stringify({
+                directory: '/repo',
+                agent: 'codex'
+            }),
+            headers: { 'content-type': 'application/json' }
+        })
+
+        expect(response.status).toBe(200)
+        expect(await response.json()).toEqual({
+            options: { permissionMode: 'yolo', modelReasoningEffort: 'xhigh' },
+            matchedRules: [{ id: 'codex-repo', label: 'Codex repo' }],
+            diagnostics: []
+        })
+        expect(calls).toEqual([expect.objectContaining({
+            actionId: 'runner-launch-presets.resolve',
+            namespace: 'default',
+            cwd: '/repo',
+            payload: expect.objectContaining({ directory: '/repo', agent: 'codex' })
+        })])
+    })
+
     it('returns Codex models for an online machine', async () => {
         const machine = createMachine()
         const engine = {

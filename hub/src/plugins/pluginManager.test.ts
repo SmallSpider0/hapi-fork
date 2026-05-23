@@ -7,7 +7,7 @@ import { HubPluginManager } from './pluginManager'
 import { writePluginState } from '@hapi/protocol/plugins/foundation'
 import {
     HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
-    HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
+    HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
     HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
     HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
     bundledCorePlugins
@@ -335,7 +335,7 @@ describe('HubPluginManager', () => {
             active: false,
             runtimes: { runner: { entry: 'dist/runner.js', active: false } }
         })
-        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID)).toMatchObject({
+        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
             source: 'bundled',
             enabled: false,
             active: false,
@@ -369,8 +369,8 @@ describe('HubPluginManager', () => {
                 status: 'disabled'
             }),
             expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_SPAWN_GUARD_PLUGIN_ID,
-                capabilityId: 'runner-spawn-guard',
+                pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+                capabilityId: 'runner-launch-presets',
                 kind: 'runner.spawnExtension',
                 status: 'disabled'
             })
@@ -391,6 +391,11 @@ describe('HubPluginManager', () => {
                 active: false
             })
         ]))
+        const launchPresetsPanel = manager.getPlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)?.contributions.web?.settingsPanels?.[0]
+        expect(launchPresetsPanel?.components).toEqual([
+            expect.objectContaining({ kind: 'text', tone: 'info' })
+        ])
+        expect(JSON.stringify(launchPresetsPanel)).not.toMatch(/blocked|allowed|permissionMode|rulesJson/)
 
         await manager.disablePlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
         expect(manager.getPlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
@@ -443,6 +448,50 @@ describe('HubPluginManager', () => {
         await manager.dispose()
 
         expect(afterWatchWindow).toBe(loadedAt)
+    })
+
+    it('activates bundled ServerChan notifier with filters, timeout, and secret redaction', async () => {
+        const calls: Array<{ url: string; body: URLSearchParams }> = []
+        const originalFetch = globalThis.fetch
+        globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+            calls.push({
+                url: String(url),
+                body: init?.body as URLSearchParams
+            })
+            return new Response('ok', { status: 200 })
+        }) as typeof fetch
+
+        try {
+            const manager = new HubPluginManager({
+                hapiHome,
+                watch: false,
+                includeBundledCore: true,
+                publicUrl: 'https://hapi.example.test',
+                env: { SERVERCHAN_SENDKEY: 'SCT_SECRET_VALUE' }
+            })
+            await manager.start()
+            await manager.enablePlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID, {
+                titlePrefix: 'HAPI Test',
+                namespaces: ['default'],
+                sessionPathPrefixes: ['/tmp/project'],
+                timeoutMs: 5000
+            })
+
+            const unmatched = createSession()
+            const unmatchedMetadata = unmatched.metadata!
+            unmatched.metadata = { ...unmatchedMetadata, host: unmatchedMetadata.host, path: '/tmp/project2' }
+            await manager.getNotificationChannel().sendReady(unmatched)
+            await manager.getNotificationChannel().sendReady(createSession())
+            await manager.dispose()
+
+            expect(calls).toHaveLength(1)
+            expect(calls[0]?.url).toBe('https://sctapi.ftqq.com/SCT_SECRET_VALUE.send')
+            expect(calls[0]?.body.get('title')).toBe('HAPI Test Ready for input')
+            expect(calls[0]?.body.get('desp')).toContain('https://hapi.example.test/sessions/session-1')
+            expect(JSON.stringify(manager.getPlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID))).not.toContain('SCT_SECRET_VALUE')
+        } finally {
+            globalThis.fetch = originalFetch
+        }
     })
 
     it('rejects config updates that would persist secrets', async () => {

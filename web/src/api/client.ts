@@ -27,6 +27,7 @@ import type {
     OpencodeModelsResponse,
     AgentHistoryImportResponse,
     PluginMessageActionRequest,
+    RunnerLaunchPresetResolveResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
@@ -43,6 +44,7 @@ import type {
     PluginInstallResult,
     PluginLocalDirectoryListResponse,
     PluginListResponse,
+    PluginNotificationFilterOptionsResponse,
     PluginReloadResult,
     PluginTargetScope
 } from '@hapi/protocol/plugins/admin'
@@ -245,6 +247,10 @@ export class ApiClient {
 
     async getPluginCapabilities(query?: PluginCapabilitiesQuery): Promise<PluginCapabilitiesResponse> {
         return await this.request<PluginCapabilitiesResponse>(withPluginCapabilitiesQuery('/api/plugins/capabilities', query))
+    }
+
+    async getPluginNotificationFilterOptions(): Promise<PluginNotificationFilterOptionsResponse> {
+        return await this.request<PluginNotificationFilterOptionsResponse>('/api/plugins/notification-filter-options')
     }
 
     async enablePlugin(pluginId: string, config?: Record<string, unknown>, target?: PluginTargetScope): Promise<PluginReloadResult> {
@@ -652,12 +658,38 @@ export class ApiClient {
         sessionType?: 'simple' | 'worktree',
         worktreeName?: string,
         effort?: string,
+        permissionMode?: string,
         pluginFields?: Record<string, unknown>
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
-            body: JSON.stringify({ directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, effort, pluginFields })
+            body: JSON.stringify({ directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, effort, permissionMode, pluginFields })
         })
+    }
+
+    async resolveRunnerLaunchPresets(
+        machineId: string,
+        input: {
+            directory: string
+            cwd?: string
+            agent?: string
+            model?: string
+            effort?: string
+            modelReasoningEffort?: string
+            permissionMode?: string
+            yolo?: boolean
+            sessionType?: 'simple' | 'worktree'
+            resumeSessionId?: string
+            pluginFields?: Record<string, unknown>
+        }
+    ): Promise<RunnerLaunchPresetResolveResponse> {
+        return await this.request<RunnerLaunchPresetResolveResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/launch-presets/resolve`,
+            {
+                method: 'POST',
+                body: JSON.stringify(input)
+            }
+        )
     }
 
     async getMachineCodexModels(machineId: string): Promise<CodexModelsResponse> {

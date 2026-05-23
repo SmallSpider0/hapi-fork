@@ -8,6 +8,8 @@ import type {
     RunnerCommandResolverProposal,
     RunnerEnvironmentProposal,
     RunnerSpawnContext,
+    RunnerSpawnOptionsContext,
+    RunnerSpawnOptionsProviderProposal,
     RunnerSpawnHookProposal
 } from './runnerExtensions'
 
@@ -136,6 +138,14 @@ export type HubPluginModule = {
     activate(ctx: HubPluginContext): void | Promise<void>
 }
 
+/** Spawn-options provider contribution registered by a Runner plugin. */
+export type RunnerSpawnOptionsProviderContribution = {
+    id: string
+    priority?: number
+    provide?: (context: RunnerSpawnOptionsContext) => MaybePromise<RunnerSpawnOptionsProviderProposal>
+    dispose?: () => void | Promise<void>
+}
+
 /** Environment provider contribution registered by a Runner plugin. */
 export type RunnerEnvironmentProviderContribution = {
     id: string
@@ -200,6 +210,7 @@ export type RunnerPluginContext = {
     config: PluginConfigReader
     secrets: PluginSecretReader
     runtime: {
+        registerSpawnOptionsProvider(provider: RunnerSpawnOptionsProviderContribution): Disposable
         registerEnvironmentProvider(provider: RunnerEnvironmentProviderContribution): Disposable
         registerCommandResolver(resolver: RunnerCommandResolverContribution): Disposable
         registerSpawnHook(hook: RunnerSpawnHookContribution): Disposable
