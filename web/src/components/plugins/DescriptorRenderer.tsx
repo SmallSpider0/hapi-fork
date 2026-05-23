@@ -10,11 +10,19 @@ import {
     type CorePluginActionId,
     type WebDescriptorComponent,
     type WebLocalizedText,
+    type WebSchemaFormOption,
+    type WebSchemaFormOptionsSource,
     type WebSchemaFormField,
 } from '@hapi/protocol/plugins'
 
 export type DescriptorActionHandler = (actionId: CorePluginActionId) => Promise<void> | void
 export type DescriptorConfigSaveHandler = (config: Record<string, unknown>) => Promise<void> | void
+export type DescriptorConfigChangeHandler = (config: Record<string, unknown>) => void
+export type DescriptorOption = WebSchemaFormOption & {
+    count?: number
+    lastSeenAt?: number
+}
+export type DescriptorOptionSources = Partial<Record<WebSchemaFormOptionsSource, DescriptorOption[]>>
 
 type BadgeVariant = 'default' | 'success' | 'warning' | 'destructive'
 
@@ -58,12 +66,39 @@ function componentKey(component: WebDescriptorComponent, index: number): string 
 }
 
 function valueIsBlank(value: unknown): boolean {
+    if (Array.isArray(value)) return value.length === 0
     return value === undefined || value === null || value === ''
+}
+
+function uniqueList(entries: string[]): string[] {
+    const result: string[] = []
+    const seen = new Set<string>()
+    for (const entry of entries) {
+        const value = entry.trim()
+        if (!value || seen.has(value)) continue
+        seen.add(value)
+        result.push(value)
+    }
+    return result
+}
+
+function listFromValue(value: unknown): string[] {
+    if (Array.isArray(value)) {
+        return uniqueList(value.map((entry) => String(entry)))
+    }
+    if (typeof value === 'string') {
+        return uniqueList(value.split(/[\n,]/))
+    }
+    return []
 }
 
 function initialFieldValue(field: WebSchemaFormField, config: Record<string, unknown>): unknown {
     if (field.secret) return ''
     const current = config[field.key]
+    if (field.type === 'multiSelect') {
+        if (current !== undefined && current !== '[REDACTED]') return listFromValue(current)
+        return []
+    }
     if (current !== undefined && current !== '[REDACTED]') return current
     if (field.defaultValue !== undefined) return field.defaultValue
     if (field.type === 'boolean') return false
@@ -72,6 +107,10 @@ function initialFieldValue(field: WebSchemaFormField, config: Record<string, unk
 
 function coerceFieldValue(field: WebSchemaFormField, value: unknown): unknown {
     if (field.type === 'boolean') return value === true
+    if (field.type === 'multiSelect') {
+        const values = listFromValue(value)
+        return values.length > 0 ? values : undefined
+    }
     if (field.type === 'number') {
         if (valueIsBlank(value)) return undefined
         const parsed = Number(value)
@@ -81,11 +120,134 @@ function coerceFieldValue(field: WebSchemaFormField, value: unknown): unknown {
     return value ?? ''
 }
 
+function buildNextConfig(fields: WebSchemaFormField[], config: Record<string, unknown>, values: Record<string, unknown>): Record<string, unknown> {
+    const nextConfig = { ...config }
+    for (const field of fields) {
+        if (field.secret) continue
+        const value = coerceFieldValue(field, values[field.key])
+        if (value === undefined || value === '') {
+            delete nextConfig[field.key]
+        } else {
+            nextConfig[field.key] = value
+        }
+    }
+    return nextConfig
+}
+
+function fieldWantsMultilineText(field: WebSchemaFormField): boolean {
+    return field.type === 'text' && /json|yaml|toml|script|template/i.test(field.key)
+}
+
+function optionsForField(field: WebSchemaFormField, optionSources?: DescriptorOptionSources): DescriptorOption[] {
+    const sourceOptions = field.optionsSource ? optionSources?.[field.optionsSource] ?? [] : []
+    const entries = [...sourceOptions, ...(field.options ?? [])]
+    const result: DescriptorOption[] = []
+    const seen = new Set<string>()
+    for (const option of entries) {
+        const value = option.value.trim()
+        if (!value || seen.has(value)) continue
+        seen.add(value)
+        result.push({ ...option, value })
+    }
+    return result
+}
+
+function SchemaMultiSelectField(props: {
+    field: WebSchemaFormField
+    value: unknown
+    options: DescriptorOption[]
+    sourceReady: boolean
+    disabled?: boolean
+    saving?: boolean
+    onChange: (value: string[]) => void
+}) {
+    const { t, locale } = useTranslation()
+    const [customValue, setCustomValue] = useState('')
+    const selected = listFromValue(props.value)
+    const selectedSet = new Set(selected)
+    const optionsByValue = new Map(props.options.map((option) => [option.value, option]))
+    const options: DescriptorOption[] = [
+        ...props.options,
+        ...selected
+            .filter((value) => !optionsByValue.has(value))
+            .map((value): DescriptorOption => ({ value }))
+    ]
+    const disabled = props.disabled || props.saving
+
+    const setSelected = (next: string[]) => props.onChange(uniqueList(next))
+    const toggleValue = (value: string, checked: boolean) => {
+        setSelected(checked
+            ? [...selected, value]
+            : selected.filter((entry) => entry !== value))
+    }
+    const addCustomValue = () => {
+        const entries = listFromValue(customValue)
+        if (entries.length === 0) return
+        setSelected([...selected, ...entries])
+        setCustomValue('')
+    }
+
+    return (
+        <div className="space-y-2 rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2">
+            <div className="text-xs text-[var(--app-hint)]">{t('settings.plugins.descriptor.allWhenEmpty')}</div>
+            {!props.sourceReady ? <div className="text-xs text-[var(--app-hint)]">{t('settings.plugins.descriptor.loadingOptions')}</div> : null}
+            {props.sourceReady && options.length === 0 ? <div className="text-xs text-[var(--app-hint)]">{t('settings.plugins.descriptor.noOptions')}</div> : null}
+            {options.length > 0 ? (
+                <div className="grid gap-2">
+                    {options.map((option) => {
+                        const label = descriptorText(option.label, locale) || option.value
+                        const description = descriptorText(option.description, locale)
+                            || (typeof option.count === 'number' ? t('settings.plugins.descriptor.optionCount', { count: option.count }) : '')
+                        return (
+                            <label key={option.value} className="flex min-w-0 cursor-pointer items-start gap-2 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={selectedSet.has(option.value)}
+                                    disabled={disabled}
+                                    onChange={(event) => toggleValue(option.value, event.target.checked)}
+                                    className="mt-0.5 accent-[var(--app-link)]"
+                                />
+                                <span className="min-w-0">
+                                    <span className="block break-words font-medium">{label}</span>
+                                    {description ? <span className="block break-all text-xs text-[var(--app-hint)]">{description}</span> : null}
+                                </span>
+                            </label>
+                        )
+                    })}
+                </div>
+            ) : null}
+            {props.field.allowCustom === false ? null : (
+                <div className="flex min-w-0 flex-col gap-2 sm:flex-row">
+                    <input
+                        type="text"
+                        value={customValue}
+                        disabled={disabled}
+                        placeholder={t('settings.plugins.descriptor.customPlaceholder')}
+                        onChange={(event) => setCustomValue(event.target.value)}
+                        onKeyDown={(event) => {
+                            if (event.key === 'Enter') {
+                                event.preventDefault()
+                                addCustomValue()
+                            }
+                        }}
+                        className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)]"
+                    />
+                    <Button type="button" size="sm" variant="outline" disabled={disabled || listFromValue(customValue).length === 0} onClick={addCustomValue}>
+                        {t('settings.plugins.descriptor.addCustom')}
+                    </Button>
+                </div>
+            )}
+        </div>
+    )
+}
+
 function SchemaFormComponent(props: {
     component: Extract<WebDescriptorComponent, { kind: 'schemaForm' }>
     config: Record<string, unknown>
     disabled?: boolean
+    optionSources?: DescriptorOptionSources
     onSaveConfig?: DescriptorConfigSaveHandler
+    onConfigChange?: DescriptorConfigChangeHandler
 }) {
     const { component, config } = props
     const { t, locale } = useTranslation()
@@ -100,22 +262,21 @@ function SchemaFormComponent(props: {
 
     const requiredMissing = component.fields.find((field) => field.required && !field.secret && valueIsBlank(values[field.key]))
 
+    const updateFieldValue = (field: WebSchemaFormField, value: unknown) => {
+        const nextValues = { ...values, [field.key]: value }
+        setValues(nextValues)
+        if (props.onConfigChange && !field.secret) {
+            props.onConfigChange(buildNextConfig(component.fields, config, nextValues))
+        }
+    }
+
     const save = async () => {
         if (!props.onSaveConfig || props.disabled) return
         if (requiredMissing) {
             setError(t('settings.plugins.descriptor.required', { label: descriptorText(requiredMissing.label, locale) }))
             return
         }
-        const nextConfig = { ...config }
-        for (const field of component.fields) {
-            if (field.secret) continue
-            const value = coerceFieldValue(field, values[field.key])
-            if (value === undefined || value === '') {
-                delete nextConfig[field.key]
-            } else {
-                nextConfig[field.key] = value
-            }
-        }
+        const nextConfig = buildNextConfig(component.fields, config, values)
         setSaving(true)
         setError(null)
         try {
@@ -128,51 +289,86 @@ function SchemaFormComponent(props: {
     }
 
     return (
-        <div className="space-y-3 rounded-lg border border-[var(--app-border)] p-3">
-            {component.title ? <div className="font-medium">{descriptorText(component.title, locale)}</div> : null}
-            {component.description ? <div className="text-sm text-[var(--app-hint)]">{descriptorText(component.description, locale)}</div> : null}
-            <div className="space-y-3">
+        <div className="min-w-0 space-y-3 overflow-hidden rounded-lg border border-[var(--app-border)] p-3">
+            {component.title ? <div className="min-w-0 break-words font-medium">{descriptorText(component.title, locale)}</div> : null}
+            {component.description ? <div className="min-w-0 break-words text-sm text-[var(--app-hint)] [overflow-wrap:anywhere]">{descriptorText(component.description, locale)}</div> : null}
+            <div className="min-w-0 space-y-3">
                 {component.fields.map((field) => {
                     const value = values[field.key]
                     const label = descriptorText(field.label, locale)
                     const description = descriptorText(field.description, locale)
+                    if (!field.secret && field.type === 'multiSelect') {
+                        return (
+                            <div key={field.key} className="block min-w-0 space-y-1 text-sm">
+                                <span className="block min-w-0 break-words font-medium">{label}{field.required ? ' *' : ''}</span>
+                                {description ? <span className="block min-w-0 break-words text-xs text-[var(--app-hint)] [overflow-wrap:anywhere]">{description}</span> : null}
+                                <SchemaMultiSelectField
+                                    field={field}
+                                    value={value}
+                                    options={optionsForField(field, props.optionSources)}
+                                    sourceReady={!field.optionsSource || props.optionSources?.[field.optionsSource] !== undefined}
+                                    disabled={props.disabled}
+                                    saving={saving}
+                                    onChange={(nextValue) => updateFieldValue(field, nextValue)}
+                                />
+                            </div>
+                        )
+                    }
+                    if (!field.secret && field.type === 'boolean') {
+                        return (
+                            <label key={field.key} className="flex min-w-0 items-start gap-2 text-sm">
+                                <input
+                                    type="checkbox"
+                                    checked={value === true}
+                                    disabled={props.disabled || saving}
+                                    onChange={(event) => updateFieldValue(field, event.target.checked)}
+                                    className="mt-0.5 shrink-0 accent-[var(--app-link)]"
+                                />
+                                <span className="min-w-0">
+                                    <span className="block min-w-0 break-words font-medium">{label}{field.required ? ' *' : ''}</span>
+                                    {description ? <span className="block min-w-0 break-words text-xs text-[var(--app-hint)] [overflow-wrap:anywhere]">{description}</span> : null}
+                                </span>
+                            </label>
+                        )
+                    }
                     return (
-                        <label key={field.key} className="block space-y-1 text-sm">
-                            <span className="font-medium">{label}{field.required ? ' *' : ''}</span>
-                            {description ? <span className="block text-xs text-[var(--app-hint)]">{description}</span> : null}
+                        <label key={field.key} className="block min-w-0 space-y-1 text-sm">
+                            <span className="block min-w-0 break-words font-medium">{label}{field.required ? ' *' : ''}</span>
+                            {description ? <span className="block min-w-0 break-words text-xs text-[var(--app-hint)] [overflow-wrap:anywhere]">{description}</span> : null}
                             {field.secret ? (
                                 <input
                                     type="password"
                                     value=""
                                     disabled
                                     placeholder={t('settings.plugins.descriptor.secretPlaceholder')}
-                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-sm text-[var(--app-hint)]"
-                                />
-                            ) : field.type === 'boolean' ? (
-                                <input
-                                    type="checkbox"
-                                    checked={value === true}
-                                    disabled={props.disabled || saving}
-                                    onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.checked }))}
-                                    className="accent-[var(--app-link)]"
+                                    className="w-full min-w-0 rounded-md border border-[var(--app-border)] bg-[var(--app-subtle-bg)] px-3 py-2 text-sm text-[var(--app-hint)]"
                                 />
                             ) : field.type === 'select' ? (
                                 <select
                                     value={typeof value === 'string' ? value : ''}
                                     disabled={props.disabled || saving}
-                                    onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
-                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                                    onChange={(event) => updateFieldValue(field, event.target.value)}
+                                    className="w-full min-w-0 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
                                 >
                                     <option value="">{t('settings.plugins.descriptor.select')}</option>
-                                    {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{descriptorText(option.label, locale) || option.value}</option>)}
+                                    {optionsForField(field, props.optionSources).map((option) => <option key={option.value} value={option.value}>{descriptorText(option.label, locale) || option.value}</option>)}
                                 </select>
+                            ) : fieldWantsMultilineText(field) ? (
+                                <textarea
+                                    value={typeof value === 'string' || typeof value === 'number' ? String(value) : ''}
+                                    disabled={props.disabled || saving}
+                                    onChange={(event) => updateFieldValue(field, event.target.value)}
+                                    spellCheck={false}
+                                    rows={5}
+                                    className="min-h-28 w-full min-w-0 resize-y rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 font-mono text-xs text-[var(--app-fg)] placeholder:text-[var(--app-hint)]"
+                                />
                             ) : (
                                 <input
                                     type={field.type === 'number' ? 'number' : 'text'}
                                     value={typeof value === 'string' || typeof value === 'number' ? value : ''}
                                     disabled={props.disabled || saving}
-                                    onChange={(event) => setValues((current) => ({ ...current, [field.key]: event.target.value }))}
-                                    className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
+                                    onChange={(event) => updateFieldValue(field, event.target.value)}
+                                    className="w-full min-w-0 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
                                 />
                             )}
                         </label>
@@ -193,8 +389,10 @@ function DescriptorComponent(props: {
     component: WebDescriptorComponent
     config: Record<string, unknown>
     disabled?: boolean
+    optionSources?: DescriptorOptionSources
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
+    onConfigChange?: DescriptorConfigChangeHandler
 }) {
     const { t, locale } = useTranslation()
     const parsed = WebDescriptorComponentSchema.safeParse(props.component)
@@ -210,7 +408,7 @@ function DescriptorComponent(props: {
                 : component.tone === 'muted'
                     ? 'text-[var(--app-hint)]'
                     : ''
-        return <div className={`text-sm ${tone}`}>{descriptorText(component.text, locale)}</div>
+        return <div className={`min-w-0 break-words text-sm [overflow-wrap:anywhere] ${tone}`}>{descriptorText(component.text, locale)}</div>
     }
     if (component.kind === 'badge') {
         return <Badge variant={badgeVariant(component.variant)}>{descriptorText(component.label, locale)}</Badge>
@@ -252,7 +450,7 @@ function DescriptorComponent(props: {
             </Button>
         )
     }
-    return <SchemaFormComponent component={component} config={props.config} disabled={props.disabled} onSaveConfig={props.onSaveConfig} />
+    return <SchemaFormComponent component={component} config={props.config} disabled={props.disabled} optionSources={props.optionSources} onSaveConfig={props.onSaveConfig} onConfigChange={props.onConfigChange} />
 }
 
 function DescriptorError(props: { message: string }) {
@@ -288,26 +486,30 @@ export function PluginDescriptorPanels(props: {
     contributions: unknown
     config?: Record<string, unknown>
     disabled?: boolean
+    optionSources?: DescriptorOptionSources
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
+    onConfigChange?: DescriptorConfigChangeHandler
 }) {
     const panels = readSettingsPanels(props.contributions)
     if (panels.length === 0) return null
-    return <PluginSettingsPanels panels={panels} config={props.config} disabled={props.disabled} onAction={props.onAction} onSaveConfig={props.onSaveConfig} />
+    return <PluginSettingsPanels panels={panels} config={props.config} disabled={props.disabled} optionSources={props.optionSources} onAction={props.onAction} onSaveConfig={props.onSaveConfig} onConfigChange={props.onConfigChange} />
 }
 
 export function PluginSettingsPanels(props: {
     panels: unknown[]
     config?: Record<string, unknown>
     disabled?: boolean
+    optionSources?: DescriptorOptionSources
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
+    onConfigChange?: DescriptorConfigChangeHandler
 }) {
     const { t, locale } = useTranslation()
     const parsed = useMemo(() => props.panels.map((panel) => parsePanelShell(panel)), [props.panels])
 
     return (
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
             {parsed.map((entry, index) => {
                 if (!entry.success) {
                     return <DescriptorError key={`invalid-${index}`} message={t('settings.plugins.descriptor.invalidPanel')} />
@@ -315,12 +517,12 @@ export function PluginSettingsPanels(props: {
                 const panel = entry
                 return (
                     <DescriptorBoundary key={panel.id} fallback={<DescriptorError message={t('settings.plugins.descriptor.panelRenderFailed')} />}>
-                        <div className="space-y-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
-                            <div>
-                                <div className="font-medium">{descriptorText(panel.title, locale)}</div>
-                                {panel.description ? <div className="mt-1 text-sm text-[var(--app-hint)]">{descriptorText(panel.description, locale)}</div> : null}
+                        <div className="min-w-0 space-y-3 overflow-hidden rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3">
+                            <div className="min-w-0">
+                                <div className="min-w-0 break-words font-medium">{descriptorText(panel.title, locale)}</div>
+                                {panel.description ? <div className="mt-1 min-w-0 break-words text-sm text-[var(--app-hint)] [overflow-wrap:anywhere]">{descriptorText(panel.description, locale)}</div> : null}
                             </div>
-                            <div className="space-y-3">
+                            <div className="min-w-0 space-y-3">
                                 {panel.components.map((component, componentIndex) => {
                                     const parsedComponent = WebDescriptorComponentSchema.safeParse(component)
                                     if (!parsedComponent.success) {
@@ -332,8 +534,10 @@ export function PluginSettingsPanels(props: {
                                             component={parsedComponent.data}
                                             config={props.config ?? {}}
                                             disabled={props.disabled}
+                                            optionSources={props.optionSources}
                                             onAction={props.onAction}
                                             onSaveConfig={props.onSaveConfig}
+                                            onConfigChange={props.onConfigChange}
                                         />
                                     )
                                 })}

@@ -17,8 +17,8 @@ const plugin = {
         name: { en: 'Example Plugin', 'zh-CN': '示例插件' },
         description: { en: 'Localized English', 'zh-CN': '本地化中文描述' },
         featureIntro: {
-            en: '### Features\n- English overview',
-            'zh-CN': '### 功能\n- 中文功能介绍'
+            en: '- English overview',
+            'zh-CN': '- 中文功能介绍'
         }
     }
 } as unknown as PluginDetail
@@ -56,14 +56,15 @@ describe('plugin metadata localization', () => {
         })).toBe('设置面板')
     })
 
-    it('returns explicit markdown feature introduction before generated fallback', () => {
-        expect(pluginFeatureIntroMarkdown(plugin, [capability], 'zh-CN', (key) => key)).toContain('中文功能介绍')
+    it('returns explicit markdown feature introduction as authored', () => {
+        const markdown = pluginFeatureIntroMarkdown(plugin, 'zh-CN')
+        expect(markdown).toBe('- 中文功能介绍')
     })
 
-    it('generates markdown overview when no explicit intro exists', () => {
+    it('uses plugin description as fallback feature introduction', () => {
         const withoutIntro = { ...plugin, display: { ...plugin.display, featureIntro: undefined } } as PluginDetail
-        const markdown = pluginFeatureIntroMarkdown(withoutIntro, [capability], 'zh-CN', (key) => key === 'settings.plugins.detail.featureIntro.capabilities' ? '能力' : key)
-        expect(markdown).toContain('### 能力')
-        expect(markdown).toContain('**示例能力**')
+        const markdown = pluginFeatureIntroMarkdown(withoutIntro, 'zh-CN')
+        expect(markdown).toBe('本地化中文描述')
+        expect(markdown).not.toContain('示例能力')
     })
 })

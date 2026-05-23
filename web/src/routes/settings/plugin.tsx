@@ -4,6 +4,7 @@ import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugin } from '@/hooks/queries/usePlugin'
 import { usePluginCapabilities } from '@/hooks/queries/usePluginCapabilities'
+import { useMachines } from '@/hooks/queries/useMachines'
 import { usePluginActions } from '@/hooks/mutations/usePluginActions'
 import { useTranslation } from '@/lib/use-translation'
 import { Button } from '@/components/ui/button'
@@ -12,7 +13,8 @@ import { Card, CardContent } from '@/components/ui/card'
 import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-import { PluginDescriptorPanels, type DescriptorActionHandler } from '@/components/plugins/DescriptorRenderer'
+import { PluginDescriptorPanels, type DescriptorActionHandler, type DescriptorOptionSources } from '@/components/plugins/DescriptorRenderer'
+import { RunnerLaunchPresetsEditor } from '@/components/plugins/RunnerLaunchPresetsEditor'
 import {
     localizedCapabilityDescription,
     localizedCapabilityName,
@@ -24,6 +26,7 @@ import {
 import { PluginTargetScopeSchema, type PluginCapabilityView, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
+const RUNNER_LAUNCH_PRESETS_PLUGIN_ID = 'com.hapi.core.runner-launch-presets'
 type ResultState = {
     title: string
     lines: string[]
@@ -393,8 +396,14 @@ function secretPermissionLabel(
     return parts.join(' · ')
 }
 
-function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params?: Record<string, string | number>) => string; locale: 'en' | 'zh-CN' }) {
-    const { plugin, t, locale } = props
+function DeveloperDetails(props: {
+    plugin: PluginDetail
+    capabilities: PluginCapabilityView[]
+    capabilitiesLoading: boolean
+    t: (key: string, params?: Record<string, string | number>) => string
+    locale: 'en' | 'zh-CN'
+}) {
+    const { plugin, capabilities, capabilitiesLoading, t, locale } = props
     return (
         <details className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-sm">
             <summary className="cursor-pointer font-medium">{t('settings.plugins.detail.developerDetails')}</summary>
@@ -425,6 +434,11 @@ function DeveloperDetails(props: { plugin: PluginDetail; t: (key: string, params
                 <div className="space-y-2">
                     <div className="font-medium">{t('settings.plugins.detail.contributions')}</div>
                     <ContributionsList plugin={plugin} t={t} locale={locale} />
+                </div>
+
+                <div className="space-y-2">
+                    <div className="font-medium">{t('settings.plugins.capabilities.title')}</div>
+                    <CapabilitiesList capabilities={capabilities} loading={capabilitiesLoading} t={t} locale={locale} />
                 </div>
 
                 <div className="space-y-2">
@@ -474,12 +488,15 @@ export default function PluginPage() {
     const { plugin, isLoading, error } = usePlugin(api, pluginId, target)
     const capabilityState = usePluginCapabilities(api, { target })
     const actions = usePluginActions(api)
+    const isRunnerLaunchPresetsRoute = pluginId === RUNNER_LAUNCH_PRESETS_PLUGIN_ID
+    const machineState = useMachines(api, isRunnerLaunchPresetsRoute)
     const [configText, setConfigText] = useState('{}')
     const [initialConfigText, setInitialConfigText] = useState('{}')
     const [result, setResult] = useState<ResultState>(null)
     const [configError, setConfigError] = useState<string | null>(null)
     const [enableDialogOpen, setEnableDialogOpen] = useState(false)
     const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+    const [descriptorOptionSources, setDescriptorOptionSources] = useState<DescriptorOptionSources | undefined>(undefined)
 
     useEffect(() => {
         const next = formatConfig(plugin?.config ?? {})
@@ -488,18 +505,53 @@ export default function PluginPage() {
         setConfigError(null)
     }, [plugin])
 
+    useEffect(() => {
+        let cancelled = false
+        void api.getPluginNotificationFilterOptions()
+            .then((options) => {
+                if (cancelled) return
+                setDescriptorOptionSources({
+                    'notification.namespaces': options.namespaces,
+                    'notification.agents': options.agents,
+                    'notification.workspaces': options.workspaces
+                })
+            })
+            .catch(() => {
+                if (!cancelled) {
+                    setDescriptorOptionSources({
+                        'notification.namespaces': [],
+                        'notification.agents': [],
+                        'notification.workspaces': []
+                    })
+                }
+            })
+        return () => {
+            cancelled = true
+        }
+    }, [api])
+
     const dirtyConfig = configText !== initialConfigText
     const issueCount = useMemo(() => plugin?.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length ?? 0, [plugin])
     const canEnablePlugin = plugin ? !['invalid', 'incompatible', 'blocked'].includes(plugin.status) : false
     const canDeletePlugin = plugin?.source === 'user-home'
     const hasConfig = Boolean(plugin && (Object.keys(plugin.config ?? {}).length > 0 || dirtyConfig))
+    const isRunnerLaunchPresetsPlugin = plugin?.id === RUNNER_LAUNCH_PRESETS_PLUGIN_ID
+    const runnerTargetMachineId = plugin?.target?.machineId
+        ?? (typeof target === 'string' && target.startsWith('runner:') ? target.slice('runner:'.length) : null)
     const pluginCapabilities = useMemo(
         () => capabilityState.capabilities.filter((capability) => capability.pluginId === plugin?.id),
         [capabilityState.capabilities, plugin?.id]
     )
+    const descriptorConfig = useMemo(() => {
+        try {
+            return parseConfig(configText, t)
+        } catch {
+            return plugin?.config ?? {}
+        }
+    }, [configText, plugin?.config, t])
     const featureIntro = useMemo(
-        () => plugin ? pluginFeatureIntroMarkdown(plugin, pluginCapabilities, locale, t) : '',
-        [plugin, pluginCapabilities, locale, t]
+        () => plugin ? pluginFeatureIntroMarkdown(plugin, locale) : '',
+        [plugin, locale]
     )
 
     const showReloadResult = (title: string, reloadResult: PluginReloadResult) => {
@@ -535,6 +587,15 @@ export default function PluginPage() {
         await runAction(t('settings.plugins.action.reload'), async () => await actions.reloadPlugin(plugin.id, target))
     }
 
+    const primaryReloadAction = async () => {
+        if (!plugin) return
+        if (dirtyConfig) {
+            await saveConfig()
+            return
+        }
+        await reload()
+    }
+
     const deletePlugin = async () => {
         if (!plugin) return
         await actions.deletePlugin(plugin.id, target)
@@ -551,6 +612,11 @@ export default function PluginPage() {
         const formatted = formatConfig(config)
         setConfigText(formatted)
         setInitialConfigText(formatted)
+    }
+
+    const draftConfigObject = (config: Record<string, unknown>): void => {
+        setConfigText(formatConfig(config))
+        setConfigError(null)
     }
 
     const saveConfig = async () => {
@@ -600,7 +666,15 @@ export default function PluginPage() {
                         <div className="font-semibold">{t('settings.plugins.detail.title')}</div>
                         <div className="truncate text-xs text-[var(--app-hint)]">{pluginId}</div>
                     </div>
-                    {plugin ? <Button type="button" variant="outline" size="sm" disabled={actions.isPending} onClick={() => void reload()}>{t('settings.plugins.action.reload')}</Button> : null}
+                    {plugin ? (
+                        <Button type="button" variant="outline" size="sm" disabled={actions.isPending} onClick={() => void primaryReloadAction()}>
+                            {actions.isPending
+                                ? t('settings.plugins.config.saving')
+                                : dirtyConfig
+                                    ? t('settings.plugins.config.saveAndReload')
+                                    : t('settings.plugins.action.reload')}
+                        </Button>
+                    ) : null}
                 </div>
             </div>
             <div className="app-scroll-y min-h-0 flex-1">
@@ -645,29 +719,33 @@ export default function PluginPage() {
                                     ) : (
                                         <Button type="button" disabled={actions.isPending || !canEnablePlugin} onClick={() => setEnableDialogOpen(true)}>{t('settings.plugins.action.enable')}</Button>
                                     )}
-                                    <Button type="button" variant="outline" disabled={actions.isPending} onClick={() => void reload()}>{plugin.status === 'reload-failed' ? t('settings.plugins.action.retryReload') : t('settings.plugins.action.reload')}</Button>
                                     <Button type="button" variant="destructive" disabled={actions.isPending || !canDeletePlugin} onClick={() => setDeleteDialogOpen(true)}>{t('settings.plugins.action.delete')}</Button>
                                 </div>
                                 {!plugin.enabled && !canEnablePlugin ? <div className="mt-2 text-sm text-[var(--app-hint)]">{t('settings.plugins.action.cannotEnableStatus', { status: t(`settings.plugins.status.${plugin.status}`) })}</div> : null}
                             </SectionCard>
 
-                            {plugin.contributions.web?.settingsPanels?.length ? (
-                                <SectionCard title={t('settings.plugins.detail.pluginUi')}>
-                                    <PluginDescriptorPanels
-                                        contributions={plugin.contributions.web}
-                                        config={plugin.config ?? {}}
-                                        disabled={actions.isPending}
-                                        onAction={runDescriptorAction}
-                                        onSaveConfig={saveConfigObject}
-                                    />
-                                </SectionCard>
+                            {isRunnerLaunchPresetsPlugin ? (
+                                <RunnerLaunchPresetsEditor
+                                    config={descriptorConfig}
+                                    machines={machineState.machines}
+                                    targetMachineId={runnerTargetMachineId}
+                                    optionSources={descriptorOptionSources}
+                                    dirty={dirtyConfig}
+                                    disabled={actions.isPending || machineState.isLoading}
+                                    onConfigChange={draftConfigObject}
+                                />
+                            ) : plugin.contributions.web?.settingsPanels?.length ? (
+                                <PluginDescriptorPanels
+                                    contributions={plugin.contributions.web}
+                                    config={descriptorConfig}
+                                    disabled={actions.isPending}
+                                    optionSources={descriptorOptionSources}
+                                    onAction={runDescriptorAction}
+                                    onConfigChange={draftConfigObject}
+                                />
                             ) : null}
 
-                            <SectionCard title={t('settings.plugins.capabilities.title')}>
-                                <CapabilitiesList capabilities={pluginCapabilities} loading={capabilityState.isLoading} t={t} locale={locale} />
-                            </SectionCard>
-
-                            {hasConfig ? <SectionCard title={t('settings.plugins.config.title')}>
+                            {hasConfig && !isRunnerLaunchPresetsPlugin ? <SectionCard title={t('settings.plugins.config.title')}>
                                 <div className="space-y-2">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <label className="text-sm font-medium" htmlFor="plugin-config-json">{t('settings.plugins.config.textareaLabel')}</label>
@@ -681,7 +759,6 @@ export default function PluginPage() {
                                     />
                                     {configError ? <div className="text-sm text-red-600">{configError}</div> : null}
                                     <div className="flex flex-wrap gap-2">
-                                        <Button type="button" disabled={actions.isPending || !dirtyConfig} onClick={() => void saveConfig()}>{actions.isPending ? t('settings.plugins.config.saving') : t('settings.plugins.config.saveAndReload')}</Button>
                                         <Button type="button" variant="outline" onClick={formatConfigText}>{t('settings.plugins.config.format')}</Button>
                                         <Button type="button" variant="outline" disabled={!dirtyConfig} onClick={() => { setConfigText(initialConfigText); setConfigError(null) }}>{t('settings.plugins.config.reset')}</Button>
                                     </div>
@@ -692,7 +769,13 @@ export default function PluginPage() {
                                 <DiagnosticsList plugin={plugin} t={t} />
                             </SectionCard> : null}
 
-                            <DeveloperDetails plugin={plugin} t={t} locale={locale} />
+                            <DeveloperDetails
+                                plugin={plugin}
+                                capabilities={pluginCapabilities}
+                                capabilitiesLoading={capabilityState.isLoading}
+                                t={t}
+                                locale={locale}
+                            />
 
                             <ConfirmDialog
                                 isOpen={enableDialogOpen}

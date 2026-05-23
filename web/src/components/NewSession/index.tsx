@@ -40,6 +40,12 @@ import {
     type NewSessionPluginField
 } from './pluginFields'
 
+type LaunchPresetNotice = {
+    matched: string[]
+    applied: Array<{ key: string; value: string }>
+    manual: string[]
+}
+
 export function NewSession(props: {
     api: ApiClient
     machines: Machine[]
@@ -66,12 +72,16 @@ export function NewSession(props: {
     const [effort, setEffort] = useState<ClaudeEffort>('auto')
     const [modelReasoningEffort, setModelReasoningEffort] = useState<CodexReasoningEffort>('default')
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
+    const [permissionMode, setPermissionMode] = useState<string | undefined>(undefined)
+    const [manualLaunchFields, setManualLaunchFields] = useState<string[]>([])
+    const [launchPresetNotice, setLaunchPresetNotice] = useState<LaunchPresetNotice | null>(null)
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [worktreeName, setWorktreeName] = useState('')
     const [pluginFieldValues, setPluginFieldValues] = useState<Record<string, unknown>>({})
     const [directoryCreationConfirmed, setDirectoryCreationConfirmed] = useState(false)
     const [error, setError] = useState<string | null>(null)
     const worktreeInputRef = useRef<HTMLInputElement>(null)
+    const yoloModeFromPresetRef = useRef(false)
 
     useEffect(() => {
         if (sessionType === 'worktree') {
@@ -79,9 +89,16 @@ export function NewSession(props: {
         }
     }, [sessionType])
 
+    const markLaunchFieldManual = useCallback((field: string) => {
+        setManualLaunchFields((current) => current.includes(field) ? current : [...current, field])
+    }, [])
+
     useEffect(() => {
         setModel('auto')
         setEffort('auto')
+        setModelReasoningEffort('default')
+        setPermissionMode(undefined)
+        setManualLaunchFields([])
     }, [agent])
 
     useEffect(() => {
@@ -89,6 +106,10 @@ export function NewSession(props: {
     }, [agent])
 
     useEffect(() => {
+        if (yoloModeFromPresetRef.current) {
+            yoloModeFromPresetRef.current = false
+            return
+        }
         savePreferredYoloMode(yoloMode)
     }, [yoloMode])
 
@@ -138,6 +159,13 @@ export function NewSession(props: {
     const newSessionPluginFieldPayload = useMemo(
         () => buildNewSessionPluginFieldPayload(newSessionPluginFields, pluginFieldValues),
         [newSessionPluginFields, pluginFieldValues]
+    )
+    const launchPresetPluginFields = useMemo(
+        () => ({
+            ...newSessionPluginFieldPayload,
+            ...(manualLaunchFields.length > 0 ? { launchPresetManualFields: manualLaunchFields } : {})
+        }),
+        [manualLaunchFields, newSessionPluginFieldPayload]
     )
     useEffect(() => {
         if (agentDescriptors.some((descriptor) => descriptor.id === agent && descriptor.available !== false)) {
@@ -246,6 +274,73 @@ export function NewSession(props: {
         })
     })
     useEffect(() => {
+        if (!props.api || !machineId || !deferredDirectory) {
+            setLaunchPresetNotice(null)
+            return
+        }
+        let cancelled = false
+        const manual = new Set(manualLaunchFields)
+        void props.api.resolveRunnerLaunchPresets(machineId, {
+            directory: deferredDirectory,
+            agent,
+            model: manual.has('model') && model !== 'auto' ? model : undefined,
+            effort: manual.has('effort') && effort !== 'auto' ? effort : undefined,
+            modelReasoningEffort: manual.has('modelReasoningEffort') && modelReasoningEffort !== 'default' ? modelReasoningEffort : undefined,
+            permissionMode: manual.has('permissionMode') ? permissionMode : undefined,
+            yolo: manual.has('yolo') || manual.has('permissionMode') ? yoloMode : undefined,
+            sessionType,
+            pluginFields: launchPresetPluginFields
+        }).then((result) => {
+            if (cancelled) return
+            const options = result.options ?? {}
+            if (options.model && !manual.has('model')) {
+                setModel(options.model)
+            }
+            if (options.effort && !manual.has('effort')) {
+                setEffort(options.effort as ClaudeEffort)
+            }
+            if (options.modelReasoningEffort && !manual.has('modelReasoningEffort')) {
+                setModelReasoningEffort(options.modelReasoningEffort as CodexReasoningEffort)
+            }
+            if (options.permissionMode && !manual.has('permissionMode')) {
+                setPermissionMode(options.permissionMode)
+                yoloModeFromPresetRef.current = true
+                setYoloMode(options.permissionMode === 'yolo' || options.permissionMode === 'bypassPermissions')
+            }
+            if (typeof options.yolo === 'boolean' && !manual.has('yolo') && !manual.has('permissionMode')) {
+                yoloModeFromPresetRef.current = true
+                setYoloMode(options.yolo)
+            }
+            const matched = result.matchedRules.map((rule) => rule.label)
+            const applied = Object.entries(options)
+                .filter(([, value]) => value !== undefined)
+                .map(([key, value]) => ({ key, value: String(value) }))
+            setLaunchPresetNotice(matched.length > 0 ? {
+                matched,
+                applied,
+                manual: manualLaunchFields
+            } : null)
+        }).catch(() => {
+            if (!cancelled) setLaunchPresetNotice(null)
+        })
+        return () => {
+            cancelled = true
+        }
+    }, [
+        props.api,
+        machineId,
+        deferredDirectory,
+        agent,
+        model,
+        effort,
+        modelReasoningEffort,
+        permissionMode,
+        yoloMode,
+        sessionType,
+        manualLaunchFields,
+        launchPresetPluginFields
+    ])
+    useEffect(() => {
         // Auto-pick the OpenCode default model when discovery finishes, so the
         // form has a sensible value if the user hits Enter without scrolling.
         if (agent !== 'opencode') return
@@ -305,6 +400,8 @@ export function NewSession(props: {
 
     const handleMachineChange = useCallback((newMachineId: string) => {
         setMachineId(newMachineId)
+        setManualLaunchFields([])
+        setPermissionMode(undefined)
         const paths = getRecentPaths(newMachineId)
         if (paths[0]) {
             setDirectory(paths[0])
@@ -398,6 +495,11 @@ export function NewSession(props: {
             const resolvedModelReasoningEffort = agent === 'codex' && modelReasoningEffort !== 'default'
                 ? modelReasoningEffort
                 : undefined
+            const resolvedYolo = selectedAgentSupportsYolo
+                ? permissionMode
+                    ? permissionMode === 'yolo' || permissionMode === 'bypassPermissions'
+                    : yoloMode
+                : false
             const result = await spawnSession({
                 machineId,
                 directory: trimmedDirectory,
@@ -405,10 +507,11 @@ export function NewSession(props: {
                 model: resolvedModel,
                 effort: resolvedEffort,
                 modelReasoningEffort: resolvedModelReasoningEffort,
-                yolo: selectedAgentSupportsYolo ? yoloMode : false,
+                permissionMode,
+                yolo: resolvedYolo,
                 sessionType,
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
-                pluginFields: newSessionPluginFieldPayload
+                pluginFields: launchPresetPluginFields
             })
 
             if (result.type === 'success') {
@@ -443,6 +546,9 @@ export function NewSession(props: {
                     Runner last spawn error: {runnerSpawnError}
                 </div>
             ) : null}
+            {launchPresetNotice ? (
+                <LaunchPresetNoticeCard notice={launchPresetNotice} />
+            ) : null}
             <DirectorySection
                 directory={directory}
                 suggestions={suggestions}
@@ -471,7 +577,11 @@ export function NewSession(props: {
                 agent={agent}
                 agents={agentDescriptors}
                 isDisabled={isFormDisabled}
-                onAgentChange={setAgent}
+                onAgentChange={(nextAgent) => {
+                    setManualLaunchFields([])
+                    setPermissionMode(undefined)
+                    setAgent(nextAgent)
+                }}
             />
             <AgentCapabilitiesSummary
                 api={props.api}
@@ -495,7 +605,10 @@ export function NewSession(props: {
                     availableModels={opencodeModelsState.availableModels}
                     currentModelId={opencodeModelsState.currentModelId}
                     selectedModel={opencodeSelectedModel}
-                    onModelChange={setOpencodeSelectedModel}
+                    onModelChange={(value) => {
+                        markLaunchFieldManual('model')
+                        setOpencodeSelectedModel(value)
+                    }}
                     onRetry={opencodeModelsState.refetch}
                 />
             ) : (
@@ -508,25 +621,39 @@ export function NewSession(props: {
                     error={agent === 'codex' && codexModelsState.error
                         ? `${t('newSession.model.loadFailed')}: ${codexModelsState.error}`
                         : null}
-                    onModelChange={setModel}
+                    onModelChange={(value) => {
+                        markLaunchFieldManual('model')
+                        setModel(value)
+                    }}
                 />
             )}
             <ClaudeEffortSelector
                 agent={agent}
                 effort={effort}
                 isDisabled={isFormDisabled}
-                onEffortChange={setEffort}
+                onEffortChange={(value) => {
+                    markLaunchFieldManual('effort')
+                    setEffort(value)
+                }}
             />
             <ReasoningEffortSelector
                 agent={agent}
                 value={modelReasoningEffort}
                 isDisabled={isFormDisabled}
-                onChange={setModelReasoningEffort}
+                onChange={(value) => {
+                    markLaunchFieldManual('modelReasoningEffort')
+                    setModelReasoningEffort(value)
+                }}
             />
             <YoloToggle
                 yoloMode={yoloMode}
                 isDisabled={isFormDisabled || !selectedAgentSupportsYolo}
-                onToggle={setYoloMode}
+                onToggle={(value) => {
+                    markLaunchFieldManual('permissionMode')
+                    markLaunchFieldManual('yolo')
+                    setPermissionMode(undefined)
+                    setYoloMode(value)
+                }}
             />
 
             {(error ?? spawnError) ? (
@@ -543,6 +670,41 @@ export function NewSession(props: {
                 onCancel={props.onCancel}
                 onCreate={handleCreate}
             />
+        </div>
+    )
+}
+
+function launchPresetFieldLabel(field: string): string {
+    if (field === 'model') return 'model'
+    if (field === 'effort') return 'Claude effort'
+    if (field === 'modelReasoningEffort') return 'reasoning'
+    if (field === 'permissionMode' || field === 'yolo') return 'permission'
+    return field
+}
+
+function LaunchPresetNoticeCard(props: { notice: LaunchPresetNotice }) {
+    const applied = props.notice.applied
+    const manual = Array.from(new Set(props.notice.manual.map(launchPresetFieldLabel)))
+    return (
+        <div className="px-3 py-2">
+            <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2 text-xs">
+                <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 font-medium text-[var(--app-link)]">启动预设</span>
+                    <span className="min-w-0 break-words text-[var(--app-fg)]">{props.notice.matched.join(', ')}</span>
+                </div>
+                {applied.length > 0 ? (
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                        {applied.map((entry) => (
+                            <span key={`${entry.key}-${entry.value}`} className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 text-[var(--app-fg)]">
+                                {launchPresetFieldLabel(entry.key)}={entry.value}
+                            </span>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="mt-1 text-[var(--app-hint)]">已匹配；当前没有新增默认值。</div>
+                )}
+                {manual.length > 0 ? <div className="mt-1 text-[var(--app-hint)]">手动覆盖：{manual.join(', ')}</div> : null}
+            </div>
         </div>
     )
 }

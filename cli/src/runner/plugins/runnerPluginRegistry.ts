@@ -9,6 +9,7 @@ import type {
     RunnerAgentCapabilityProviderContribution,
     RunnerCommandResolverContribution,
     RunnerEnvironmentProviderContribution,
+    RunnerSpawnOptionsProviderContribution,
     RunnerPluginContext,
     RunnerPluginModule,
     RunnerPluginActionContribution,
@@ -24,6 +25,7 @@ export type {
     RunnerAgentCapabilityProviderContribution,
     RunnerCommandResolverContribution,
     RunnerEnvironmentProviderContribution,
+    RunnerSpawnOptionsProviderContribution,
     RunnerPluginActionContribution,
     RunnerPluginContext,
     RunnerPluginModule,
@@ -31,7 +33,7 @@ export type {
 } from '@hapi/protocol/plugins'
 
 export type RegisteredRuntimeContribution<T = unknown> = {
-    type: 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider' | 'action'
+    type: 'spawnOptionsProvider' | 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider' | 'action'
     pluginId: string
     id: string
     priority: number
@@ -88,6 +90,7 @@ export class RunnerPluginRegistry {
                 }
             },
             runtime: {
+                registerSpawnOptionsProvider: (provider: unknown): Disposable => register('spawnOptionsProvider', provider),
                 registerEnvironmentProvider: (provider: unknown): Disposable => register('environmentProvider', provider),
                 registerCommandResolver: (resolver: unknown): Disposable => register('commandResolver', resolver),
                 registerSpawnHook: (hook: unknown): Disposable => register('spawnHook', hook),
@@ -134,6 +137,10 @@ export class RunnerPluginRegistry {
 
     getEnvironmentProviders(): RegisteredRuntimeContribution<RunnerEnvironmentProviderContribution>[] {
         return this.getContributionsByType('environmentProvider')
+    }
+
+    getSpawnOptionsProviders(): RegisteredRuntimeContribution<RunnerSpawnOptionsProviderContribution>[] {
+        return this.getContributionsByType('spawnOptionsProvider')
     }
 
     getCommandResolvers(): RegisteredRuntimeContribution<RunnerCommandResolverContribution>[] {
@@ -244,6 +251,9 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
         || candidate.priority > 1000
     )) {
         throw new Error(`${type} contribution priority must be an integer between -1000 and 1000.`)
+    }
+    if (type === 'spawnOptionsProvider' && candidate.provide !== undefined && typeof candidate.provide !== 'function') {
+        throw new Error('spawnOptionsProvider provide must be a function.')
     }
     if (type === 'environmentProvider' && candidate.provide !== undefined && typeof candidate.provide !== 'function') {
         throw new Error('environmentProvider provide must be a function.')

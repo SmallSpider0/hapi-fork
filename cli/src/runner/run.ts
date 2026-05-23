@@ -248,7 +248,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
       const { directory, sessionId, approvedNewDirectoryCreation = true } = options;
       const agent = options.agent ?? 'claude';
-      const yolo = options.yolo === true;
       const sessionType = options.sessionType ?? 'simple';
       const worktreeName = options.worktreeName;
       let directoryCreated = false;
@@ -264,25 +263,6 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           errorMessage: `Agent ${agent} is not available on this runner${unavailableReason}`
         };
       }
-      if (
-        options.permissionMode
-        && (
-          !(PERMISSION_MODES as readonly string[]).includes(options.permissionMode)
-          || !agentDescriptor.capabilities.permissionModes.includes(options.permissionMode as PermissionMode)
-        )
-      ) {
-        return {
-          type: 'error',
-          errorMessage: `Permission mode ${options.permissionMode} is not available for agent ${agent}`
-        };
-      }
-      if (yolo && !agentDescriptor.capabilities.permissionModes.some((mode) => mode === 'yolo' || mode === 'bypassPermissions')) {
-        return {
-          type: 'error',
-          errorMessage: `YOLO mode is not available for agent ${agent}`
-        };
-      }
-
       if (sessionType === 'simple') {
         try {
           await fs.access(directory);
@@ -384,25 +364,51 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
       };
 
       try {
+        const spawnOptionsResult = await runnerPluginManager.resolveSpawnOptions({
+          options,
+          agent,
+          cwd: spawnDirectory
+        });
+        const effectiveOptions = spawnOptionsResult.options;
+        const yolo = effectiveOptions.yolo === true;
+
+        if (
+          effectiveOptions.permissionMode
+          && (
+            !(PERMISSION_MODES as readonly string[]).includes(effectiveOptions.permissionMode)
+            || !agentDescriptor.capabilities.permissionModes.includes(effectiveOptions.permissionMode as PermissionMode)
+          )
+        ) {
+          return {
+            type: 'error',
+            errorMessage: `Permission mode ${effectiveOptions.permissionMode} is not available for agent ${agent}`
+          };
+        }
+        if (yolo && !agentDescriptor.capabilities.permissionModes.some((mode) => mode === 'yolo' || mode === 'bypassPermissions')) {
+          return {
+            type: 'error',
+            errorMessage: `YOLO mode is not available for agent ${agent}`
+          };
+        }
 
         // Resolve authentication token if provided
         let extraEnv: Record<string, string> = {};
-        if (options.token) {
-          if (options.agent === 'codex') {
+        if (effectiveOptions.token) {
+          if (agent === 'codex') {
 
             // Create a temporary directory for Codex
             const codexHomeDir = await fs.mkdtemp(join(os.tmpdir(), 'hapi-codex-'));
 
             // Write the token to the temporary directory
-            await fs.writeFile(join(codexHomeDir, 'auth.json'), options.token);
+            await fs.writeFile(join(codexHomeDir, 'auth.json'), effectiveOptions.token);
 
             // Set the environment variable for Codex
             extraEnv = {
               CODEX_HOME: codexHomeDir
             };
-          } else if (options.agent === 'claude' || !options.agent) {
+          } else if (agent === 'claude') {
             extraEnv = {
-              CLAUDE_CODE_OAUTH_TOKEN: options.token
+              CLAUDE_CODE_OAUTH_TOKEN: effectiveOptions.token
             };
           }
         }
@@ -418,10 +424,10 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
           };
         }
 
-        const args = buildCliArgs(agent, options, yolo);
+        const args = buildCliArgs(agent, effectiveOptions, yolo);
         const basePlan = buildHappyCliSpawnPlan(args);
         const extensionPlan = await runnerPluginManager.resolveSpawnPlan({
-          options,
+          options: effectiveOptions,
           agent,
           basePlan,
           cwd: spawnDirectory,
@@ -449,7 +455,7 @@ export async function startRunner(options: { workspaceRoots?: string[] } = {}): 
 
         const pluginSpawnContext = buildRunnerPluginSpawnContext({
           runnerMachineId: machineId,
-          options,
+          options: effectiveOptions,
           agent,
           cwd: extensionPlan.cwd,
           displayArgs: extensionPlan.displayArgs,
@@ -1065,6 +1071,7 @@ export function buildRunnerPluginSpawnContext(args: {
     ...(args.options.effort ? { effort: args.options.effort } : {}),
     ...(args.options.modelReasoningEffort ? { modelReasoningEffort: args.options.modelReasoningEffort } : {}),
     ...(args.options.permissionMode ? { permissionMode: args.options.permissionMode } : {}),
-    ...(args.options.yolo !== undefined ? { yolo: args.options.yolo } : {})
+    ...(args.options.yolo !== undefined ? { yolo: args.options.yolo } : {}),
+    ...(args.options.pluginFields ? { pluginFields: args.options.pluginFields } : {})
   });
 }

@@ -236,6 +236,7 @@ export const PluginDetailSchema = PluginListItemSchema.extend({
             display: PluginLocalizedTextMetadataSchema.optional()
         }).strict()).optional(),
         runner: z.object({
+            spawnOptionsProviders: z.array(z.unknown()).optional(),
             environmentProviders: z.array(z.unknown()).optional(),
             commandResolvers: z.array(z.unknown()).optional(),
             spawnHooks: z.array(z.unknown()).optional()
@@ -282,6 +283,7 @@ export const RunnerPluginInventorySchema = z.object({
     plugins: z.array(PluginListItemSchema),
     diagnostics: z.array(PluginDiagnosticViewSchema).default([]),
     extensions: z.object({
+        spawnOptionsProviders: z.array(RunnerExtensionContributionSummarySchema).default([]),
         environmentProviders: z.array(RunnerExtensionContributionSummarySchema).default([]),
         commandResolvers: z.array(RunnerExtensionContributionSummarySchema).default([]),
         spawnHooks: z.array(RunnerExtensionContributionSummarySchema).default([])
@@ -313,6 +315,22 @@ export const PluginCapabilitiesResponseSchema = z.object({
     capabilities: z.array(PluginCapabilityViewSchema)
 }).strict()
 export type PluginCapabilitiesResponse = z.infer<typeof PluginCapabilitiesResponseSchema>
+
+export const PluginNotificationFilterOptionSchema = z.object({
+    value: z.string().min(1),
+    label: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    count: z.number().int().nonnegative().optional(),
+    lastSeenAt: z.number().int().nonnegative().optional()
+}).strict()
+export type PluginNotificationFilterOption = z.infer<typeof PluginNotificationFilterOptionSchema>
+
+export const PluginNotificationFilterOptionsResponseSchema = z.object({
+    namespaces: z.array(PluginNotificationFilterOptionSchema).default([]),
+    agents: z.array(PluginNotificationFilterOptionSchema).default([]),
+    workspaces: z.array(PluginNotificationFilterOptionSchema).default([])
+}).strict()
+export type PluginNotificationFilterOptionsResponse = z.infer<typeof PluginNotificationFilterOptionsResponseSchema>
 
 export const RunnerPluginActionInvokeRequestSchema = z.object({
     pluginId: z.string().min(1).max(128),

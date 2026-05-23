@@ -2,8 +2,11 @@ import {
     AgentHistoryImportRequestSchema,
     MachineListDirectoryRequestSchema,
     MachinePathsExistsRequestSchema,
+    RunnerLaunchPresetResolveRequestSchema,
+    RunnerLaunchPresetResolveResponseSchema,
     SpawnSessionRequestSchema
 } from '@hapi/protocol'
+import { HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID } from '@hapi/protocol/plugins/bundledCore'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -52,10 +55,45 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             parsed.data.worktreeName,
             undefined,
             parsed.data.effort,
-            undefined,
+            parsed.data.permissionMode,
             parsed.data.pluginFields
         )
         return c.json(result)
+    })
+
+    app.post('/machines/:id/launch-presets/resolve', async (c) => {
+        const engine = getSyncEngine()
+        if (!engine) {
+            return c.json({ error: 'Not connected' }, 503)
+        }
+
+        const machineId = c.req.param('id')
+        const machine = requireMachine(c, engine, machineId)
+        if (machine instanceof Response) {
+            return machine
+        }
+
+        const body = await c.req.json().catch(() => null)
+        const parsed = RunnerLaunchPresetResolveRequestSchema.safeParse(body)
+        if (!parsed.success) {
+            return c.json({ error: 'Invalid body' }, 400)
+        }
+
+        const result = await engine.invokeRunnerPluginAction(machineId, {
+            pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+            capabilityId: 'runner-launch-presets',
+            actionId: 'runner-launch-presets.resolve',
+            namespace: c.get('namespace'),
+            cwd: parsed.data.cwd ?? parsed.data.directory,
+            payload: parsed.data
+        })
+        if (!result.ok) {
+            return c.json(RunnerLaunchPresetResolveResponseSchema.parse({ options: {}, matchedRules: [], diagnostics: [] }))
+        }
+        const resolved = RunnerLaunchPresetResolveResponseSchema.safeParse(result.result)
+        return c.json(resolved.success
+            ? resolved.data
+            : RunnerLaunchPresetResolveResponseSchema.parse({ options: {}, matchedRules: [], diagnostics: [] }))
     })
 
     app.post('/machines/:id/list-directory', async (c) => {

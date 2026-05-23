@@ -9,6 +9,7 @@ import {
 } from './schemas'
 import { AgentIdSchema } from './plugins/agentDescriptors'
 import { AgentHistoryImportResultSchema } from './plugins/agentCapabilities'
+import { PluginDiagnosticSchema } from './plugins/types'
 import type {
     DecryptedMessage,
     Machine,
@@ -182,6 +183,7 @@ export const SpawnSessionRequestSchema = z.object({
     model: z.string().optional(),
     effort: z.string().optional(),
     modelReasoningEffort: z.string().optional(),
+    permissionMode: PermissionModeSchema.optional(),
     yolo: z.boolean().optional(),
     sessionType: z.enum(['simple', 'worktree']).optional(),
     worktreeName: z.string().optional(),
@@ -189,6 +191,41 @@ export const SpawnSessionRequestSchema = z.object({
 })
 
 export type SpawnSessionRequest = z.infer<typeof SpawnSessionRequestSchema>
+
+export const RunnerLaunchPresetOptionsSchema = z.object({
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    modelReasoningEffort: z.string().optional(),
+    permissionMode: z.string().optional(),
+    yolo: z.boolean().optional()
+}).strict()
+
+export const RunnerLaunchPresetResolveRequestSchema = z.object({
+    directory: z.string().min(1),
+    cwd: z.string().min(1).optional(),
+    agent: AgentIdSchema.optional(),
+    model: z.string().optional(),
+    effort: z.string().optional(),
+    modelReasoningEffort: z.string().optional(),
+    permissionMode: z.string().optional(),
+    yolo: z.boolean().optional(),
+    sessionType: z.enum(['simple', 'worktree']).optional(),
+    resumeSessionId: z.string().optional(),
+    pluginFields: z.record(z.string(), z.unknown()).optional()
+}).strict()
+
+export type RunnerLaunchPresetResolveRequest = z.infer<typeof RunnerLaunchPresetResolveRequestSchema>
+
+export const RunnerLaunchPresetResolveResponseSchema = z.object({
+    options: RunnerLaunchPresetOptionsSchema.default({}),
+    matchedRules: z.array(z.object({
+        id: z.string().min(1),
+        label: z.string().min(1)
+    }).strict()).default([]),
+    diagnostics: z.array(PluginDiagnosticSchema).default([])
+}).strict()
+
+export type RunnerLaunchPresetResolveResponse = z.infer<typeof RunnerLaunchPresetResolveResponseSchema>
 
 export const AgentHistoryImportRequestSchema = z.object({
     agentId: AgentIdSchema,

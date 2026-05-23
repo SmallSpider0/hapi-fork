@@ -72,7 +72,9 @@ bun run build:single-exe # All-in-one binary
 ## Local deployment hygiene
 
 - Prefer local deployment for this fork; do not use GitHub Pages / online deploy unless explicitly requested.
-- After every local deploy, clean historical deployment bins: remove superseded `/opt/hapi-fork/bin/hapi-fork-*` binaries after `/opt/hapi-fork/current` points at the new binary.
+- After every local deploy, switch `/opt/hapi-fork/current` first, then restart both `hapi-hub.service` and `hapi-runner.service` before cleanup.
+- Before deleting old bins, verify the active runner uses the current binary: `/root/.hapi/runner.state.json` PID must have `/proc/<pid>/exe` pointing at `/opt/hapi-fork/current`'s target, not `(deleted)`.
+- After every local deploy, clean historical deployment bins: remove superseded `/opt/hapi-fork/bin/hapi-fork-*` binaries only after hub/runner restart, and never delete a binary still referenced by any `/proc/*/exe`.
 - After every local deploy, clean temporary build outputs such as `cli/dist-exe/`, `web/dist/`, `hub/dist/`, and stale `/tmp/hapi-*` files when they are no longer needed.
 - Preserve runtime/user data: do not delete `$HAPI_HOME`, plugin state, session DBs, or active workspace files.
 

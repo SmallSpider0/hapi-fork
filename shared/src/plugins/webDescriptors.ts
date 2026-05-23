@@ -37,21 +37,34 @@ export const WebDescriptorPrimitiveValueSchema = z.union([
 ])
 export type WebDescriptorPrimitiveValue = z.infer<typeof WebDescriptorPrimitiveValueSchema>
 
+export const WebSchemaFormOptionsSourceSchema = z.enum([
+    'notification.namespaces',
+    'notification.agents',
+    'notification.workspaces'
+])
+export type WebSchemaFormOptionsSource = z.infer<typeof WebSchemaFormOptionsSourceSchema>
+
+export const WebSchemaFormOptionSchema = z.object({
+    value: z.string().min(1),
+    label: WebLocalizedTextSchema.optional(),
+    description: WebLocalizedTextSchema.optional()
+}).strict()
+export type WebSchemaFormOption = z.infer<typeof WebSchemaFormOptionSchema>
+
 export const WebSchemaFormFieldSchema = z.object({
     key: FieldKeySchema,
     label: WebLocalizedTextSchema,
     description: WebLocalizedTextSchema.optional(),
-    type: z.enum(['text', 'number', 'boolean', 'select']).default('text'),
+    type: z.enum(['text', 'number', 'boolean', 'select', 'multiSelect']).default('text'),
     required: z.boolean().optional(),
     secret: z.boolean().optional(),
     defaultValue: WebDescriptorPrimitiveValueSchema.optional(),
-    options: z.array(z.object({
-        value: z.string().min(1),
-        label: WebLocalizedTextSchema.optional()
-    }).strict()).optional()
+    options: z.array(WebSchemaFormOptionSchema).optional(),
+    optionsSource: WebSchemaFormOptionsSourceSchema.optional(),
+    allowCustom: z.boolean().optional()
 }).strict().superRefine((field, ctx) => {
-    if (field.type === 'select' && (!field.options || field.options.length === 0)) {
-        ctx.addIssue({ code: 'custom', message: 'select fields require at least one option', path: ['options'] })
+    if (field.type === 'select' && !field.optionsSource && (!field.options || field.options.length === 0)) {
+        ctx.addIssue({ code: 'custom', message: 'select fields require at least one option or optionsSource', path: ['options'] })
     }
 })
 export type WebSchemaFormField = z.infer<typeof WebSchemaFormFieldSchema>
