@@ -828,21 +828,36 @@ export function RunnerLaunchPresetsEditor(props: {
     const snapshots = useMemo(() => machine?.runnerState?.agentCapabilities ?? [], [machine])
     const workspaces = useMemo(() => workspaceOptions(machine, props.optionSources), [machine, props.optionSources])
     const parsed = useMemo(() => parseRunnerLaunchPresetConfig(props.config), [props.config])
-    const [expandedId, setExpandedId] = useState<string | null>(parsed.presets[0]?.id ?? null)
+    const starterPreset = useMemo(
+        () => fallbackPreset([], descriptors[0]?.id, workspaces[0]?.value),
+        [descriptors, workspaces]
+    )
+    const visiblePresets = parsed.presets.length > 0 ? parsed.presets : [starterPreset]
+    const [expandedId, setExpandedId] = useState<string | null>(parsed.presets[0]?.id ?? starterPreset.id)
+    const activeExpandedId = expandedId ?? (parsed.presets.length === 0 ? starterPreset.id : null)
 
     const commit = (presets: RunnerLaunchPresetDraft[]) => {
         props.onConfigChange(serializeRunnerLaunchPresetConfig(presets, props.config))
     }
-    const updatePreset = (preset: RunnerLaunchPresetDraft) => commit(parsed.presets.map((entry) => entry.id === preset.id ? preset : entry))
+    const updatePreset = (preset: RunnerLaunchPresetDraft) => {
+        if (parsed.presets.length === 0) {
+            commit([preset])
+            setExpandedId(preset.id)
+            return
+        }
+        commit(parsed.presets.map((entry) => entry.id === preset.id ? preset : entry))
+    }
     const addPreset = () => {
-        const next = fallbackPreset(parsed.presets, descriptors[0]?.id, workspaces[0]?.value)
-        commit([...parsed.presets, next])
+        const basePresets = parsed.presets.length > 0 ? parsed.presets : [starterPreset]
+        const next = fallbackPreset(basePresets, descriptors[0]?.id, workspaces[0]?.value)
+        commit([...basePresets, next])
         setExpandedId(next.id)
     }
     const duplicatePreset = (preset: RunnerLaunchPresetDraft) => {
-        const id = nextPresetId(parsed.presets)
+        const basePresets = parsed.presets.length > 0 ? parsed.presets : [starterPreset]
+        const id = nextPresetId(basePresets)
         const copy = { ...preset, id, label: `${preset.label || preset.id} copy` }
-        commit([...parsed.presets, copy])
+        commit([...basePresets, copy])
         setExpandedId(id)
     }
 
@@ -865,37 +880,34 @@ export function RunnerLaunchPresetsEditor(props: {
                 {parsed.jsonError ? <div className="mt-3 rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-sm text-[var(--app-badge-warning-text)]">rulesJson: {parsed.jsonError}</div> : null}
             </div>
 
-            {parsed.presets.length === 0 ? (
-                <div className="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-bg)] p-6 text-center text-sm text-[var(--app-hint)]">
-                    <div className="font-medium text-[var(--app-fg)]">{local(locale, '还没有启动预设', 'No launch presets yet')}</div>
-                    <div className="mt-1">{local(locale, '创建一条预设后，可按 Agent 和工作区自动填充新会话默认值。', 'Create a preset to auto-fill new session defaults by agent and workspace.')}</div>
-                    <Button type="button" size="sm" className="mt-3" disabled={props.disabled} onClick={addPreset}>{local(locale, '创建第一条预设', 'Create first preset')}</Button>
-                </div>
-            ) : (
-                <div className="space-y-3">
-                    {parsed.presets.map((preset) => (
-                        <PresetEditorCard
-                            key={preset.id}
-                            preset={preset}
-                            descriptors={descriptors}
-                            snapshots={snapshots}
-                            workspaceOptions={workspaces}
-                            locale={locale}
-                            disabled={props.disabled}
-                            expanded={expandedId === preset.id}
-                            onToggleExpanded={() => setExpandedId(expandedId === preset.id ? null : preset.id)}
-                            onUpdate={updatePreset}
-                            onDelete={() => {
-                                commit(parsed.presets.filter((entry) => entry.id !== preset.id))
-                                if (expandedId === preset.id) setExpandedId(null)
-                            }}
-                            onDuplicate={() => duplicatePreset(preset)}
-                        />
-                    ))}
-                </div>
-            )}
+            <div className="space-y-3">
+                {parsed.presets.length === 0 ? (
+                    <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
+                        {local(locale, '当前还没有已保存预设；下方已展开第一条预设草稿，填写任意默认值后右上角保存并重载即可生效。', 'No saved presets yet; the first preset draft is expanded below. Set any default and save/reload from the top-right to apply.')}
+                    </div>
+                ) : null}
+                {visiblePresets.map((preset) => (
+                    <PresetEditorCard
+                        key={preset.id}
+                        preset={preset}
+                        descriptors={descriptors}
+                        snapshots={snapshots}
+                        workspaceOptions={workspaces}
+                        locale={locale}
+                        disabled={props.disabled}
+                        expanded={activeExpandedId === preset.id}
+                        onToggleExpanded={() => setExpandedId(activeExpandedId === preset.id ? null : preset.id)}
+                        onUpdate={updatePreset}
+                        onDelete={() => {
+                            commit(parsed.presets.filter((entry) => entry.id !== preset.id))
+                            if (expandedId === preset.id) setExpandedId(null)
+                        }}
+                        onDuplicate={() => duplicatePreset(preset)}
+                    />
+                ))}
+            </div>
 
-            <TestMatchPanel presets={parsed.presets} descriptors={descriptors} workspaceOptions={workspaces} locale={locale} />
+            <TestMatchPanel presets={visiblePresets} descriptors={descriptors} workspaceOptions={workspaces} locale={locale} />
         </div>
     )
 }
