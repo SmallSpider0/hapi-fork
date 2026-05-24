@@ -155,10 +155,11 @@ describe('RunnerPluginManager runtime', () => {
         expect(managerMissingSecret.getDiagnostics()).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 pluginId: 'com.example.runner',
-                code: 'plugin-secret-missing',
-                target: expect.objectContaining({ scope: 'runner:runner-1' }),
-                configScope: 'runner:runner-1:com.example.runner'
+                code: 'missing-secret'
             })
+        ]))
+        expect(managerMissingSecret.getDiagnostics()).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'plugin-secret-missing' })
         ]))
         expect(JSON.stringify(managerMissingSecret.getDiagnostics())).not.toContain('super-secret-value')
     })
@@ -354,6 +355,23 @@ describe('RunnerPluginManager runtime', () => {
         expect(manager.listPlugins()[0]).toMatchObject({ id: 'com.example.runner', status: 'enabled', active: false, runtimes: { hub: { active: false } } })
     })
 
+    it('marks unsupported declared Runner extension points incompatible before activation', async () => {
+        writeManifest(pluginRoot, {
+            compatibility: {
+                runner: { extensionPoints: ['hub.action'] }
+            }
+        })
+        writeState(testDir)
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+
+        const result = await manager.start()
+        await expect(manager.enablePlugin('com.example.runner')).rejects.toThrow('cannot be enabled')
+
+        expect(result.ok).toBe(false)
+        expect(result.results[0]).toMatchObject({ status: 'incompatible' })
+        expect(JSON.stringify(manager.listPlugins())).toContain('hub.action')
+    })
+
     it('keeps the previous active Runner plugin when reload activation fails', async () => {
         writeFileSync(runnerEntry, `
             import { appendFileSync } from 'node:fs';
@@ -438,7 +456,7 @@ describe('RunnerPluginManager runtime', () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
                 ctx.runtime.registerAgentAdapter({
-                    id: 'vendor:example-agent',
+                    id: 'example-adapter',
                     descriptor: {
                         id: 'vendor:example-agent',
                         displayName: 'Example Agent',
@@ -473,7 +491,17 @@ describe('RunnerPluginManager runtime', () => {
                 agent: {
                     adapters: [{ id: 'example-adapter', displayName: 'Example Agent Adapter' }]
                 }
-            }
+            },
+            capabilities: [{
+                id: 'agent-adapter-ready',
+                kind: 'agent.adapter',
+                displayName: 'Agent adapter ready',
+                parts: {
+                    runner: {
+                        contributions: [{ type: 'agentAdapter', id: 'example-adapter' }]
+                    }
+                }
+            }]
         })
         writeState(testDir)
         const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
@@ -495,13 +523,34 @@ describe('RunnerPluginManager runtime', () => {
         })
         expect(manager.getAgentAdapterFactory('vendor:example-agent')).toBeTypeOf('function')
         expect(manager.getAgentDescriptor('claude')).toMatchObject({ id: 'claude', source: 'builtin' })
+        expect(manager.getPlugin('com.example.runner')?.contributions.agent?.adapters).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                id: 'example-adapter',
+                agentId: 'vendor:example-agent',
+                active: true
+            })
+        ]))
+        expect(manager.getPlugin('com.example.runner')?.contributions.agent?.adapters).toHaveLength(1)
+        expect(manager.collectContributionStates()).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                contributionType: 'agentAdapter',
+                contributionId: 'example-adapter',
+                registered: true,
+                active: true
+            })
+        ]))
+        expect(manager.collectCapabilities()[0]).toMatchObject({
+            capabilityId: 'agent-adapter-ready',
+            status: 'ready',
+            parts: { runner: { registered: true, active: true } }
+        })
     })
 
     it('rejects invalid plugin agent descriptors during activation before spawn', async () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
                 ctx.runtime.registerAgentAdapter({
-                    id: 'vendor:example-agent',
+                    id: 'example-adapter',
                     descriptor: {
                         id: 'other-agent',
                         displayName: 'Broken Agent',
@@ -542,7 +591,7 @@ describe('RunnerPluginManager runtime', () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
                 ctx.runtime.registerAgentAdapter({
-                    id: 'vendor:example-agent',
+                    id: 'example-adapter',
                     descriptor: {
                         id: 'vendor:example-agent',
                         displayName: 'Example Agent',
@@ -628,7 +677,7 @@ describe('RunnerPluginManager runtime', () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
                 ctx.runtime.registerAgentAdapter({
-                    id: 'vendor:example-agent',
+                    id: 'example-adapter',
                     descriptor: {
                         id: 'vendor:example-agent',
                         displayName: 'Example Agent',
@@ -689,13 +738,16 @@ describe('RunnerPluginManager runtime', () => {
             expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-capability-provider-session-usage-rejected' }),
             expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-capability-provider-agent-not-owned' })
         ]))
+        const codes = manager.getDiagnostics().map((diagnostic) => diagnostic.code)
+        expect(codes.filter((code) => code === 'agent-capability-provider-permission-mode-not-owned')).toHaveLength(1)
+        expect(codes.filter((code) => code === 'agent-capability-provider-session-usage-rejected')).toHaveLength(1)
     })
 
     it('keeps capability provider failures diagnostic without crashing the runner manager', async () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
                 ctx.runtime.registerAgentAdapter({
-                    id: 'vendor:example-agent',
+                    id: 'example-adapter',
                     descriptor: {
                         id: 'vendor:example-agent',
                         displayName: 'Example Agent',
@@ -747,7 +799,7 @@ describe('RunnerPluginManager runtime', () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {
                 ctx.runtime.registerAgentAdapter({
-                    id: 'vendor:example-agent',
+                    id: 'example-adapter',
                     descriptor: {
                         id: 'vendor:example-agent',
                         displayName: 'Example Agent',
@@ -789,6 +841,88 @@ describe('RunnerPluginManager runtime', () => {
         expect(manager.getDiagnostics()).toEqual(expect.arrayContaining([
             expect.objectContaining({ pluginId: 'com.example.runner', code: 'agent-history-import-failed' })
         ]))
+    })
+
+    it('redacts declared secrets from action, capability provider, and history importer failures', async () => {
+        writeFileSync(runnerEntry, `
+            export function activate(ctx) {
+                ctx.runtime.registerAgentAdapter({
+                    id: 'example-adapter',
+                    descriptor: {
+                        id: 'vendor:example-agent',
+                        displayName: 'Example Agent',
+                        adapter: {
+                            runtime: 'runner',
+                            kind: 'custom-runner-plugin',
+                            contributionId: 'example-adapter'
+                        }
+                    },
+                    createBackend() {
+                        return {
+                            async initialize() {},
+                            async newSession() { return 'plugin-session'; },
+                            async prompt() {},
+                            async cancelPrompt() {},
+                            async respondToPermission() {},
+                            onPermissionRequest() {},
+                            async disconnect() {}
+                        };
+                    }
+                });
+                ctx.runtime.registerAgentCapabilityProvider({
+                    id: 'bad-capabilities',
+                    agentId: 'vendor:example-agent',
+                    provide() { throw new Error('capability leaked super-secret-value'); },
+                    importHistory() { throw new Error('history leaked super-secret-value'); }
+                });
+                ctx.actions.register({
+                    id: 'run-secret-action',
+                    kind: 'test.action',
+                    run() { throw new Error('action leaked super-secret-value'); }
+                });
+            }
+        `)
+        writeManifest(pluginRoot, {
+            permissions: { secrets: ['RUNNER_TOKEN'] },
+            contributions: {
+                agent: {
+                    adapters: [{ id: 'example-adapter', displayName: 'Example Agent Adapter' }],
+                    capabilityProviders: [{ id: 'bad-capabilities', displayName: 'Bad Capabilities' }]
+                }
+            }
+        })
+        writeState(testDir)
+        const manager = new RunnerPluginManager({
+            hapiHome: testDir,
+            machineId: 'runner-1',
+            env: { RUNNER_TOKEN: 'super-secret-value' }
+        })
+        await manager.start()
+
+        const actionResult = await manager.invokeAction({
+            pluginId: 'com.example.runner',
+            actionId: 'run-secret-action',
+            namespace: 'default',
+            payload: {}
+        })
+        await expect(manager.importAgentHistory({
+            agentId: 'vendor:example-agent',
+            nativeSessionId: 'native-session-1',
+            providerId: 'bad-capabilities'
+        })).rejects.toThrow('[REDACTED]')
+
+        expect(actionResult).toMatchObject({
+            ok: false,
+            code: 'plugin-action-failed',
+            message: expect.stringContaining('[REDACTED]')
+        })
+        const serialized = JSON.stringify({
+            actionResult,
+            diagnostics: manager.getDiagnostics(),
+            capabilities: manager.getAgentCapabilities()
+        })
+        expect(serialized).toContain('[REDACTED]')
+        expect(serialized).not.toContain('super-secret-value')
     })
 
     it('applies active Runner extension proposals to spawn plans', async () => {

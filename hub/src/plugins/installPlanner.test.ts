@@ -5,6 +5,7 @@ import {
     HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
     bundledCorePlugins
 } from '@hapi/protocol/plugins/bundledCore'
+import { HUB_IMPLEMENTED_EXTENSION_POINTS, RUNNER_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
 import { buildPluginInstallPlan, inferPluginInstallPositions } from './installPlanner'
 import type { PluginInstallTargetCandidate } from './installPlanner'
 
@@ -18,31 +19,8 @@ function manifest(overrides: Partial<PluginManifestLite> = {}): PluginManifestLi
     }
 }
 
-const CURRENT_HUB_EXTENSION_POINTS = [
-    'hub.notificationChannel',
-    'hub.messageAction',
-    'hub.action',
-    'web.settingsPanel',
-    'web.newSessionField',
-    'web.action',
-    'web.badge',
-    'web.composerAction'
-]
-
-const CURRENT_RUNNER_EXTENSION_POINTS = [
-    'runner.spawnOptionsProvider',
-    'runner.environmentProvider',
-    'runner.commandResolver',
-    'runner.spawnHook',
-    'runner.action',
-    'agent.adapter',
-    'agent.capabilityProvider',
-    'web.settingsPanel',
-    'web.newSessionField',
-    'web.action',
-    'web.badge',
-    'web.composerAction'
-]
+const CURRENT_HUB_EXTENSION_POINTS = [...HUB_IMPLEMENTED_EXTENSION_POINTS]
+const CURRENT_RUNNER_EXTENSION_POINTS = [...RUNNER_IMPLEMENTED_EXTENSION_POINTS]
 
 function corePluginManifest(id: string): PluginManifestLite {
     const plugin = bundledCorePlugins.find((entry) => entry.manifest.id === id)
@@ -98,7 +76,11 @@ function runnerCandidate(machineId: string, options: {
     }
 }
 
-function planFor(manifestValue: PluginManifestLite, candidates: PluginInstallTargetCandidate[]) {
+function planFor(
+    manifestValue: PluginManifestLite,
+    candidates: PluginInstallTargetCandidate[],
+    requestOverrides: Record<string, unknown> = {}
+) {
     return buildPluginInstallPlan({
         planId: 'plan-1',
         now: 1,
@@ -107,7 +89,8 @@ function planFor(manifestValue: PluginManifestLite, candidates: PluginInstallTar
             filename: 'plugin.tgz',
             contentBase64: 'AA==',
             checksum: 'sha256:test',
-            format: 'tgz'
+            format: 'tgz',
+            ...requestOverrides
         },
         packageFormat: 'tgz',
         candidates
@@ -219,5 +202,74 @@ describe('plugin install planner', () => {
 
         expect(plan.positions).toEqual(['runner'])
         expect(plan.blockingErrors).toContain('Plugin requires at least 1 compatible Runner target(s), but only 0 are ready.')
+    })
+
+    it('honors selected Runner placement and blocks missing selected targets', () => {
+        const plugin = manifest({
+            runtimes: { runner: { entry: 'runner.js' } },
+            install: { runnerPlacement: 'selected-runners' }
+        })
+
+        const plan = planFor(plugin, [
+            runnerCandidate('runner-a'),
+            runnerCandidate('runner-b')
+        ], {
+            runnerSelection: { mode: 'selected', machineIds: ['runner-b', 'runner-missing'] }
+        })
+
+        expect(plan.targets.map((target) => target.target.scope)).toEqual(['runner:runner-b'])
+        expect(plan.blockingErrors).toContain('Selected Runner runner-missing was not found.')
+    })
+
+    it('blocks all-runner placement when any runner is offline', () => {
+        const plugin = manifest({
+            runtimes: { runner: { entry: 'runner.js' } },
+            install: { runnerPlacement: 'all-runners' }
+        })
+
+        const plan = planFor(plugin, [
+            runnerCandidate('runner-online'),
+            runnerCandidate('runner-offline', { active: false })
+        ])
+
+        expect(plan.targets.find((target) => target.target.scope === 'runner:runner-offline')?.status).toBe('offline')
+        expect(plan.blockingErrors).toContain('Plugin requested all Runner placement, but at least one Runner target is not installable.')
+    })
+
+    it('blocks offline runners when offlineRunnerPolicy is fail', () => {
+        const plugin = manifest({
+            runtimes: { runner: { entry: 'runner.js' } },
+            install: { offlineRunnerPolicy: 'fail' }
+        })
+
+        const plan = planFor(plugin, [runnerCandidate('runner-offline', { active: false })])
+
+        expect(plan.targets[0]).toMatchObject({ status: 'offline', action: 'block', required: true })
+        expect(plan.blockingErrors.join(' ')).toContain('Runner is offline')
+    })
+
+    it('reports installed-version conflicts and allows overwrite', () => {
+        const plugin = manifest({ runtimes: { hub: { entry: 'hub.js' } }, version: '2.0.0' })
+        const installed = [{ ...({} as PluginInstallTargetCandidate['plugins'][number]), id: plugin.id, version: '1.0.0' }]
+
+        const blocked = planFor(plugin, [hubCandidate(installed)])
+        const overwrite = planFor(plugin, [hubCandidate(installed)], { overwrite: true })
+
+        expect(blocked.targets[0]).toMatchObject({ status: 'conflict', action: 'block', existingVersion: '1.0.0' })
+        expect(overwrite.targets[0]).toMatchObject({ status: 'compatible', action: 'overwrite', existingVersion: '1.0.0' })
+    })
+
+    it('enforces minReadyRunnerCount greater than one', () => {
+        const plugin = manifest({
+            runtimes: { runner: { entry: 'runner.js' } },
+            install: { minReadyRunnerCount: 2 }
+        })
+
+        const plan = planFor(plugin, [
+            runnerCandidate('runner-ready'),
+            runnerCandidate('runner-offline', { active: false })
+        ])
+
+        expect(plan.blockingErrors).toContain('Plugin requires at least 2 compatible Runner target(s), but only 1 are ready.')
     })
 })

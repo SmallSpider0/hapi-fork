@@ -204,10 +204,11 @@ describe('HubPluginManager', () => {
         expect(managerMissingSecret.getDiagnostics()).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 pluginId: 'com.example.plugin',
-                code: 'plugin-secret-missing',
-                target: expect.objectContaining({ scope: 'hub' }),
-                configScope: 'hub:com.example.plugin'
+                code: 'missing-secret'
             })
+        ]))
+        expect(managerMissingSecret.getDiagnostics()).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'plugin-secret-missing' })
         ]))
         expect(JSON.stringify(managerMissingSecret.getDiagnostics())).not.toContain('hub-secret-value')
         await managerMissingSecret.dispose()
@@ -239,6 +240,33 @@ describe('HubPluginManager', () => {
         expect(result.results[0]?.status).toBe('reload-failed')
         expect(JSON.stringify(result)).not.toContain('super-secret')
         expect(readJsonl(logFile)).toContainEqual({ type: 'old-send' })
+    })
+
+    it('disposes a Hub plugin activated while shutdown is requested', async () => {
+        writePlugin(pluginRoot, `
+            import { appendFileSync } from 'node:fs';
+            const log = ${JSON.stringify(logFile)};
+            export async function activate(ctx) {
+                await new Promise((resolve) => setTimeout(resolve, 20));
+                ctx.notifications.registerChannel({
+                    async send() {},
+                    async dispose() { appendFileSync(log, 'dispose-race\\n'); }
+                });
+            }
+        `)
+        writeManifest(pluginRoot, manifest())
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: { 'com.example.plugin': { enabled: true } }
+        })
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+
+        const reload = manager.start()
+        await sleep(5)
+        await manager.dispose()
+        await reload
+
+        expect(manager.listPlugins()[0]?.active).not.toBe(true)
+        expect(readFileSync(logFile, 'utf8')).toContain('dispose-race')
     })
 
     it('does not import Runner-only runtime entries in the Hub process', async () => {
@@ -287,6 +315,24 @@ describe('HubPluginManager', () => {
 
         expect(result.ok).toBe(false)
         expect(result.results[0]?.status).toBe('incompatible')
+    })
+
+    it('marks unsupported declared Hub extension points incompatible before activation', async () => {
+        writePlugin(pluginRoot, 'export function activate() {}')
+        writeManifest(pluginRoot, manifest({
+            compatibility: {
+                hub: { extensionPoints: ['hub.action'] }
+            }
+        }))
+
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+        const result = await manager.start()
+        await expect(manager.enablePlugin('com.example.plugin')).rejects.toThrow('cannot be enabled')
+        await manager.dispose()
+
+        expect(result.ok).toBe(false)
+        expect(result.results[0]).toMatchObject({ status: 'incompatible' })
+        expect(JSON.stringify(manager.listPlugins())).toContain('hub.action')
     })
 
     it('discovers bundled example plugins when enabled for the Hub manager', async () => {

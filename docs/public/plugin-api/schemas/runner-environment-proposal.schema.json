@@ -30,6 +30,7 @@
             "minLength": 1
         },
         "toolPaths": {
+            "description": "Reserved for future structured tool resolution; current Runner emits a warning and does not apply this field.",
             "type": "object",
             "propertyNames": {
                 "type": "string"

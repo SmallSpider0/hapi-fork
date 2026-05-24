@@ -2,6 +2,11 @@ import { describe, expect, it } from 'bun:test'
 import { readdirSync, readFileSync, statSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import {
+    HUB_IMPLEMENTED_EXTENSION_POINTS,
+    RUNNER_IMPLEMENTED_EXTENSION_POINTS,
+    SCHEMA_ONLY_EXTENSION_POINTS
+} from '@hapi/protocol/plugins/extensionPoints'
 
 const repoRoot = join(dirname(fileURLToPath(import.meta.url)), '../../..')
 const scannedRoots = ['hub/src', 'web/src', 'cli/src']
@@ -51,5 +56,14 @@ describe('plugin architecture boundaries', () => {
             .map((file) => relative(repoRoot, file))
 
         expect(offenders).toEqual([])
+    })
+
+    it('keeps implemented extension points scoped to actual runtimes', () => {
+        expect(HUB_IMPLEMENTED_EXTENSION_POINTS).not.toContain('hub.action')
+        expect(RUNNER_IMPLEMENTED_EXTENSION_POINTS).not.toContain('hub.action')
+        for (const extensionPoint of SCHEMA_ONLY_EXTENSION_POINTS) {
+            expect(HUB_IMPLEMENTED_EXTENSION_POINTS).not.toContain(extensionPoint)
+            expect(RUNNER_IMPLEMENTED_EXTENSION_POINTS).not.toContain(extensionPoint)
+        }
     })
 })

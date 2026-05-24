@@ -1,5 +1,10 @@
 import { logger as runnerLogger } from '@/ui/logger'
 import { AgentDescriptorSchema, AgentIdSchema, type PluginDiagnostic } from '@hapi/protocol/plugins'
+import {
+    PluginRuntimeRegistryBase,
+    redactText,
+    type RuntimeRegistryContribution
+} from '@hapi/protocol/plugins/runtime/registryBase'
 import type {
     Disposable,
     PluginConfigReader,
@@ -32,23 +37,26 @@ export type {
     RunnerSpawnHookContribution
 } from '@hapi/protocol/plugins'
 
-export type RegisteredRuntimeContribution<T = unknown> = {
-    type: 'spawnOptionsProvider' | 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider' | 'action'
-    pluginId: string
-    id: string
-    priority: number
-    order: number
-    contribution: T
-    disposed: boolean
-}
+export type RunnerRuntimeContributionType = 'spawnOptionsProvider' | 'environmentProvider' | 'commandResolver' | 'spawnHook' | 'agentAdapter' | 'agentCapabilityProvider' | 'action'
+export type RegisteredRuntimeContribution<T = unknown> = RuntimeRegistryContribution<RunnerRuntimeContributionType, T>
 
-export class RunnerPluginRegistry {
-    private readonly contributions: RegisteredRuntimeContribution[] = []
-    private readonly disposables: Disposable[] = []
-    private nextContributionOrder = 0
-    readonly diagnostics: PluginDiagnostic[] = []
+export class RunnerPluginRegistry extends PluginRuntimeRegistryBase<RunnerRuntimeContributionType> {
+    private readonly disposeSecretState: { names: Set<string>; env: NodeJS.ProcessEnv }
 
-    constructor(private readonly machineId: string) {}
+    constructor(private readonly machineId: string) {
+        const disposeSecretState = { names: new Set<string>(), env: process.env }
+        super({
+            registrationClosedMessage: 'Runner plugin runtime contributions can only be registered during activate(ctx).',
+            diagnosticPrefix: (pluginId) => `[runner-plugin:${machineId}:${pluginId}]`,
+            writeLog: (_level, pluginId, message, args) => {
+                runnerLogger.debug(`[runner-plugin:${machineId}:${pluginId}] ${message}`, ...args)
+            },
+            onDisposeError: (error) => {
+                runnerLogger.debug(`[RunnerPluginRegistry] Dispose failed on ${machineId}: ${redactText(error instanceof Error ? error.message : String(error), [...disposeSecretState.names], disposeSecretState.env)}`)
+            }
+        })
+        this.disposeSecretState = disposeSecretState
+    }
 
     createContext(args: {
         pluginId: string
@@ -56,39 +64,22 @@ export class RunnerPluginRegistry {
         declaredSecrets?: string[]
         env?: NodeJS.ProcessEnv
     }): { ctx: RunnerPluginContext; close(): void } {
-        let acceptingRegistrations = true
-        const declaredSecrets = new Set(args.declaredSecrets ?? [])
-        const env = args.env ?? process.env
-        for (const secretName of declaredSecrets) {
-            if (!env[secretName]) {
-                this.addDiagnostic('warning', 'missing-secret', `Declared secret ${secretName} is not set.`, args.pluginId)
-            }
+        this.disposeSecretState.env = args.env ?? process.env
+        for (const secretName of args.declaredSecrets ?? []) {
+            this.disposeSecretState.names.add(secretName)
         }
-
+        const common = this.createCommonContextParts(args)
         const register = (type: RegisteredRuntimeContribution['type'], contribution: unknown): Disposable => {
-            if (!acceptingRegistrations) {
-                throw new Error('Runner plugin runtime contributions can only be registered during activate(ctx).')
-            }
+            common.assertAccepting()
             return this.registerContribution(type, args.pluginId, validateContribution(type, contribution))
         }
 
         const ctx: RunnerPluginContext = {
             pluginId: args.pluginId,
             machineId: this.machineId,
-            logger: this.createLogger(args.pluginId, Array.from(declaredSecrets), env),
-            config: {
-                get: <T = unknown>(key: string): T | undefined => args.config?.[key] as T | undefined,
-                all: (): Record<string, unknown> => ({ ...(args.config ?? {}) })
-            },
-            secrets: {
-                get: (name: string): string | undefined => {
-                    if (!declaredSecrets.has(name)) {
-                        this.addDiagnostic('warning', 'undeclared-secret', `Plugin attempted to read undeclared secret ${name}.`, args.pluginId)
-                        return undefined
-                    }
-                    return env[name]
-                }
-            },
+            logger: common.logger,
+            config: common.config,
+            secrets: common.secrets,
             runtime: {
                 registerSpawnOptionsProvider: (provider: unknown): Disposable => register('spawnOptionsProvider', provider),
                 registerEnvironmentProvider: (provider: unknown): Disposable => register('environmentProvider', provider),
@@ -104,35 +95,8 @@ export class RunnerPluginRegistry {
 
         return {
             ctx,
-            close: () => {
-                acceptingRegistrations = false
-            }
+            close: common.close
         }
-    }
-
-    addDiagnostic(severity: PluginDiagnostic['severity'], code: string, message: string, pluginId: string, path?: string): void {
-        this.diagnostics.push({
-            severity,
-            code,
-            message: `[runner-plugin:${this.machineId}:${pluginId}] ${message}`,
-            ...(path ? { path } : {})
-        })
-    }
-
-    async dispose(): Promise<void> {
-        for (const disposable of [...this.disposables].reverse()) {
-            try {
-                await disposable.dispose()
-            } catch (error) {
-                runnerLogger.debug(`[RunnerPluginRegistry] Dispose failed on ${this.machineId}: ${redactText(error instanceof Error ? error.message : String(error), [], process.env)}`)
-            }
-        }
-        this.disposables.length = 0
-        this.contributions.length = 0
-    }
-
-    getDisposableCount(): number {
-        return this.disposables.length
     }
 
     getEnvironmentProviders(): RegisteredRuntimeContribution<RunnerEnvironmentProviderContribution>[] {
@@ -162,71 +126,9 @@ export class RunnerPluginRegistry {
     getActions(): RegisteredRuntimeContribution<RunnerPluginActionContribution>[] {
         return this.getContributionsByType('action')
     }
-
-    async disposeFrom(startIndex: number): Promise<void> {
-        const extras = this.disposables.splice(startIndex)
-        for (const disposable of extras.reverse()) {
-            try {
-                await disposable.dispose()
-            } catch (error) {
-                runnerLogger.debug(`[RunnerPluginRegistry] Dispose failed on ${this.machineId}: ${redactText(error instanceof Error ? error.message : String(error), [], process.env)}`)
-            }
-        }
-        this.contributions.splice(startIndex)
-    }
-
-    private registerContribution<T extends { id: string; priority?: number }>(
-        type: RegisteredRuntimeContribution['type'],
-        pluginId: string,
-        contribution: T
-    ): Disposable {
-        const entry: RegisteredRuntimeContribution = {
-            type,
-            pluginId,
-            id: contribution.id,
-            priority: contribution.priority ?? 0,
-            order: this.nextContributionOrder++,
-            contribution,
-            disposed: false
-        }
-        this.contributions.push(entry)
-
-        const disposable: Disposable = {
-            dispose: async () => {
-                if (entry.disposed) {
-                    return
-                }
-                entry.disposed = true
-                const index = this.contributions.indexOf(entry)
-                if (index >= 0) {
-                    this.contributions.splice(index, 1)
-                }
-                if (contribution && typeof contribution === 'object' && 'dispose' in contribution && typeof contribution.dispose === 'function') {
-                    await contribution.dispose()
-                }
-            }
-        }
-        this.disposables.push(disposable)
-        return disposable
-    }
-
-    private getContributionsByType<T>(type: RegisteredRuntimeContribution['type']): RegisteredRuntimeContribution<T>[] {
-        return this.contributions
-            .filter((entry): entry is RegisteredRuntimeContribution<T> => entry.type === type && !entry.disposed)
-            .map((entry) => ({ ...entry }))
-    }
-
-    private createLogger(pluginId: string, declaredSecrets: string[], env: NodeJS.ProcessEnv): PluginLogger {
-        const prefix = `[runner-plugin:${this.machineId}:${pluginId}]`
-        const redactArgs = (args: unknown[]) => args.map((arg) => redactUnknown(arg, declaredSecrets, env))
-        return {
-            debug: (message, ...args) => runnerLogger.debug(`${prefix} ${redactText(message, declaredSecrets, env)}`, ...redactArgs(args)),
-            info: (message, ...args) => runnerLogger.debug(`${prefix} ${redactText(message, declaredSecrets, env)}`, ...redactArgs(args)),
-            warn: (message, ...args) => runnerLogger.debug(`${prefix} ${redactText(message, declaredSecrets, env)}`, ...redactArgs(args)),
-            error: (message, ...args) => runnerLogger.debug(`${prefix} ${redactText(message, declaredSecrets, env)}`, ...redactArgs(args))
-        }
-    }
 }
+
+export { redactText }
 
 function validateContribution<T extends { id: string }>(type: RegisteredRuntimeContribution['type'], contribution: unknown): T {
     if (!contribution || typeof contribution !== 'object') {
@@ -236,12 +138,7 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
     if (typeof candidate.id !== 'string' || candidate.id.trim().length === 0) {
         throw new Error(`${type} contribution must have a non-empty id.`)
     }
-    if (type === 'agentAdapter' || type === 'agentCapabilityProvider') {
-        const parsedId = AgentIdSchema.safeParse(candidate.id)
-        if (!parsedId.success) {
-            throw new Error(`${type} contribution id must be a valid id.`)
-        }
-    } else if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate.id)) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(candidate.id)) {
         throw new Error(`${type} contribution id must contain only alphanumeric characters, dots, underscores, or dashes.`)
     }
     if (candidate.priority !== undefined && (
@@ -273,8 +170,8 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
         if (!descriptor.success) {
             throw new Error('agentAdapter descriptor is invalid.')
         }
-        if (descriptor.data.id !== candidate.id) {
-            throw new Error('agentAdapter id must match descriptor.id.')
+        if (descriptor.data.adapter.contributionId !== candidate.id) {
+            throw new Error('agentAdapter id must match descriptor.adapter.contributionId.')
         }
         if (descriptor.data.adapter.runtime !== 'runner') {
             throw new Error('agentAdapter descriptor runtime must be runner.')
@@ -307,42 +204,4 @@ function validateContribution<T extends { id: string }>(type: RegisteredRuntimeC
         }
     }
     return contribution as T
-}
-
-export function redactText(value: string, declaredSecrets: string[], env: NodeJS.ProcessEnv = process.env): string {
-    let redacted = value
-    for (const secretName of declaredSecrets) {
-        const secretValue = env[secretName]
-        if (secretValue) {
-            redacted = redacted.split(secretValue).join('[REDACTED]')
-        }
-    }
-    return redacted
-}
-
-function redactUnknown(
-    value: unknown,
-    declaredSecrets: string[],
-    env: NodeJS.ProcessEnv,
-    seen: WeakSet<object> = new WeakSet()
-): unknown {
-    if (typeof value === 'string') {
-        return redactText(value, declaredSecrets, env)
-    }
-    if (value instanceof Error) {
-        return new Error(redactText(value.message, declaredSecrets, env))
-    }
-    if (Array.isArray(value)) {
-        return value.map((entry) => redactUnknown(entry, declaredSecrets, env, seen))
-    }
-    if (value && typeof value === 'object') {
-        if (seen.has(value)) {
-            return '[Circular]'
-        }
-        seen.add(value)
-        return Object.fromEntries(
-            Object.entries(value).map(([key, entry]) => [key, redactUnknown(entry, declaredSecrets, env, seen)])
-        )
-    }
-    return value
 }

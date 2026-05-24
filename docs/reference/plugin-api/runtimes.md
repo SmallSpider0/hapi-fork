@@ -498,7 +498,7 @@ JSON Schema: [RunnerEnvironmentProposal](/docs/plugin-api/schemas/runner-environ
 | `pathPrepend` | no | array&lt;string&gt; | — |
 | `pathAppend` | no | array&lt;string&gt; | — |
 | `cwd` | no | string | — |
-| `toolPaths` | no | object | — |
+| `toolPaths` | no | object | Reserved for future structured tool resolution; current Runner emits a warning and does not apply this field. |
 | `diagnostics` | no | array&lt;object&gt; | — |
 
 ### RunnerCommandResolverProposal

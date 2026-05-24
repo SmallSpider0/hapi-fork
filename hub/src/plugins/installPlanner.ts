@@ -1,5 +1,4 @@
 import type {
-    PluginHostInfo,
     PluginInstallPackageRequest,
     PluginInstallPlanResponse,
     PluginInstallPlanTarget,
@@ -8,7 +7,8 @@ import type {
     PluginPackageFormat,
     PluginTargetSummary
 } from '@hapi/protocol/plugins/admin'
-import { pluginManifestRequiresHubInstall, pluginManifestRequiresRunnerInstall, type PluginManifestLite, type PluginRuntimeName } from '@hapi/protocol/plugins'
+import { pluginManifestRequiresHubInstall, pluginManifestRequiresRunnerInstall, type PluginManifestLite } from '@hapi/protocol/plugins'
+import { pluginRuntimeCompatibilityProblems } from '@hapi/protocol/plugins/runtime/compatibility'
 
 export interface PluginInstallTargetCandidate {
     target: PluginTargetSummary
@@ -30,8 +30,6 @@ export interface BuildPluginInstallPlanOptions {
     candidates: PluginInstallTargetCandidate[]
 }
 
-type NumericVersion = [number, number, number]
-
 export function inferPluginInstallPositions(manifest: PluginManifestLite): PluginInstallPosition[] {
     const capabilities = manifest.capabilities ?? []
     const hasWeb = Boolean(manifest.contributions?.web && Object.values(manifest.contributions.web).some((entry) => Array.isArray(entry) ? entry.length > 0 : Boolean(entry)))
@@ -44,105 +42,6 @@ export function inferPluginInstallPositions(manifest: PluginManifestLite): Plugi
     if (hasHub) positions.push('hub')
     if (hasRunner) positions.push('runner')
     return positions.length > 0 ? positions : ['hub']
-}
-
-function parseNumericVersion(version: string): NumericVersion | null {
-    const match = version.trim().match(/^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?/)
-    if (!match) return null
-    return [
-        Number(match[1]),
-        Number(match[2] ?? 0),
-        Number(match[3] ?? 0)
-    ]
-}
-
-function compareVersion(leftRaw: string, rightRaw: string): number | null {
-    const left = parseNumericVersion(leftRaw)
-    const right = parseNumericVersion(rightRaw)
-    if (!left || !right) return null
-    for (let index = 0; index < 3; index += 1) {
-        if (left[index] > right[index]) return 1
-        if (left[index] < right[index]) return -1
-    }
-    return 0
-}
-
-function satisfiesSimpleComparator(version: string, comparator: string): boolean {
-    const trimmed = comparator.trim()
-    if (!trimmed || trimmed === '*' || trimmed === 'x') return true
-
-    if (trimmed.startsWith('^')) {
-        const base = parseNumericVersion(trimmed.slice(1))
-        if (!base) return false
-        const lower = compareVersion(version, base.join('.'))
-        if (lower === null || lower < 0) return false
-        const upper: NumericVersion = base[0] === 0
-            ? [0, base[1] + 1, 0]
-            : [base[0] + 1, 0, 0]
-        const upperCompare = compareVersion(version, upper.join('.'))
-        return upperCompare !== null && upperCompare < 0
-    }
-
-    const match = trimmed.match(/^(<=|>=|<|>|=)?\s*(.+)$/)
-    if (!match) return false
-    const operator = match[1] ?? '='
-    const target = match[2]
-    const compare = compareVersion(version, target)
-    if (compare === null) return false
-    if (operator === '>=') return compare >= 0
-    if (operator === '>') return compare > 0
-    if (operator === '<=') return compare <= 0
-    if (operator === '<') return compare < 0
-    return compare === 0
-}
-
-export function satisfiesVersionRange(version: string, range: string | undefined): boolean {
-    if (!range?.trim()) return true
-    return range
-        .split('||')
-        .some((alternative) => alternative
-            .trim()
-            .split(/\s+/)
-            .filter(Boolean)
-            .every((comparator) => satisfiesSimpleComparator(version, comparator)))
-}
-
-function compatibilityProblems(manifest: PluginManifestLite, runtime: PluginRuntimeName, hostInfo: PluginHostInfo | undefined): string[] {
-    if (!hostInfo) {
-        return ['Target did not report plugin host information. Upgrade this Runner before installing cross-runtime plugins.']
-    }
-
-    const problems: string[] = []
-    const global = manifest.compatibility
-    const runtimeCompatibility = runtime === 'hub' ? global?.hub : global?.runner
-    const hapiRanges = [global?.hapi, runtimeCompatibility?.hapi].filter((entry): entry is string => Boolean(entry))
-    for (const range of hapiRanges) {
-        if (!satisfiesVersionRange(hostInfo.hapiVersion, range)) {
-            problems.push(`${runtime} HAPI version ${hostInfo.hapiVersion} does not satisfy ${range}.`)
-        }
-    }
-    const pluginApiRanges = [global?.pluginApi, runtimeCompatibility?.pluginApi].filter((entry): entry is string => Boolean(entry))
-    for (const range of pluginApiRanges) {
-        if (!satisfiesVersionRange(hostInfo.pluginApiVersion, range)) {
-            problems.push(`${runtime} plugin API version ${hostInfo.pluginApiVersion} does not satisfy ${range}.`)
-        }
-    }
-    const osList = runtimeCompatibility?.os ?? global?.os
-    if (osList && !osList.includes(hostInfo.os as 'darwin' | 'linux' | 'win32')) {
-        problems.push(`${runtime} OS ${hostInfo.os} is not in supported OS list: ${osList.join(', ')}.`)
-    }
-    const archList = runtimeCompatibility?.arch ?? global?.arch
-    if (archList && !archList.includes(hostInfo.arch)) {
-        problems.push(`${runtime} arch ${hostInfo.arch} is not in supported arch list: ${archList.join(', ')}.`)
-    }
-    const extensionPoints = runtimeCompatibility?.extensionPoints ?? []
-    const supported = new Set(hostInfo.supportedExtensionPoints)
-    for (const extensionPoint of extensionPoints) {
-        if (!supported.has(extensionPoint)) {
-            problems.push(`${runtime} does not support extension point ${extensionPoint}.`)
-        }
-    }
-    return problems
 }
 
 function existingPluginVersion(plugins: PluginListItem[], pluginId: string): string | undefined {
@@ -171,7 +70,7 @@ function createTargetPlan(options: {
     const existingVersion = existingPluginVersion(options.candidate.plugins, options.manifest.id)
     const incompatibilities = offline
         ? [options.candidate.target.error ?? 'Target is offline.']
-        : compatibilityProblems(options.manifest, runtime, options.candidate.target.hostInfo)
+        : pluginRuntimeCompatibilityProblems(options.manifest, runtime, options.candidate.target.hostInfo)
     if (incompatibilities.length > 0) {
         const shouldBlock = options.required && !options.compatibleMode
         return {

@@ -1,8 +1,6 @@
 import { watch, type FSWatcher } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { basename, dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
-import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
 import type {
     HubMessageActionInput,
     HubMessageActionResult,
@@ -17,37 +15,40 @@ import type {
     PluginInstallResult,
     PluginInstallPackageRequest,
     PluginListItem,
-    PluginLocalDirectoryEntry,
     PluginLocalDirectoryListResponse,
     PluginReloadItem,
     PluginReloadResult,
     PluginRuntimeContributionState,
+    PluginHostInfo,
     PluginTargetSummary,
     PluginWebContributionView
 } from '@hapi/protocol/plugins'
 import {
     applyPluginState,
     discoverPlugins,
-    expandHomePath,
     getPluginStateFile,
-    getUserPluginsDir,
-    installPluginFromDirectory,
-    installPluginFromPackage,
     readPluginState,
-    resolvePluginScopedConfig,
-    setPluginScopedConfig,
-    writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { HAPI_PLUGIN_MANIFEST_FILE, assertPluginConfigSafeForPersistence, hubPluginConfigScope, pluginManifestRequiresHubInstall, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_API_VERSION, hubPluginConfigScope, pluginManifestRequiresHubInstall, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
-import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
+import { HUB_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
+import { activateRuntimeRecord, safeMtime, stableStringify } from '@hapi/protocol/plugins/runtime/activation'
+import { diagnosticView, reloadItemIsOk } from '@hapi/protocol/plugins/runtime/diagnostics'
+import { applyRuntimeCompatibility } from '@hapi/protocol/plugins/runtime/compatibility'
+import {
+    aggregateCapabilityStatus,
+    webContributionsForPart,
+    webPartStatus as runtimeWebPartStatus
+} from '@hapi/protocol/plugins/runtime/capabilityView'
+import { performRuntimeReload } from '@hapi/protocol/plugins/runtime/reloadController'
+import { PluginRuntimeStateController } from '@hapi/protocol/plugins/runtime/stateController'
 import type { NotificationChannel, TaskNotification } from '../notifications/notificationTypes'
 import type { Session } from '../sync/syncEngine'
 import type { SessionEndReason } from '@hapi/protocol'
-import { PluginRegistryLite, redactText, type RegisteredHubMessageAction } from './registry'
-import type { HubPluginModule } from './types'
+import { HubPluginRegistry, type RegisteredHubMessageAction } from './registry'
+import packageJson from '../../../cli/package.json'
 
 export interface HubPluginManagerOptions {
     hapiHome: string
@@ -62,7 +63,7 @@ export interface HubPluginManagerOptions {
 
 type ActivePluginInstance = {
     pluginId: string
-    registry: PluginRegistryLite
+    registry: HubPluginRegistry
     record: DiscoveredPluginRecord
     signature: string
     loadedAt: number
@@ -75,86 +76,6 @@ type InternalReloadResult = {
     items: PluginReloadItem[]
 }
 
-function errorMessage(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message
-    }
-    return String(error)
-}
-
-function getActivate(value: unknown): HubPluginModule['activate'] | null {
-    if (!value || typeof value !== 'object') {
-        return null
-    }
-    const moduleObject = value as { activate?: unknown; default?: unknown }
-    if (typeof moduleObject.activate === 'function') {
-        return moduleObject.activate as HubPluginModule['activate']
-    }
-    if (typeof moduleObject.default === 'function') {
-        return moduleObject.default as HubPluginModule['activate']
-    }
-    if (moduleObject.default && typeof moduleObject.default === 'object') {
-        const defaultObject = moduleObject.default as { activate?: unknown }
-        if (typeof defaultObject.activate === 'function') {
-            return defaultObject.activate as HubPluginModule['activate']
-        }
-    }
-    return null
-}
-
-function stableStringify(value: unknown): string {
-    if (Array.isArray(value)) {
-        return `[${value.map((entry) => stableStringify(entry)).join(',')}]`
-    }
-    if (value && typeof value === 'object') {
-        return `{${Object.entries(value as Record<string, unknown>)
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-            .join(',')}}`
-    }
-    return JSON.stringify(value)
-}
-
-
-async function materializeReloadImportPath(realPath: string, pluginId: string, signature: string): Promise<string> {
-    const hash = createHash('sha256').update(signature).digest('hex').slice(0, 16)
-    const safePluginId = pluginId.replace(/[^A-Za-z0-9._-]/g, '_')
-    const shadowPath = join(dirname(realPath), `.hapi-reload-${safePluginId}-${hash}.mjs`)
-    await mkdir(dirname(shadowPath), { recursive: true })
-    await writeFile(shadowPath, await readFile(realPath, 'utf8'))
-    return shadowPath
-}
-
-async function safeMtime(path: string): Promise<number> {
-    try {
-        return (await stat(path)).mtimeMs
-    } catch {
-        return 0
-    }
-}
-
-async function safePathExists(path: string): Promise<boolean> {
-    try {
-        await stat(path)
-        return true
-    } catch {
-        return false
-    }
-}
-
-function isPathInside(parentPath: string, childPath: string): boolean {
-    const rel = relative(parentPath, childPath)
-    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
-}
-
-function sortLocalDirectoryEntries<T extends { name: string; type: string }>(entries: T[]): T[] {
-    return entries.sort((left, right) => {
-        if (left.type === 'directory' && right.type !== 'directory') return -1
-        if (left.type !== 'directory' && right.type === 'directory') return 1
-        return left.name.localeCompare(right.name)
-    })
-}
-
 function pluginDisplayId(record: DiscoveredPluginRecord): string {
     const id = record.manifest?.id ?? basename(record.rootPath)
     if (record.manifest && record.status !== 'blocked') {
@@ -164,94 +85,9 @@ function pluginDisplayId(record: DiscoveredPluginRecord): string {
     return `${id}#${hash}`
 }
 
-function diagnosticView(pluginId: string | undefined, diagnostic: { severity: 'info' | 'warning' | 'error'; code: string; message: string; path?: string }): PluginDiagnosticView {
-    return {
-        severity: diagnostic.severity,
-        code: diagnostic.code,
-        message: diagnostic.message,
-        ...(diagnostic.path ? { path: diagnostic.path } : {}),
-        ...(pluginId ? { pluginId } : {})
-    }
-}
-
-function assertDiscoveredRecordCanBeEnabled(
-    record: DiscoveredPluginRecord,
-    id: string
-): asserts record is DiscoveredPluginRecord & { manifest: NonNullable<DiscoveredPluginRecord['manifest']> } {
-    if (!record.manifest) {
-        throw new Error(`Plugin ${id} was not found.`)
-    }
-    if (record.status !== 'validated') {
-        throw new Error(`Plugin ${record.manifest.id} cannot be enabled while status is ${record.status}.`)
-    }
-}
-
-function reloadItemIsOk(item: PluginReloadItem): boolean {
-    if (item.action === 'failed' || item.action === 'kept-previous') {
-        return false
-    }
-    return !['invalid', 'failed', 'reload-failed', 'blocked', 'incompatible'].includes(item.status)
-}
-
-function aggregateCapabilityStatus(parts: {
-    web?: PluginCapabilityPartStatus
-    hub?: PluginCapabilityPartStatus
-    runner?: PluginCapabilityPartStatus
-}): PluginCapabilityView['status'] {
-    const required = Object.values(parts).filter((part) => part.required !== false)
-    if (required.length === 0) {
-        return 'ready'
-    }
-    const priority: PluginCapabilityView['status'][] = [
-        'disabled',
-        'failed',
-        'incompatible',
-        'offline',
-        'missing-target',
-        'partial'
-    ]
-    for (const status of priority) {
-        if (required.some((part) => part.status === status)) {
-            return status
-        }
-    }
-    return required.every((part) => part.status === 'ready') ? 'ready' : 'partial'
-}
-
-function webContributionsForPart(
-    record: DiscoveredPluginRecord,
-    part: PluginCapabilityPart
-): NonNullable<PluginCapabilityView['web']> | undefined {
-    const web = record.manifest?.contributions?.web
-    if (!web) {
-        return undefined
-    }
-
-    const result: NonNullable<PluginCapabilityView['web']> = {}
-    for (const contribution of part.contributions) {
-        if (contribution.type === 'settingsPanel') {
-            const match = web.settingsPanels?.find((entry) => entry.id === contribution.id)
-            if (match) result.settingsPanels = [...(result.settingsPanels ?? []), match]
-        } else if (contribution.type === 'newSessionField') {
-            const match = web.newSessionFields?.find((entry) => entry.id === contribution.id)
-            if (match) result.newSessionFields = [...(result.newSessionFields ?? []), match]
-        } else if (contribution.type === 'action') {
-            const match = web.actions?.find((entry) => entry.id === contribution.id)
-            if (match) result.actions = [...(result.actions ?? []), match]
-        } else if (contribution.type === 'badge') {
-            const match = web.badges?.find((entry) => entry.id === contribution.id)
-            if (match) result.badges = [...(result.badges ?? []), match]
-        } else if (contribution.type === 'composerAction') {
-            const match = web.composerActions?.find((entry) => entry.id === contribution.id)
-            if (match) result.composerActions = [...(result.composerActions ?? []), match]
-        }
-    }
-
-    return Object.keys(result).length > 0 ? result : undefined
-}
-
 export class HubPluginManager {
     private readonly activePlugins = new Map<string, ActivePluginInstance>()
+    private readonly stateController: PluginRuntimeStateController
     private records: DiscoveredPluginRecord[] = []
     private managerDiagnostics: PluginDiagnosticView[] = []
     private reloadQueue: Promise<InternalReloadResult> = Promise.resolve({ records: [], items: [] })
@@ -261,6 +97,13 @@ export class HubPluginManager {
     private readonly notificationChannel: NotificationChannel
 
     constructor(private readonly options: HubPluginManagerOptions) {
+        this.stateController = new PluginRuntimeStateController({
+            hapiHome: options.hapiHome,
+            configScope: (pluginId) => hubPluginConfigScope(pluginId),
+            defaultEnabledPluginIds: () => this.defaultEnabledPluginIds(),
+            enableDefaultOnConfigUpdate: true,
+            displayId: pluginDisplayId
+        })
         this.notificationChannel = this.createNotificationMultiplexer()
     }
 
@@ -344,7 +187,7 @@ export class HubPluginManager {
             .flatMap((record) => record.manifest!.capabilities!.map((capability): PluginCapabilityView => {
                 const pluginId = record.manifest!.id
                 const parts = {
-                    ...(capability.parts.web ? { web: this.webPartStatus(record, capability.parts.web) } : {}),
+                    ...(capability.parts.web ? { web: runtimeWebPartStatus(record, capability.parts.web) } : {}),
                     ...(capability.parts.hub ? { hub: this.hubPartStatus(record, capability.parts.hub) } : {}),
                     ...(capability.parts.runner ? {
                         runner: {
@@ -445,60 +288,23 @@ export class HubPluginManager {
     }
 
     async enablePlugin(id: string, config?: Record<string, unknown>, shouldReload = true): Promise<PluginReloadResult> {
-        const state = await this.readWritableState()
-        const record = await this.findDiscoveredRecord(id)
-        if (!record) throw new Error(`Plugin ${id} was not found.`)
-        assertDiscoveredRecordCanBeEnabled(record, id)
-        assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
-        const previous = state.enabled[record.manifest.id]
-        state.enabled[record.manifest.id] = config
-            ? { ...setPluginScopedConfig(previous, hubPluginConfigScope(record.manifest.id), config), enabled: true }
-            : { ...previous, enabled: true }
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
-        return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
+        const pluginId = await this.stateController.enablePluginState(id, config, (candidate) => this.findDiscoveredRecord(candidate))
+        return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
     }
 
     async disablePlugin(id: string, shouldReload = true): Promise<PluginReloadResult> {
-        const state = await this.readWritableState()
-        const record = await this.findDiscoveredRecord(id)
-        const pluginId = record?.manifest?.id ?? id
-        const previous = state.enabled[pluginId]
-        state.enabled[pluginId] = {
-            ...previous,
-            enabled: false,
-        }
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
+        const pluginId = await this.stateController.disablePluginState(id, (candidate) => this.findDiscoveredRecord(candidate))
         return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
     }
 
     async updatePluginConfig(id: string, config: Record<string, unknown>, shouldReload = true): Promise<PluginReloadResult> {
-        const state = await this.readWritableState()
-        const record = await this.findDiscoveredRecord(id)
-        if (!record) throw new Error(`Plugin ${id} was not found.`)
-        assertDiscoveredRecordCanBeEnabled(record, id)
-        assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
-        const previous = state.enabled[record.manifest.id]
-        const nextEntry = setPluginScopedConfig(previous, hubPluginConfigScope(record.manifest.id), config)
-        state.enabled[record.manifest.id] = previous === undefined && this.defaultEnabledPluginIds().includes(record.manifest.id)
-            ? { ...nextEntry, enabled: true }
-            : nextEntry
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
-        return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
+        const pluginId = await this.stateController.updatePluginConfigState(id, config, (candidate) => this.findDiscoveredRecord(candidate))
+        return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
     }
 
     async installLocalPlugin(sourcePath: string, options: Omit<PluginInstallLocalRequest, 'sourcePath'> = {}): Promise<PluginInstallResult> {
-        const install = await installPluginFromDirectory({
-            hapiHome: this.options.hapiHome,
-            sourcePath,
-            overwrite: options.overwrite === true
-        })
+        const install = await this.stateController.installLocalPlugin({ ...options, sourcePath }, 'hub-local-path')
         const pluginId = install.record.manifest!.id
-        await this.recordInstallState(pluginId, {
-            sourceType: 'hub-local-path',
-            sourcePath: install.sourcePath,
-            version: install.record.manifest!.version
-        }, options.enable === true)
-
         return await this.buildInstallResult({
             action: install.action,
             pluginId,
@@ -511,34 +317,8 @@ export class HubPluginManager {
     }
 
     async installPluginPackage(options: PluginInstallPackageRequest): Promise<PluginInstallResult> {
-        const install = await installPluginFromPackage({
-            hapiHome: this.options.hapiHome,
-            filename: options.filename,
-            contentBase64: options.contentBase64,
-            checksum: options.checksum,
-            format: options.format,
-            manifest: options.manifest,
-            overwrite: options.overwrite === true
-        })
+        const install = await this.stateController.installPluginPackage(options)
         const pluginId = install.record.manifest!.id
-        const marketplaceInstall = options.installSource?.type === 'marketplace'
-        await this.recordInstallState(pluginId, {
-            sourceType: marketplaceInstall ? 'marketplace' : 'uploaded-package',
-            checksum: install.checksum,
-            packageFormat: install.packageFormat,
-            version: install.record.manifest!.version,
-            ...(marketplaceInstall ? {
-                marketplace: {
-                    sourceUrl: options.installSource!.sourceUrl,
-                    pluginId: options.installSource!.pluginId,
-                    repo: options.installSource!.repo,
-                    version: options.installSource!.version,
-                    assetUrl: options.installSource!.assetUrl,
-                    checksum: install.checksum
-                }
-            } : {})
-        }, options.enable === true)
-
         return await this.buildInstallResult({
             action: install.action,
             pluginId,
@@ -551,91 +331,20 @@ export class HubPluginManager {
     }
 
     async listLocalDirectory(path?: string): Promise<PluginLocalDirectoryListResponse> {
-        const requestedPath = path?.trim() ? path.trim() : this.options.hapiHome
-        const resolvedPath = resolve(expandHomePath(requestedPath))
-        try {
-            const stats = await lstat(resolvedPath)
-            if (!stats.isDirectory()) {
-                return {
-                    success: false,
-                    path: resolvedPath,
-                    error: `Path is not a directory: ${resolvedPath}`
-                }
-            }
-
-            const [entries, hasPluginManifest] = await Promise.all([
-                readdir(resolvedPath, { withFileTypes: true }),
-                safePathExists(join(resolvedPath, HAPI_PLUGIN_MANIFEST_FILE))
-            ])
-
-            const mapped = await Promise.all(entries.map(async (entry): Promise<PluginLocalDirectoryEntry> => {
-                const entryPath = join(resolvedPath, entry.name)
-                const entryStats = await lstat(entryPath).catch(() => null)
-                const type: PluginLocalDirectoryEntry['type'] = entry.isDirectory()
-                    ? 'directory'
-                    : entry.isFile()
-                        ? 'file'
-                        : 'other'
-                return {
-                    name: entry.name,
-                    type,
-                    ...(entryStats ? { size: entryStats.size, modified: entryStats.mtimeMs } : {}),
-                    ...(type === 'directory' ? { hasPluginManifest: await safePathExists(join(entryPath, HAPI_PLUGIN_MANIFEST_FILE)) } : {})
-                }
-            }))
-
-            return {
-                success: true,
-                path: resolvedPath,
-                parentPath: dirname(resolvedPath),
-                hasPluginManifest,
-                entries: sortLocalDirectoryEntries(mapped)
-            }
-        } catch (error) {
-            return {
-                success: false,
-                path: resolvedPath,
-                error: error instanceof Error ? error.message : String(error)
-            }
-        }
+        return await this.stateController.listLocalDirectory(path)
     }
 
     async deletePlugin(id: string, shouldReload = true): Promise<PluginDeleteResult> {
-        const record = await this.findDiscoveredRecord(id)
-        if (!record) {
-            throw new Error(`Plugin ${id} was not found.`)
-        }
-        if (record.source !== 'user-home') {
-            throw new Error(`Plugin ${id} cannot be deleted because it is from ${record.source}. Only user-home plugins can be deleted.`)
-        }
-
-        const pluginId = pluginDisplayId(record)
-        const statePluginId = record.status === 'blocked' ? undefined : record.manifest?.id
-        const userPluginsDir = getUserPluginsDir(this.options.hapiHome)
-        const [userPluginsRealPath, rootRealPath] = await Promise.all([
-            realpath(userPluginsDir),
-            realpath(record.rootPath)
-        ])
-        if (!isPathInside(userPluginsRealPath, rootRealPath)) {
-            throw new Error(`Plugin ${pluginId} cannot be deleted because its path is outside the user plugin directory.`)
-        }
-
-        const nextState = statePluginId ? await this.readWritableState() : null
-        if (nextState && statePluginId) {
-            delete nextState.enabled[statePluginId]
-        }
-        if (nextState) {
-            await writePluginState(getPluginStateFile(this.options.hapiHome), nextState)
-        }
-        if (statePluginId) {
-            await this.disposeActive(statePluginId)
-        }
-        await rm(rootRealPath, { recursive: true, force: true })
-        const reloadResult = shouldReload ? await this.reload(pluginId, 'state-change') : undefined
+        const deleted = await this.stateController.deleteUserHomePlugin(
+            id,
+            (candidate) => this.findDiscoveredRecord(candidate),
+            (pluginId) => this.disposeActive(pluginId)
+        )
+        const reloadResult = shouldReload ? await this.reload(deleted.pluginId, 'state-change') : undefined
         return {
             ok: reloadResult?.ok ?? true,
-            pluginId,
-            rootPath: rootRealPath,
+            pluginId: deleted.pluginId,
+            rootPath: deleted.rootPath,
             deleted: true,
             ...(reloadResult ? { reload: reloadResult } : {}),
             plugins: this.listPlugins()
@@ -658,24 +367,6 @@ export class HubPluginManager {
                 console.error('[HubPluginManager] Plugin dispose failed:', error)
             }
         }))
-    }
-
-    private async recordInstallState(pluginId: string, metadata: Omit<PluginInstallMetadata, 'installedAt' | 'updatedAt'>, enable: boolean): Promise<void> {
-        const state = await this.readWritableState()
-        const previous = state.enabled[pluginId]
-        const now = Date.now()
-        state.enabled[pluginId] = {
-            enabled: enable ? true : previous?.enabled === true,
-            ...(previous?.config ? { config: previous.config } : {}),
-            ...(previous?.configUpdatedAt ? { configUpdatedAt: previous.configUpdatedAt } : {}),
-            ...(previous?.scopedConfig ? { scopedConfig: previous.scopedConfig } : {}),
-            install: {
-                ...metadata,
-                installedAt: previous?.install?.installedAt ?? now,
-                updatedAt: now
-            }
-        }
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
     }
 
     private async buildInstallResult(options: {
@@ -739,7 +430,7 @@ export class HubPluginManager {
         const managerDiagnostics: PluginDiagnosticView[] = []
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
-        const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
+        const records = this.stateController.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
             failClosed: stateResult.failClosed,
             defaultEnabledPluginIds: this.defaultEnabledPluginIds()
         }), stateResult.state)
@@ -752,101 +443,20 @@ export class HubPluginManager {
             })
         }
 
-        const seenIds = new Set(records.filter((record) => record.manifest).map((record) => record.manifest!.id))
-        for (const [pluginId, instance] of Array.from(this.activePlugins.entries())) {
-            if (targetId && pluginId !== targetId) {
-                continue
-            }
-            if (!seenIds.has(pluginId)) {
-                await this.disposeActive(pluginId)
-                items.push({
-                    id: pluginId,
-                    action: 'deactivated',
-                    status: 'disabled',
-                    message: 'Plugin is no longer discovered.',
-                    diagnostics: []
-                })
-            } else if (!records.some((record) => record.manifest?.id === pluginId && record.status === 'enabled' && record.manifest.runtimes?.hub)) {
-                await this.disposeActive(pluginId)
-                items.push({
-                    id: pluginId,
-                    action: 'deactivated',
-                    status: 'disabled',
-                    message: 'Plugin is no longer enabled for the Hub runtime.',
-                    diagnostics: []
-                })
-            } else {
-                instance.record = records.find((record) => record.manifest?.id === pluginId) ?? instance.record
-            }
-        }
-
-        for (const record of records) {
-            const id = pluginDisplayId(record)
-            if (targetId && id !== targetId && record.manifest?.id !== targetId) {
-                continue
-            }
-
-            if (!record.manifest || record.status !== 'enabled' || !record.manifest.runtimes?.hub) {
-                if (!items.some((item) => item.id === id)) {
-                    items.push({
-                        id,
-                        action: 'unchanged',
-                        status: record.status,
-                        diagnostics: record.diagnostics.map((entry) => diagnosticView(id, entry))
-                    })
-                }
-                continue
-            }
-
-            const pluginId = record.manifest.id
-            const signature = await this.computeSignature(record)
-            const existing = this.activePlugins.get(pluginId)
-            if (existing && existing.signature === signature) {
-                record.status = 'active'
-                existing.record = record
-                items.push({ id: pluginId, action: 'unchanged', status: 'active', diagnostics: [] })
-                continue
-            }
-
-            const activation = await this.activateRecord(record, signature)
-            if (activation.ok) {
-                const action = existing ? 'reloaded' : 'activated'
-                this.activePlugins.set(pluginId, activation.instance)
-                record.status = 'active'
-                if (existing) {
-                    await existing.registry.dispose()
-                }
-                items.push({ id: pluginId, action, status: 'active', diagnostics: [] })
-                continue
-            }
-
-            record.diagnostics.push(...activation.diagnostics.map((diagnostic) => ({
-                severity: diagnostic.severity,
-                code: diagnostic.code,
-                message: diagnostic.message,
-                ...(diagnostic.path ? { path: diagnostic.path } : {})
-            })))
-            if (existing) {
-                record.status = 'reload-failed'
-                existing.record = record
-                items.push({
-                    id: pluginId,
-                    action: 'kept-previous',
-                    status: 'reload-failed',
-                    message: activation.message,
-                    diagnostics: activation.diagnostics
-                })
-            } else {
-                record.status = 'failed'
-                items.push({
-                    id: pluginId,
-                    action: 'failed',
-                    status: 'failed',
-                    message: activation.message,
-                    diagnostics: activation.diagnostics
-                })
-            }
-        }
+        items.push(...await performRuntimeReload({
+            records,
+            activePlugins: this.activePlugins,
+            targetId,
+            runtime: 'hub',
+            runtimeDisplayName: 'Hub',
+            pluginDisplayId,
+            computeSignature: (record) => this.computeSignature(record),
+            activateRecord: (record, signature) => this.activateRecord(record, signature),
+            disposeActive: (pluginId) => this.disposeActive(pluginId),
+            disposeInstance: (instance) => instance.registry.dispose(),
+            shouldDiscardActivatedInstance: () => this.disposed,
+            discardedActivationMessage: 'Hub plugin manager disposed during activation.'
+        }))
 
         this.records = records
         this.managerDiagnostics = managerDiagnostics
@@ -856,93 +466,68 @@ export class HubPluginManager {
         return { records, items }
     }
 
-    private applyScopedRuntimeConfig(records: DiscoveredPluginRecord[], state: PluginStateFile): DiscoveredPluginRecord[] {
-        return records.map((record) => {
-            if (!record.manifest || record.status === 'blocked') {
-                return record
-            }
-            const resolved = resolvePluginScopedConfig(state.enabled[record.manifest.id], hubPluginConfigScope(record.manifest.id))
-            const baseRecord = { ...record }
-            delete baseRecord.config
-            delete baseRecord.configUpdatedAt
-            delete baseRecord.configSource
-            return {
-                ...baseRecord,
-                ...(resolved.config ? { config: resolved.config } : {}),
-                ...(resolved.updatedAt ? { configUpdatedAt: resolved.updatedAt } : {}),
-                configSource: resolved.source
-            }
+    private async activateRecord(record: DiscoveredPluginRecord, signature: string) {
+        const result = await activateRuntimeRecord({
+            record,
+            signature,
+            runtime: 'hub',
+            runtimeDisplayName: 'Hub',
+            missingEntryCode: 'missing-hub-entry',
+            invalidEntryCode: 'invalid-hub-entry',
+            activationFailedCode: 'hub-plugin-activate-failed',
+            activationFailureLabel: 'hub plugin',
+            importQueryName: 'hapiPlugin',
+            reloadMarker: 'hapi-reload',
+            env: this.options.env,
+            createRegistry: () => new HubPluginRegistry(this.options.publicUrl),
+            createInstance: ({ pluginId, registry, record: activatedRecord, signature: activatedSignature, loadedAt }) => ({
+                pluginId,
+                registry,
+                record: activatedRecord,
+                signature: activatedSignature,
+                loadedAt
+            })
         })
+        if (!result.ok) {
+            return result
+        }
+        const diagnostics = this.validateHubRuntimeRegistrations(record, result.instance.registry)
+        if (diagnostics.length > 0) {
+            await result.instance.registry.dispose()
+            return {
+                ok: false as const,
+                message: diagnostics.map((diagnostic) => diagnostic.message).join(' '),
+                diagnostics
+            }
+        }
+        return result
     }
 
-    private async activateRecord(record: DiscoveredPluginRecord, signature: string): Promise<{
-        ok: true
-        instance: ActivePluginInstance
-    } | {
-        ok: false
-        message: string
-        diagnostics: PluginDiagnosticView[]
-    }> {
+    private validateHubRuntimeRegistrations(record: DiscoveredPluginRecord, registry: HubPluginRegistry): PluginDiagnosticView[] {
         const pluginId = record.manifest!.id
-        const hubEntry = record.runtimeEntryPaths.find((entry) => entry.runtime === 'hub')
-        if (!hubEntry) {
-            return {
-                ok: false,
-                message: 'Hub runtime entry is missing.',
-                diagnostics: [{ pluginId, severity: 'error', code: 'missing-hub-entry', message: 'Hub runtime entry is missing.', path: record.manifestPath }]
-            }
-        }
-
-        const declaredSecrets = record.manifest?.permissions?.secrets ?? []
-        const registry = new PluginRegistryLite(this.options.publicUrl)
-        try {
-            const importPath = await materializeReloadImportPath(hubEntry.realPath, pluginId, signature)
-            const importUrl = `${pathToFileURL(importPath).href}?hapiPlugin=${encodeURIComponent(pluginId)}&signature=${encodeURIComponent(signature)}`
-            const importedModule = await import(importUrl)
-            const activate = getActivate(importedModule)
-            if (!activate) {
-                return {
-                    ok: false,
-                    message: 'Hub runtime entry must export activate(ctx).',
-                    diagnostics: [{ pluginId, severity: 'error', code: 'invalid-hub-entry', message: 'Hub runtime entry must export activate(ctx).', path: record.manifestPath }]
-                }
-            }
-
-            const disposableStart = registry.getDisposableCount()
-            const activation = registry.createContext({
-                pluginId,
-                config: record.config,
-                declaredSecrets,
-                env: this.options.env
-            })
-            try {
-                await activate(activation.ctx)
-                activation.close()
-            } catch (error) {
-                activation.close()
-                await registry.disposeFrom(disposableStart)
-                throw error
-            }
-
-            return {
-                ok: true,
-                instance: {
+        const declaredMessageActionIds = new Set((record.manifest?.contributions?.hub?.messageActions ?? []).map((action) => action.id))
+        const seenMessageActionIds = new Set<string>()
+        const diagnostics: PluginDiagnosticView[] = []
+        for (const action of registry.getMessageActions()) {
+            if (!declaredMessageActionIds.has(action.id)) {
+                diagnostics.push({
                     pluginId,
-                    registry,
-                    record,
-                    signature,
-                    loadedAt: Date.now()
-                }
+                    severity: 'error',
+                    code: 'hub-message-action-undeclared',
+                    message: `Hub message action ${action.id} was registered but is not declared in the plugin manifest.`
+                })
             }
-        } catch (error) {
-            await registry.dispose().catch(() => undefined)
-            const message = redactText(`Failed to import or activate hub plugin: ${errorMessage(error)}`, declaredSecrets, this.options.env)
-            return {
-                ok: false,
-                message,
-                diagnostics: [{ pluginId, severity: 'error', code: 'hub-plugin-activate-failed', message, path: record.manifestPath }]
+            if (seenMessageActionIds.has(action.id)) {
+                diagnostics.push({
+                    pluginId,
+                    severity: 'error',
+                    code: 'hub-message-action-duplicate',
+                    message: `Hub message action ${action.id} was registered more than once.`
+                })
             }
+            seenMessageActionIds.add(action.id)
         }
+        return diagnostics
     }
 
     private async computeSignature(record: DiscoveredPluginRecord): Promise<string> {
@@ -983,19 +568,26 @@ export class HubPluginManager {
             envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS,
             bundledPluginDirs
         })
-        return records.filter((record) => !record.manifest || record.source !== 'bundled' || pluginManifestRequiresHubInstall(record.manifest))
+        return applyRuntimeCompatibility(
+            records.filter((record) => !record.manifest || record.source !== 'bundled' || pluginManifestRequiresHubInstall(record.manifest)),
+            'hub',
+            this.hostInfo()
+        )
     }
 
     private defaultEnabledPluginIds(): string[] {
         return this.options.includeBundledCore === true ? defaultEnabledBundledPluginIds : []
     }
 
-    private async readWritableState(): Promise<PluginStateFile> {
-        const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
-        if (stateResult.parseError) {
-            throw new Error(`Cannot update plugins.json while it is invalid: ${stateResult.parseError}`)
+    private hostInfo(): PluginHostInfo {
+        return {
+            runtime: 'hub',
+            hapiVersion: packageJson.version,
+            pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+            os: process.platform,
+            arch: process.arch,
+            supportedExtensionPoints: [...HUB_IMPLEMENTED_EXTENSION_POINTS]
         }
-        return stateResult.state
     }
 
     private currentNoopResult(targetId: string): PluginReloadResult {
@@ -1098,42 +690,6 @@ export class HubPluginManager {
         }
     }
 
-    private webPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
-        const declaredIds = new Set(part.contributions.map((entry) => `${entry.type}:${entry.id}`))
-        const registeredIds = new Set<string>()
-        const web = record.manifest?.contributions?.web
-        for (const contribution of part.contributions) {
-            const type = contribution.type
-            const id = contribution.id
-            const exists = type === 'settingsPanel'
-                ? Boolean(web?.settingsPanels?.some((entry) => entry.id === id))
-                : type === 'newSessionField'
-                    ? Boolean(web?.newSessionFields?.some((entry) => entry.id === id))
-                    : type === 'action'
-                        ? Boolean(web?.actions?.some((entry) => entry.id === id))
-                        : type === 'badge'
-                            ? Boolean(web?.badges?.some((entry) => entry.id === id))
-                            : type === 'composerAction'
-                                ? Boolean(web?.composerActions?.some((entry) => entry.id === id))
-                                : false
-            if (exists) {
-                registeredIds.add(`${type}:${id}`)
-            }
-        }
-        return {
-            status: record.enabled !== true
-                ? 'disabled'
-                : Array.from(declaredIds).every((id) => registeredIds.has(id))
-                    ? 'ready'
-                    : 'partial',
-            required: part.required,
-            declared: true,
-            registered: registeredIds.size === declaredIds.size,
-            active: record.enabled === true,
-            diagnostics: []
-        }
-    }
-
     private hubPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
         const pluginId = record.manifest?.id
         const target = this.targetSummary()
@@ -1212,6 +768,9 @@ export class HubPluginManager {
 
     private missingSecretDiagnostics(record: DiscoveredPluginRecord): PluginDiagnosticView[] {
         if (!record.manifest || record.enabled !== true) {
+            return []
+        }
+        if (this.activePlugins.has(record.manifest.id)) {
             return []
         }
         const target = this.targetSummary()

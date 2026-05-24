@@ -1,7 +1,4 @@
-import { createHash } from 'node:crypto'
-import { lstat, mkdir, readdir, readFile, realpath, rm, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
-import { pathToFileURL } from 'node:url'
+import { basename } from 'node:path'
 import type {
     PluginCapabilityPart,
     PluginCapabilityPartStatus,
@@ -12,9 +9,9 @@ import type {
     PluginInstallLocalRequest,
     PluginInstallPackageRequest,
     PluginInstallResult,
-    PluginLocalDirectoryEntry,
     PluginLocalDirectoryListResponse,
     PluginListItem,
+    PluginHostInfo,
     PluginReloadItem,
     PluginReloadResult,
     PluginRuntimeContributionState,
@@ -31,8 +28,6 @@ import {
     AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
     HAPI_PLUGIN_API_VERSION,
-    HAPI_PLUGIN_MANIFEST_FILE,
-    assertPluginConfigSafeForPersistence,
     builtinAgentDescriptors,
     pluginManifestRequiresRunnerInstall,
     runnerPluginConfigScope,
@@ -44,19 +39,23 @@ import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExam
 import {
     applyPluginState,
     discoverPlugins,
-    expandHomePath,
     getPluginStateFile,
-    getUserPluginsDir,
-    installPluginFromDirectory,
-    installPluginFromPackage,
     readPluginState,
-    resolvePluginScopedConfig,
-    setPluginScopedConfig,
-    writePluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import type { PluginInstallMetadata, PluginStateFile } from '@hapi/protocol/plugins'
-import { redactText, RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerAgentAdapterContribution, type RunnerAgentCapabilityProviderContribution, type RunnerPluginModule } from './runnerPluginRegistry'
+import { RUNNER_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
+import { activateRuntimeRecord, safeMtime, stableStringify } from '@hapi/protocol/plugins/runtime/activation'
+import { diagnosticView, errorMessage, reloadItemIsOk } from '@hapi/protocol/plugins/runtime/diagnostics'
+import { applyRuntimeCompatibility } from '@hapi/protocol/plugins/runtime/compatibility'
+import { redactText } from '@hapi/protocol/plugins/runtime/registryBase'
+import {
+    aggregateCapabilityStatus,
+    webContributionsForPart,
+    webPartStatus as runtimeWebPartStatus
+} from '@hapi/protocol/plugins/runtime/capabilityView'
+import { performRuntimeReload } from '@hapi/protocol/plugins/runtime/reloadController'
+import { PluginRuntimeStateController } from '@hapi/protocol/plugins/runtime/stateController'
+import { RunnerPluginRegistry, type RegisteredRuntimeContribution, type RunnerAgentAdapterContribution, type RunnerAgentCapabilityProviderContribution } from './runnerPluginRegistry'
 import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
 import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
 import type { AgentBackendFactory } from '@/agent/types'
@@ -68,6 +67,7 @@ import {
     type RegisteredRunnerContribution,
     type RunnerCommandResolverContribution,
     type RunnerEnvironmentProviderContribution,
+    type RunnerPluginDiagnosticSanitizer,
     type RunnerSpawnOptionsProviderContribution,
     type RunnerSpawnHookContribution
 } from './runnerExtensionPipeline'
@@ -94,20 +94,6 @@ type ReloadReason = 'startup' | 'manual' | 'state-change'
 type RunnerExtensionRuntimeContributionType = Exclude<RegisteredRuntimeContribution['type'], 'agentAdapter' | 'agentCapabilityProvider' | 'action'>
 const BUILTIN_AGENT_IDS = new Set(builtinAgentDescriptors().map((descriptor) => descriptor.id))
 const DEFAULT_CAPABILITY_PROVIDER_TIMEOUT_MS = 1000
-const RUNNER_SUPPORTED_EXTENSION_POINTS = [
-    'runner.spawnOptionsProvider',
-    'runner.environmentProvider',
-    'runner.commandResolver',
-    'runner.spawnHook',
-    'runner.action',
-    'agent.adapter',
-    'agent.capabilityProvider',
-    'web.settingsPanel',
-    'web.newSessionField',
-    'web.action',
-    'web.badge',
-    'web.composerAction'
-]
 
 function runtimeContributionSort<T>(
     left: RegisteredRunnerContribution<T>,
@@ -122,13 +108,6 @@ function runtimeContributionSort<T>(
 type InternalReloadResult = {
     records: DiscoveredPluginRecord[]
     items: PluginReloadItem[]
-}
-
-function errorMessage(error: unknown): string {
-    if (error instanceof Error) {
-        return error.message
-    }
-    return String(error)
 }
 
 function describeZodError(error: { issues: Array<{ path: PropertyKey[]; message: string }> }): string {
@@ -152,170 +131,27 @@ function withTimeout<T>(work: Promise<T> | T, timeoutMs: number, label: string):
     })
 }
 
-function getActivate(value: unknown): RunnerPluginModule['activate'] | null {
-    if (!value || typeof value !== 'object') {
-        return null
-    }
-    const moduleObject = value as { activate?: unknown; default?: unknown }
-    if (typeof moduleObject.activate === 'function') {
-        return moduleObject.activate as RunnerPluginModule['activate']
-    }
-    if (typeof moduleObject.default === 'function') {
-        return moduleObject.default as RunnerPluginModule['activate']
-    }
-    if (moduleObject.default && typeof moduleObject.default === 'object') {
-        const defaultObject = moduleObject.default as { activate?: unknown }
-        if (typeof defaultObject.activate === 'function') {
-            return defaultObject.activate as RunnerPluginModule['activate']
-        }
-    }
-    return null
-}
-
-function stableStringify(value: unknown): string {
-    if (Array.isArray(value)) {
-        return `[${value.map((entry) => stableStringify(entry)).join(',')}]`
-    }
-    if (value && typeof value === 'object') {
-        return `{${Object.entries(value as Record<string, unknown>)
-            .sort(([left], [right]) => left.localeCompare(right))
-            .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
-            .join(',')}}`
-    }
-    return JSON.stringify(value)
-}
-
-async function materializeReloadImportPath(realPath: string, pluginId: string, signature: string): Promise<string> {
-    const hash = createHash('sha256').update(signature).digest('hex').slice(0, 16)
-    const safePluginId = pluginId.replace(/[^A-Za-z0-9._-]/g, '_')
-    const shadowPath = `${realPath.slice(0, realPath.lastIndexOf('.')) || realPath}.hapi-runner-reload-${safePluginId}-${hash}.mjs`
-    await mkdir(dirname(shadowPath), { recursive: true })
-    await writeFile(shadowPath, await readFile(realPath, 'utf8'))
-    return shadowPath
-}
-
-async function safeMtime(path: string): Promise<number> {
-    try {
-        return (await stat(path)).mtimeMs
-    } catch {
-        return 0
-    }
-}
-
-async function safePathExists(path: string): Promise<boolean> {
-    try {
-        await stat(path)
-        return true
-    } catch {
-        return false
-    }
-}
-
-function sortLocalDirectoryEntries<T extends { name: string; type: string }>(entries: T[]): T[] {
-    return entries.sort((left, right) => {
-        if (left.type === 'directory' && right.type !== 'directory') return -1
-        if (left.type !== 'directory' && right.type === 'directory') return 1
-        return left.name.localeCompare(right.name)
-    })
-}
-
 function pluginDisplayId(record: DiscoveredPluginRecord): string {
     return record.manifest?.id ?? basename(record.rootPath)
 }
 
-function diagnosticView(pluginId: string | undefined, diagnostic: { severity: 'info' | 'warning' | 'error'; code: string; message: string; path?: string }): PluginDiagnosticView {
-    return {
-        severity: diagnostic.severity,
-        code: diagnostic.code,
-        message: diagnostic.message,
-        ...(diagnostic.path ? { path: diagnostic.path } : {}),
-        ...(pluginId ? { pluginId } : {})
-    }
-}
-
-function reloadItemIsOk(item: PluginReloadItem): boolean {
-    if (item.action === 'failed' || item.action === 'kept-previous') {
-        return false
-    }
-    return !['invalid', 'failed', 'reload-failed', 'blocked', 'incompatible'].includes(item.status)
-}
-
-function aggregateCapabilityStatus(parts: {
-    web?: PluginCapabilityPartStatus
-    hub?: PluginCapabilityPartStatus
-    runner?: PluginCapabilityPartStatus
-}): PluginCapabilityView['status'] {
-    const required = Object.values(parts).filter((part) => part.required !== false)
-    if (required.length === 0) {
-        return 'ready'
-    }
-    const priority: PluginCapabilityView['status'][] = [
-        'disabled',
-        'failed',
-        'incompatible',
-        'offline',
-        'missing-target',
-        'partial'
-    ]
-    for (const status of priority) {
-        if (required.some((part) => part.status === status)) {
-            return status
-        }
-    }
-    return required.every((part) => part.status === 'ready') ? 'ready' : 'partial'
-}
-
-function webContributionsForPart(
-    record: DiscoveredPluginRecord,
-    part: PluginCapabilityPart
-): NonNullable<PluginCapabilityView['web']> | undefined {
-    const web = record.manifest?.contributions?.web
-    if (!web) {
-        return undefined
-    }
-
-    const result: NonNullable<PluginCapabilityView['web']> = {}
-    for (const contribution of part.contributions) {
-        if (contribution.type === 'settingsPanel') {
-            const match = web.settingsPanels?.find((entry) => entry.id === contribution.id)
-            if (match) result.settingsPanels = [...(result.settingsPanels ?? []), match]
-        } else if (contribution.type === 'newSessionField') {
-            const match = web.newSessionFields?.find((entry) => entry.id === contribution.id)
-            if (match) result.newSessionFields = [...(result.newSessionFields ?? []), match]
-        } else if (contribution.type === 'action') {
-            const match = web.actions?.find((entry) => entry.id === contribution.id)
-            if (match) result.actions = [...(result.actions ?? []), match]
-        } else if (contribution.type === 'badge') {
-            const match = web.badges?.find((entry) => entry.id === contribution.id)
-            if (match) result.badges = [...(result.badges ?? []), match]
-        } else if (contribution.type === 'composerAction') {
-            const match = web.composerActions?.find((entry) => entry.id === contribution.id)
-            if (match) result.composerActions = [...(result.composerActions ?? []), match]
-        }
-    }
-
-    return Object.keys(result).length > 0 ? result : undefined
-}
-
-function isPathInside(parentPath: string, childPath: string): boolean {
-    const rel = relative(parentPath, childPath)
-    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
-}
-
-function assertDiscoveredRecordCanBeEnabled(
-    record: DiscoveredPluginRecord,
-    id: string
-): asserts record is DiscoveredPluginRecord & { manifest: NonNullable<DiscoveredPluginRecord['manifest']> } {
-    if (!record.manifest) {
-        throw new Error(`Plugin ${id} was not found.`)
-    }
-    if (record.status !== 'validated') {
-        throw new Error(`Plugin ${record.manifest.id} cannot be enabled while status is ${record.status}.`)
-    }
+function mergeContributionDetails<TManifest extends { id: string }, TActive extends { id: string }>(
+    manifestEntries: TManifest[] | undefined,
+    activeEntries: TActive[] | undefined
+): Array<TManifest | (TManifest & TActive) | TActive> {
+    const activeById = new Map((activeEntries ?? []).map((entry) => [entry.id, entry]))
+    const merged: Array<TManifest | (TManifest & TActive) | TActive> = (manifestEntries ?? []).map((entry) => ({
+        ...entry,
+        ...(activeById.get(entry.id) ?? {})
+    }))
+    const declaredIds = new Set((manifestEntries ?? []).map((entry) => entry.id))
+    merged.push(...(activeEntries ?? []).filter((entry) => !declaredIds.has(entry.id)))
+    return merged
 }
 
 export class RunnerPluginManager {
     private readonly activePlugins = new Map<string, ActiveRunnerPluginInstance>()
+    private readonly stateController: PluginRuntimeStateController
     private records: DiscoveredPluginRecord[] = []
     private managerDiagnostics: PluginDiagnosticView[] = []
     private capabilitySnapshots: AgentCapabilityProviderSnapshot[] = []
@@ -324,6 +160,12 @@ export class RunnerPluginManager {
     private lastInventoryUpdatedAt = Date.now()
 
     constructor(private readonly options: RunnerPluginManagerOptions) {
+        this.stateController = new PluginRuntimeStateController({
+            hapiHome: options.hapiHome,
+            configScope: (pluginId) => runnerPluginConfigScope(options.machineId, pluginId),
+            defaultEnabledPluginIds: () => this.defaultEnabledPluginIds(),
+            displayId: pluginDisplayId
+        })
     }
 
     async start(): Promise<PluginReloadResult> {
@@ -357,14 +199,7 @@ export class RunnerPluginManager {
         return {
             machineId: this.options.machineId,
             updatedAt: this.lastInventoryUpdatedAt,
-            hostInfo: {
-                runtime: 'runner',
-                hapiVersion: packageJson.version,
-                pluginApiVersion: HAPI_PLUGIN_API_VERSION,
-                os: process.platform,
-                arch: process.arch,
-                supportedExtensionPoints: RUNNER_SUPPORTED_EXTENSION_POINTS
-            },
+            hostInfo: this.hostInfo(),
             plugins: this.listPlugins(),
             diagnostics: this.getDiagnostics(),
             extensions: {
@@ -440,7 +275,7 @@ export class RunnerPluginManager {
             .flatMap((record) => record.manifest!.capabilities!.map((capability): PluginCapabilityView => {
                 const pluginId = record.manifest!.id
                 const parts = {
-                    ...(capability.parts.web ? { web: this.webPartStatus(record, capability.parts.web) } : {}),
+                    ...(capability.parts.web ? { web: runtimeWebPartStatus(record, capability.parts.web) } : {}),
                     ...(capability.parts.hub ? {
                         hub: {
                             status: 'missing-target' as const,
@@ -485,7 +320,7 @@ export class RunnerPluginManager {
             }
         }
         try {
-            return await action.contribution.run({
+            const result = await action.contribution.run({
                 namespace: args.namespace,
                 machineId: this.options.machineId,
                 sessionId: args.sessionId,
@@ -494,11 +329,14 @@ export class RunnerPluginManager {
                 capabilityId: args.capabilityId,
                 actionId: args.actionId
             })
+            return result.ok === false
+                ? { ...result, message: this.sanitizeRuntimeDiagnostic(args.pluginId, result.message) }
+                : result
         } catch (error) {
             return {
                 ok: false,
                 code: 'plugin-action-failed',
-                message: errorMessage(error)
+                message: this.sanitizeRuntimeDiagnostic(args.pluginId, error)
             }
         }
     }
@@ -576,13 +414,14 @@ export class RunnerPluginManager {
             }
             return parsed.data
         } catch (error) {
-            this.recordCapabilityDiagnostics([{
+            const message = this.sanitizeRuntimeDiagnostic(provider.pluginId, error)
+            this.recordDiagnostics([{
                 pluginId: provider.pluginId,
                 severity: 'warning',
                 code: 'agent-history-import-failed',
-                message: `[runner-plugin:${this.options.machineId}:${provider.pluginId}] ${provider.id} history importer failed: ${errorMessage(error)}`
+                message: `[runner-plugin:${this.options.machineId}:${provider.pluginId}] ${provider.id} history importer failed: ${message}`
             }])
-            throw error
+            throw new Error(message)
         }
     }
 
@@ -607,9 +446,10 @@ export class RunnerPluginManager {
             },
             environmentProviders: this.collectEnvironmentProviders(),
             commandResolvers: this.collectCommandResolvers(),
-            spawnHooks: this.collectSpawnHooks()
+            spawnHooks: this.collectSpawnHooks(),
+            sanitizeDiagnostic: this.runtimeDiagnosticSanitizer()
         })
-        this.recordSpawnDiagnostics([
+        this.recordDiagnostics([
             ...result.diagnostics,
             ...result.audit.map((entry) => ({
                 severity: 'info' as const,
@@ -631,9 +471,10 @@ export class RunnerPluginManager {
             options: args.options,
             agent: args.agent,
             cwd: args.cwd,
-            spawnOptionsProviders: this.collectSpawnOptionsProviders()
+            spawnOptionsProviders: this.collectSpawnOptionsProviders(),
+            sanitizeDiagnostic: this.runtimeDiagnosticSanitizer()
         })
-        this.recordSpawnDiagnostics([
+        this.recordDiagnostics([
             ...result.diagnostics,
             ...result.audit.map((entry) => ({
                 severity: 'info' as const,
@@ -650,7 +491,8 @@ export class RunnerPluginManager {
             baseContext: args.context,
             pid: args.pid,
             hooks: this.collectSpawnHooks(),
-            onDiagnostic: (diagnostic) => this.recordSpawnDiagnostics([diagnostic])
+            onDiagnostic: (diagnostic) => this.recordDiagnostics([diagnostic]),
+            sanitizeDiagnostic: this.runtimeDiagnosticSanitizer()
         })
     }
 
@@ -661,7 +503,8 @@ export class RunnerPluginManager {
             exitCode: args.exitCode,
             signal: args.signal,
             hooks: this.collectSpawnHooks(),
-            onDiagnostic: (diagnostic) => this.recordSpawnDiagnostics([diagnostic])
+            onDiagnostic: (diagnostic) => this.recordDiagnostics([diagnostic]),
+            sanitizeDiagnostic: this.runtimeDiagnosticSanitizer()
         })
     }
 
@@ -681,57 +524,23 @@ export class RunnerPluginManager {
     }
 
     async enablePlugin(id: string, config?: Record<string, unknown>, shouldReload = true): Promise<PluginReloadResult> {
-        const state = await this.readWritableState()
-        const record = await this.findDiscoveredRecord(id)
-        if (!record) throw new Error(`Plugin ${id} was not found.`)
-        assertDiscoveredRecordCanBeEnabled(record, id)
-        assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
-        const previous = state.enabled[record.manifest.id]
-        state.enabled[record.manifest.id] = config
-            ? { ...setPluginScopedConfig(previous, runnerPluginConfigScope(this.options.machineId, record.manifest.id), config), enabled: true }
-            : { ...previous, enabled: true }
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
-        return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
+        const pluginId = await this.stateController.enablePluginState(id, config, (candidate) => this.findDiscoveredRecord(candidate))
+        return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
     }
 
     async disablePlugin(id: string, shouldReload = true): Promise<PluginReloadResult> {
-        const state = await this.readWritableState()
-        const record = await this.findDiscoveredRecord(id)
-        const pluginId = record?.manifest?.id ?? id
-        const previous = state.enabled[pluginId]
-        state.enabled[pluginId] = {
-            ...previous,
-            enabled: false,
-        }
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
+        const pluginId = await this.stateController.disablePluginState(id, (candidate) => this.findDiscoveredRecord(candidate))
         return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
     }
 
     async updatePluginConfig(id: string, config: Record<string, unknown>, shouldReload = true): Promise<PluginReloadResult> {
-        const state = await this.readWritableState()
-        const record = await this.findDiscoveredRecord(id)
-        if (!record) throw new Error(`Plugin ${id} was not found.`)
-        assertDiscoveredRecordCanBeEnabled(record, id)
-        assertPluginConfigSafeForPersistence(config, record.manifest.permissions?.secrets ?? [], record.manifest.id)
-        const previous = state.enabled[record.manifest.id]
-        state.enabled[record.manifest.id] = setPluginScopedConfig(previous, runnerPluginConfigScope(this.options.machineId, record.manifest.id), config)
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
-        return shouldReload ? await this.reload(record.manifest.id, 'state-change') : this.currentNoopResult(record.manifest.id)
+        const pluginId = await this.stateController.updatePluginConfigState(id, config, (candidate) => this.findDiscoveredRecord(candidate))
+        return shouldReload ? await this.reload(pluginId, 'state-change') : this.currentNoopResult(pluginId)
     }
 
     async installLocalPlugin(options: PluginInstallLocalRequest): Promise<PluginInstallResult> {
-        const install = await installPluginFromDirectory({
-            hapiHome: this.options.hapiHome,
-            sourcePath: options.sourcePath,
-            overwrite: options.overwrite === true
-        })
+        const install = await this.stateController.installLocalPlugin(options, 'runner-local-path')
         const pluginId = install.record.manifest!.id
-        await this.recordInstallState(pluginId, {
-            sourceType: 'runner-local-path',
-            sourcePath: install.sourcePath,
-            version: install.record.manifest!.version
-        }, options.enable === true)
-
         return await this.buildInstallResult({
             action: install.action,
             pluginId,
@@ -744,34 +553,8 @@ export class RunnerPluginManager {
     }
 
     async installPluginPackage(options: PluginInstallPackageRequest): Promise<PluginInstallResult> {
-        const install = await installPluginFromPackage({
-            hapiHome: this.options.hapiHome,
-            filename: options.filename,
-            contentBase64: options.contentBase64,
-            checksum: options.checksum,
-            format: options.format,
-            manifest: options.manifest,
-            overwrite: options.overwrite === true
-        })
+        const install = await this.stateController.installPluginPackage(options)
         const pluginId = install.record.manifest!.id
-        const marketplaceInstall = options.installSource?.type === 'marketplace'
-        await this.recordInstallState(pluginId, {
-            sourceType: marketplaceInstall ? 'marketplace' : 'uploaded-package',
-            checksum: install.checksum,
-            packageFormat: install.packageFormat,
-            version: install.record.manifest!.version,
-            ...(marketplaceInstall ? {
-                marketplace: {
-                    sourceUrl: options.installSource!.sourceUrl,
-                    pluginId: options.installSource!.pluginId,
-                    repo: options.installSource!.repo,
-                    version: options.installSource!.version,
-                    assetUrl: options.installSource!.assetUrl,
-                    checksum: install.checksum
-                }
-            } : {})
-        }, options.enable === true)
-
         return await this.buildInstallResult({
             action: install.action,
             pluginId,
@@ -784,42 +567,7 @@ export class RunnerPluginManager {
     }
 
     async listLocalDirectory(path?: string): Promise<PluginLocalDirectoryListResponse> {
-        const requestedPath = path?.trim() ? path.trim() : this.options.hapiHome
-        const resolvedPath = resolve(expandHomePath(requestedPath))
-        try {
-            const stats = await lstat(resolvedPath)
-            if (!stats.isDirectory()) {
-                return { success: false, path: resolvedPath, error: `Path is not a directory: ${resolvedPath}` }
-            }
-            const [entries, hasPluginManifest] = await Promise.all([
-                readdir(resolvedPath, { withFileTypes: true }),
-                safePathExists(join(resolvedPath, HAPI_PLUGIN_MANIFEST_FILE))
-            ])
-            const mapped = await Promise.all(entries.map(async (entry): Promise<PluginLocalDirectoryEntry> => {
-                const entryPath = join(resolvedPath, entry.name)
-                const entryStats = await lstat(entryPath).catch(() => null)
-                const type: PluginLocalDirectoryEntry['type'] = entry.isDirectory()
-                    ? 'directory'
-                    : entry.isFile()
-                        ? 'file'
-                        : 'other'
-                return {
-                    name: entry.name,
-                    type,
-                    ...(entryStats ? { size: entryStats.size, modified: entryStats.mtimeMs } : {}),
-                    ...(type === 'directory' ? { hasPluginManifest: await safePathExists(join(entryPath, HAPI_PLUGIN_MANIFEST_FILE)) } : {})
-                }
-            }))
-            return {
-                success: true,
-                path: resolvedPath,
-                parentPath: dirname(resolvedPath),
-                hasPluginManifest,
-                entries: sortLocalDirectoryEntries(mapped)
-            }
-        } catch (error) {
-            return { success: false, path: resolvedPath, error: error instanceof Error ? error.message : String(error) }
-        }
+        return await this.stateController.listLocalDirectory(path)
     }
 
     installPrepareUnsupported(): RunnerPluginUnsupportedInstallResult {
@@ -835,41 +583,16 @@ export class RunnerPluginManager {
     }
 
     async deletePlugin(id: string, shouldReload = true): Promise<PluginDeleteResult> {
-        const record = await this.findDiscoveredRecord(id)
-        if (!record) {
-            throw new Error(`Plugin ${id} was not found.`)
-        }
-        if (record.source !== 'user-home') {
-            throw new Error(`Plugin ${id} cannot be deleted because it is from ${record.source}. Only user-home plugins can be deleted.`)
-        }
-
-        const pluginId = pluginDisplayId(record)
-        const statePluginId = record.status === 'blocked' ? undefined : record.manifest?.id
-        const userPluginsDir = getUserPluginsDir(this.options.hapiHome)
-        const [userPluginsRealPath, rootRealPath] = await Promise.all([
-            realpath(userPluginsDir),
-            realpath(record.rootPath)
-        ])
-        if (!isPathInside(userPluginsRealPath, rootRealPath)) {
-            throw new Error(`Plugin ${pluginId} cannot be deleted because its path is outside the user plugin directory.`)
-        }
-
-        const nextState = statePluginId ? await this.readWritableState() : null
-        if (nextState && statePluginId) {
-            delete nextState.enabled[statePluginId]
-        }
-        if (nextState) {
-            await writePluginState(getPluginStateFile(this.options.hapiHome), nextState)
-        }
-        if (statePluginId) {
-            await this.disposeActive(statePluginId)
-        }
-        await rm(rootRealPath, { recursive: true, force: true })
-        const reloadResult = shouldReload ? await this.reload(pluginId, 'state-change') : undefined
+        const deleted = await this.stateController.deleteUserHomePlugin(
+            id,
+            (candidate) => this.findDiscoveredRecord(candidate),
+            (pluginId) => this.disposeActive(pluginId)
+        )
+        const reloadResult = shouldReload ? await this.reload(deleted.pluginId, 'state-change') : undefined
         return {
             ok: reloadResult?.ok ?? true,
-            pluginId,
-            rootPath: rootRealPath,
+            pluginId: deleted.pluginId,
+            rootPath: deleted.rootPath,
             deleted: true,
             target: this.targetSummary(),
             ...(reloadResult ? { reload: reloadResult } : {}),
@@ -899,7 +622,7 @@ export class RunnerPluginManager {
         const managerDiagnostics: PluginDiagnosticView[] = []
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
-        const records = this.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
+        const records = this.stateController.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
             failClosed: stateResult.failClosed,
             defaultEnabledPluginIds: this.defaultEnabledPluginIds()
         }), stateResult.state)
@@ -912,112 +635,20 @@ export class RunnerPluginManager {
             })
         }
 
-        const seenIds = new Set(records.filter((record) => record.manifest).map((record) => record.manifest!.id))
-        for (const [pluginId, instance] of Array.from(this.activePlugins.entries())) {
-            if (targetId && pluginId !== targetId) {
-                continue
-            }
-            if (!seenIds.has(pluginId)) {
-                await this.disposeActive(pluginId)
-                items.push({
-                    id: pluginId,
-                    action: 'deactivated',
-                    status: 'disabled',
-                    message: 'Plugin is no longer discovered.',
-                    diagnostics: []
-                })
-            } else if (!records.some((record) => record.manifest?.id === pluginId && record.status === 'enabled' && record.manifest.runtimes?.runner)) {
-                await this.disposeActive(pluginId)
-                items.push({
-                    id: pluginId,
-                    action: 'deactivated',
-                    status: 'disabled',
-                    message: 'Plugin is no longer enabled for the Runner runtime.',
-                    diagnostics: []
-                })
-            } else {
-                instance.record = records.find((record) => record.manifest?.id === pluginId) ?? instance.record
-            }
-        }
-
-        for (const record of records) {
-            const id = pluginDisplayId(record)
-            if (targetId && id !== targetId && record.manifest?.id !== targetId) {
-                continue
-            }
-
-            if (!record.manifest || record.status !== 'enabled' || !record.manifest.runtimes?.runner) {
-                if (!items.some((item) => item.id === id)) {
-                    items.push({
-                        id,
-                        action: 'unchanged',
-                        status: record.status,
-                        diagnostics: record.diagnostics.map((entry) => diagnosticView(id, entry))
-                    })
-                }
-                continue
-            }
-
-            const pluginId = record.manifest.id
-            const signature = await this.computeSignature(record)
-            const existing = this.activePlugins.get(pluginId)
-            if (existing && existing.signature === signature) {
-                record.status = 'active'
-                existing.record = record
-                items.push({ id: pluginId, action: 'unchanged', status: 'active', diagnostics: [] })
-                continue
-            }
-
-            const activation = await this.activateRecord(record, signature)
-            if (activation.ok) {
-                if (this.disposed) {
-                    await activation.instance.registry.dispose()
-                    items.push({
-                        id: pluginId,
-                        action: 'deactivated',
-                        status: 'disabled',
-                        message: 'Runner plugin manager disposed during activation.',
-                        diagnostics: []
-                    })
-                    continue
-                }
-                const action = existing ? 'reloaded' : 'activated'
-                this.activePlugins.set(pluginId, activation.instance)
-                record.status = 'active'
-                if (existing) {
-                    await existing.registry.dispose()
-                }
-                items.push({ id: pluginId, action, status: 'active', diagnostics: [] })
-                continue
-            }
-
-            record.diagnostics.push(...activation.diagnostics.map((diagnostic) => ({
-                severity: diagnostic.severity,
-                code: diagnostic.code,
-                message: diagnostic.message,
-                ...(diagnostic.path ? { path: diagnostic.path } : {})
-            })))
-            if (existing) {
-                record.status = 'reload-failed'
-                existing.record = record
-                items.push({
-                    id: pluginId,
-                    action: 'kept-previous',
-                    status: 'reload-failed',
-                    message: activation.message,
-                    diagnostics: activation.diagnostics
-                })
-            } else {
-                record.status = 'failed'
-                items.push({
-                    id: pluginId,
-                    action: 'failed',
-                    status: 'failed',
-                    message: activation.message,
-                    diagnostics: activation.diagnostics
-                })
-            }
-        }
+        items.push(...await performRuntimeReload({
+            records,
+            activePlugins: this.activePlugins,
+            targetId,
+            runtime: 'runner',
+            runtimeDisplayName: 'Runner',
+            pluginDisplayId,
+            computeSignature: (record) => this.computeSignature(record),
+            activateRecord: (record, signature) => this.activateRecord(record, signature),
+            disposeActive: (pluginId) => this.disposeActive(pluginId),
+            disposeInstance: (instance) => instance.registry.dispose(),
+            shouldDiscardActivatedInstance: () => this.disposed,
+            discardedActivationMessage: 'Runner plugin manager disposed during activation.'
+        }))
 
         const capabilityResult = await this.collectAgentCapabilitySnapshots()
         managerDiagnostics.push(...capabilityResult.diagnostics)
@@ -1028,93 +659,29 @@ export class RunnerPluginManager {
         return { records, items }
     }
 
-    private applyScopedRuntimeConfig(records: DiscoveredPluginRecord[], state: PluginStateFile): DiscoveredPluginRecord[] {
-        return records.map((record) => {
-            if (!record.manifest || record.status === 'blocked') {
-                return record
-            }
-            const resolved = resolvePluginScopedConfig(state.enabled[record.manifest.id], runnerPluginConfigScope(this.options.machineId, record.manifest.id))
-            const baseRecord = { ...record }
-            delete baseRecord.config
-            delete baseRecord.configUpdatedAt
-            delete baseRecord.configSource
-            return {
-                ...baseRecord,
-                ...(resolved.config ? { config: resolved.config } : {}),
-                ...(resolved.updatedAt ? { configUpdatedAt: resolved.updatedAt } : {}),
-                configSource: resolved.source
-            }
-        })
-    }
-
-    private async activateRecord(record: DiscoveredPluginRecord, signature: string): Promise<{
-        ok: true
-        instance: ActiveRunnerPluginInstance
-    } | {
-        ok: false
-        message: string
-        diagnostics: PluginDiagnosticView[]
-    }> {
-        const pluginId = record.manifest!.id
-        const runnerEntry = record.runtimeEntryPaths.find((entry) => entry.runtime === 'runner')
-        if (!runnerEntry) {
-            return {
-                ok: false,
-                message: 'Runner runtime entry is missing.',
-                diagnostics: [{ pluginId, severity: 'error', code: 'missing-runner-entry', message: 'Runner runtime entry is missing.', path: record.manifestPath }]
-            }
-        }
-
-        const declaredSecrets = record.manifest?.permissions?.secrets ?? []
-        const registry = new RunnerPluginRegistry(this.options.machineId)
-        try {
-            const importPath = await materializeReloadImportPath(runnerEntry.realPath, pluginId, signature)
-            const importUrl = `${pathToFileURL(importPath).href}?hapiRunnerPlugin=${encodeURIComponent(pluginId)}&signature=${encodeURIComponent(signature)}`
-            const importedModule = await import(importUrl)
-            const activate = getActivate(importedModule)
-            if (!activate) {
-                return {
-                    ok: false,
-                    message: 'Runner runtime entry must export activate(ctx).',
-                    diagnostics: [{ pluginId, severity: 'error', code: 'invalid-runner-entry', message: 'Runner runtime entry must export activate(ctx).', path: record.manifestPath }]
-                }
-            }
-
-            const disposableStart = registry.getDisposableCount()
-            const activation = registry.createContext({
+    private async activateRecord(record: DiscoveredPluginRecord, signature: string) {
+        return await activateRuntimeRecord({
+            record,
+            signature,
+            runtime: 'runner',
+            runtimeDisplayName: 'Runner',
+            missingEntryCode: 'missing-runner-entry',
+            invalidEntryCode: 'invalid-runner-entry',
+            activationFailedCode: 'runner-plugin-activate-failed',
+            activationFailureLabel: 'runner plugin',
+            importQueryName: 'hapiRunnerPlugin',
+            reloadMarker: 'hapi-runner-reload',
+            reloadStrategy: 'entry-suffix',
+            env: this.options.env,
+            createRegistry: () => new RunnerPluginRegistry(this.options.machineId),
+            createInstance: ({ pluginId, registry, record: activatedRecord, signature: activatedSignature, loadedAt }) => ({
                 pluginId,
-                config: record.config,
-                declaredSecrets,
-                env: this.options.env
+                registry,
+                record: activatedRecord,
+                signature: activatedSignature,
+                loadedAt
             })
-            try {
-                await activate(activation.ctx)
-                activation.close()
-            } catch (error) {
-                activation.close()
-                await registry.disposeFrom(disposableStart)
-                throw error
-            }
-
-            return {
-                ok: true,
-                instance: {
-                    pluginId,
-                    registry,
-                    record,
-                    signature,
-                    loadedAt: Date.now()
-                }
-            }
-        } catch (error) {
-            await registry.dispose().catch(() => undefined)
-            const message = redactText(`Failed to import or activate runner plugin: ${errorMessage(error)}`, declaredSecrets, this.options.env)
-            return {
-                ok: false,
-                message,
-                diagnostics: [{ pluginId, severity: 'error', code: 'runner-plugin-activate-failed', message, path: record.manifestPath }]
-            }
-        }
+        })
     }
 
     private async computeSignature(record: DiscoveredPluginRecord): Promise<string> {
@@ -1155,7 +722,11 @@ export class RunnerPluginManager {
             envPluginDirs: this.options.envPluginDirs ?? this.options.env?.HAPI_PLUGIN_DIRS,
             bundledPluginDirs
         })
-        return records.filter((record) => !record.manifest || record.source !== 'bundled' || pluginManifestRequiresRunnerInstall(record.manifest))
+        return applyRuntimeCompatibility(
+            records.filter((record) => !record.manifest || record.source !== 'bundled' || pluginManifestRequiresRunnerInstall(record.manifest)),
+            'runner',
+            this.hostInfo()
+        )
     }
 
     private defaultEnabledPluginIds(): string[] {
@@ -1164,30 +735,15 @@ export class RunnerPluginManager {
             : []
     }
 
-    private async readWritableState(): Promise<PluginStateFile> {
-        const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
-        if (stateResult.parseError) {
-            throw new Error(`Cannot update plugins.json while it is invalid: ${stateResult.parseError}`)
+    private hostInfo(): PluginHostInfo {
+        return {
+            runtime: 'runner',
+            hapiVersion: packageJson.version,
+            pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+            os: process.platform,
+            arch: process.arch,
+            supportedExtensionPoints: [...RUNNER_IMPLEMENTED_EXTENSION_POINTS]
         }
-        return stateResult.state
-    }
-
-    private async recordInstallState(pluginId: string, metadata: Omit<PluginInstallMetadata, 'installedAt' | 'updatedAt'>, enable: boolean): Promise<void> {
-        const state = await this.readWritableState()
-        const previous = state.enabled[pluginId]
-        const now = Date.now()
-        state.enabled[pluginId] = {
-            enabled: enable ? true : previous?.enabled === true,
-            ...(previous?.config ? { config: previous.config } : {}),
-            ...(previous?.configUpdatedAt ? { configUpdatedAt: previous.configUpdatedAt } : {}),
-            ...(previous?.scopedConfig ? { scopedConfig: previous.scopedConfig } : {}),
-            install: {
-                ...metadata,
-                installedAt: previous?.install?.installedAt ?? now,
-                updatedAt: now
-            }
-        }
-        await writePluginState(getPluginStateFile(this.options.hapiHome), state)
     }
 
     private async buildInstallResult(options: {
@@ -1236,18 +792,11 @@ export class RunnerPluginManager {
             active: true,
             stale: false,
             updatedAt: this.lastInventoryUpdatedAt,
-            hostInfo: {
-                runtime: 'runner',
-                hapiVersion: packageJson.version,
-                pluginApiVersion: HAPI_PLUGIN_API_VERSION,
-                os: process.platform,
-                arch: process.arch,
-                supportedExtensionPoints: RUNNER_SUPPORTED_EXTENSION_POINTS
-            }
+            hostInfo: this.hostInfo()
         }
     }
 
-    private recordSpawnDiagnostics(diagnostics: PluginDiagnosticView[]): void {
+    private recordDiagnostics(diagnostics: PluginDiagnosticView[]): void {
         for (const diagnostic of diagnostics) {
             this.managerDiagnostics.push({
                 severity: diagnostic.severity,
@@ -1265,22 +814,15 @@ export class RunnerPluginManager {
         }
     }
 
-    private recordCapabilityDiagnostics(diagnostics: PluginDiagnosticView[]): void {
-        for (const diagnostic of diagnostics) {
-            this.managerDiagnostics.push({
-                severity: diagnostic.severity,
-                code: diagnostic.code,
-                message: diagnostic.message,
-                ...(diagnostic.pluginId ? { pluginId: diagnostic.pluginId } : {}),
-                ...(diagnostic.path ? { path: diagnostic.path } : {})
-            })
-        }
-        if (this.managerDiagnostics.length > 500) {
-            this.managerDiagnostics = this.managerDiagnostics.slice(-500)
-        }
-        if (diagnostics.length > 0) {
-            this.lastInventoryUpdatedAt = Date.now()
-        }
+    private runtimeDiagnosticSanitizer(): RunnerPluginDiagnosticSanitizer {
+        return (pluginId, value) => this.sanitizeRuntimeDiagnostic(pluginId, value)
+    }
+
+    private sanitizeRuntimeDiagnostic(pluginId: string, value: unknown): string {
+        const declaredSecrets = this.activePlugins.get(pluginId)?.record.manifest?.permissions?.secrets
+            ?? this.records.find((record) => record.manifest?.id === pluginId)?.manifest?.permissions?.secrets
+            ?? []
+        return redactText(errorMessage(value), declaredSecrets, this.options.env ?? process.env)
     }
 
     private async collectAgentCapabilitySnapshots(): Promise<{
@@ -1322,7 +864,7 @@ export class RunnerPluginManager {
                     throw new Error(`capability provider returned invalid descriptors: ${describeZodError(parsed.error)}`)
                 }
 
-                const sanitized = this.sanitizeCapabilityProviderResult(entry, parsed.data, ownedDescriptor, diagnostics)
+                const sanitized = this.sanitizeCapabilityProviderResult(entry, parsed.data, ownedDescriptor)
                 const providerDiagnostics = sanitized.diagnostics ?? []
                 snapshots.push(AgentCapabilityProviderSnapshotSchema.parse({
                     agentId: entry.contribution.agentId,
@@ -1340,11 +882,12 @@ export class RunnerPluginManager {
                     ...(diagnostic.path ? { path: diagnostic.path } : {})
                 })))
             } catch (error) {
+                const safeMessage = this.sanitizeRuntimeDiagnostic(entry.pluginId, error)
                 const diagnostic = {
                     pluginId: entry.pluginId,
                     severity: 'warning' as const,
                     code: 'agent-capability-provider-failed',
-                    message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${label} capability provider failed: ${errorMessage(error)}`
+                    message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${label} capability provider failed: ${safeMessage}`
                 }
                 diagnostics.push(diagnostic)
                 snapshots.push(AgentCapabilityProviderSnapshotSchema.parse({
@@ -1376,21 +919,17 @@ export class RunnerPluginManager {
     private sanitizeCapabilityProviderResult(
         entry: RegisteredRunnerContribution<RunnerAgentCapabilityProviderContribution>,
         result: AgentCapabilityProviderResult,
-        ownerDescriptor: AgentDescriptor,
-        diagnostics: PluginDiagnosticView[]
+        ownerDescriptor: AgentDescriptor
     ): AgentCapabilityProviderResult {
-        const providerDiagnostics = [...(result.diagnostics ?? [])]
+        const providerDiagnostics = (result.diagnostics ?? []).map((diagnostic) => ({
+            ...diagnostic,
+            message: this.sanitizeRuntimeDiagnostic(entry.pluginId, diagnostic.message)
+        }))
         const addDiagnostic = (code: string, message: string) => {
-            const diagnostic = {
+            providerDiagnostics.push({
                 severity: 'warning' as const,
                 code,
-                message
-            }
-            providerDiagnostics.push(diagnostic)
-            diagnostics.push({
-                pluginId: entry.pluginId,
-                ...diagnostic,
-                message: `[runner-plugin:${this.options.machineId}:${entry.pluginId}] ${message}`
+                message: this.sanitizeRuntimeDiagnostic(entry.pluginId, message)
             })
         }
 
@@ -1485,11 +1024,17 @@ export class RunnerPluginManager {
             return entries.map((entry) => ({
                 pluginId: entry.pluginId,
                 id: entry.id,
+                order: entry.order,
                 type,
                 priority: entry.priority,
                 active: true
             }))
-        })
+        }).sort((left, right) =>
+            left.priority - right.priority
+            || left.pluginId.localeCompare(right.pluginId)
+            || left.id.localeCompare(right.id)
+            || left.order - right.order
+        ).map(({ order: _order, ...entry }) => entry)
     }
 
     private collectWebContributions(): PluginWebContributionView[] {
@@ -1501,42 +1046,6 @@ export class RunnerPluginManager {
                 target: this.targetSummary().scope,
                 contributions: record.manifest!.contributions!.web!
             }))
-    }
-
-    private webPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
-        const declaredIds = new Set(part.contributions.map((entry) => `${entry.type}:${entry.id}`))
-        const registeredIds = new Set<string>()
-        const web = record.manifest?.contributions?.web
-        for (const contribution of part.contributions) {
-            const type = contribution.type
-            const id = contribution.id
-            const exists = type === 'settingsPanel'
-                ? Boolean(web?.settingsPanels?.some((entry) => entry.id === id))
-                : type === 'newSessionField'
-                    ? Boolean(web?.newSessionFields?.some((entry) => entry.id === id))
-                    : type === 'action'
-                        ? Boolean(web?.actions?.some((entry) => entry.id === id))
-                        : type === 'badge'
-                            ? Boolean(web?.badges?.some((entry) => entry.id === id))
-                            : type === 'composerAction'
-                                ? Boolean(web?.composerActions?.some((entry) => entry.id === id))
-                                : false
-            if (exists) {
-                registeredIds.add(`${type}:${id}`)
-            }
-        }
-        return {
-            status: record.enabled !== true
-                ? 'disabled'
-                : Array.from(declaredIds).every((id) => registeredIds.has(id))
-                    ? 'ready'
-                    : 'partial',
-            required: part.required,
-            declared: true,
-            registered: registeredIds.size === declaredIds.size,
-            active: record.enabled === true,
-            diagnostics: []
-        }
     }
 
     private runnerPartStatus(record: DiscoveredPluginRecord, part: PluginCapabilityPart): PluginCapabilityPartStatus {
@@ -1695,6 +1204,7 @@ export class RunnerPluginManager {
         const activeAgentContributions = activeInstance ? {
             adapters: activeInstance.registry.getAgentAdapters().map((entry) => ({
                 id: entry.id,
+                agentId: entry.contribution.descriptor.id,
                 pluginId: entry.pluginId,
                 priority: entry.priority,
                 active: true
@@ -1735,22 +1245,22 @@ export class RunnerPluginManager {
                     runner: {
                         ...(manifestRunnerContributions ?? {}),
                         ...(activeRunnerContributions ? {
-                            spawnOptionsProviders: [
-                                ...(manifestRunnerContributions?.spawnOptionsProviders ?? []),
-                                ...activeRunnerContributions.spawnOptionsProviders
-                            ],
-                            environmentProviders: [
-                                ...(manifestRunnerContributions?.environmentProviders ?? []),
-                                ...activeRunnerContributions.environmentProviders
-                            ],
-                            commandResolvers: [
-                                ...(manifestRunnerContributions?.commandResolvers ?? []),
-                                ...activeRunnerContributions.commandResolvers
-                            ],
-                            spawnHooks: [
-                                ...(manifestRunnerContributions?.spawnHooks ?? []),
-                                ...activeRunnerContributions.spawnHooks
-                            ]
+                            spawnOptionsProviders: mergeContributionDetails(
+                                manifestRunnerContributions?.spawnOptionsProviders,
+                                activeRunnerContributions.spawnOptionsProviders
+                            ),
+                            environmentProviders: mergeContributionDetails(
+                                manifestRunnerContributions?.environmentProviders,
+                                activeRunnerContributions.environmentProviders
+                            ),
+                            commandResolvers: mergeContributionDetails(
+                                manifestRunnerContributions?.commandResolvers,
+                                activeRunnerContributions.commandResolvers
+                            ),
+                            spawnHooks: mergeContributionDetails(
+                                manifestRunnerContributions?.spawnHooks,
+                                activeRunnerContributions.spawnHooks
+                            )
                         } : {})
                     }
                 } : {}),
@@ -1758,14 +1268,14 @@ export class RunnerPluginManager {
                     agent: {
                         ...(manifestAgentContributions ?? {}),
                         ...(activeAgentContributions ? {
-                            adapters: [
-                                ...(manifestAgentContributions?.adapters ?? []),
-                                ...activeAgentContributions.adapters
-                            ],
-                            capabilityProviders: [
-                                ...(manifestAgentContributions?.capabilityProviders ?? []),
-                                ...activeAgentContributions.capabilityProviders
-                            ]
+                            adapters: mergeContributionDetails(
+                                manifestAgentContributions?.adapters,
+                                activeAgentContributions.adapters
+                            ),
+                            capabilityProviders: mergeContributionDetails(
+                                manifestAgentContributions?.capabilityProviders,
+                                activeAgentContributions.capabilityProviders
+                            )
                         } : {})
                     }
                 } : {}),
@@ -1794,6 +1304,9 @@ export class RunnerPluginManager {
 
     private missingSecretDiagnostics(record: DiscoveredPluginRecord): PluginDiagnosticView[] {
         if (!record.manifest || record.enabled !== true) {
+            return []
+        }
+        if (this.activePlugins.has(record.manifest.id)) {
             return []
         }
         const target = this.targetSummary()

@@ -90,7 +90,7 @@ export const RunnerEnvironmentProposalSchema = z.object({
     pathPrepend: z.array(z.string().min(1)).optional(),
     pathAppend: z.array(z.string().min(1)).optional(),
     cwd: z.string().min(1).optional(),
-    toolPaths: z.record(z.string(), z.string()).optional(),
+    toolPaths: z.record(z.string(), z.string()).optional().describe('Reserved for future structured tool resolution; current Runner emits a warning and does not apply this field.'),
     diagnostics: z.array(PluginDiagnosticSchema).optional()
 }).strict()
 export type RunnerEnvironmentProposal = z.infer<typeof RunnerEnvironmentProposalSchema>

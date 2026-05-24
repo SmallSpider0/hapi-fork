@@ -4,11 +4,16 @@ import { endpointCatalog, type EndpointDoc } from './plugin-api-docs/endpointCat
 import { schemaCatalog } from './plugin-api-docs/schemaCatalog'
 
 const root = process.cwd()
-const routeFile = 'hub/src/web/routes/plugins.ts'
+const routeFiles = [
+    // Add every file that registers /api/plugins* routes here; duplicate method/path pairs are rejected below.
+    'hub/src/web/routes/plugins.ts',
+    'hub/src/plugins/admin/installMarketplaceRoutes.ts'
+]
 
 function main(): void {
     const errors = [
         ...checkRouteCoverage(),
+        ...checkRouteDuplicates(),
         ...checkEndpointSchemaRefs(),
         ...checkSchemaCatalogUniqueness()
     ]
@@ -23,7 +28,7 @@ function main(): void {
 }
 
 function checkRouteCoverage(): string[] {
-    const actual = extractPluginRoutes(readFileSync(routeFile, 'utf8'))
+    const actual = routeFiles.flatMap((routeFile) => extractPluginRoutes(readFileSync(routeFile, 'utf8')))
     const documented = endpointCatalog.map((endpoint) => `${endpoint.method} ${endpoint.path}`).sort()
     const actualSet = new Set(actual)
     const documentedSet = new Set(documented)
@@ -35,7 +40,23 @@ function checkRouteCoverage(): string[] {
     }
     for (const route of documented) {
         if (!actualSet.has(route)) {
-            errors.push(`endpointCatalog documents a route not found in ${relative(root, routeFile)}: ${route}`)
+            errors.push(`endpointCatalog documents a route not found in plugin route files (${routeFiles.map((file) => relative(root, file)).join(', ')}): ${route}`)
+        }
+    }
+    return errors
+}
+
+function checkRouteDuplicates(): string[] {
+    const seen = new Map<string, string>()
+    const errors: string[] = []
+    for (const routeFile of routeFiles) {
+        for (const route of extractPluginRoutes(readFileSync(routeFile, 'utf8'))) {
+            const existing = seen.get(route)
+            if (existing) {
+                errors.push(`Duplicate plugin route ${route} in ${relative(root, existing)} and ${relative(root, routeFile)}`)
+                continue
+            }
+            seen.set(route, routeFile)
         }
     }
     return errors

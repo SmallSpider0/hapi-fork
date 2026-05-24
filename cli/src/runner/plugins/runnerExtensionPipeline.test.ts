@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it } from 'vitest'
 import { mergePathValue, resolveRunnerPluginSpawnOptions, resolveRunnerPluginSpawnPlan } from './runnerExtensionPipeline'
 
 describe('runner plugin extension pipeline', () => {
@@ -221,26 +221,148 @@ describe('runner plugin extension pipeline', () => {
     })
 
     it('isolates timed out providers', async () => {
-        vi.useFakeTimers()
-        try {
-            const pending = resolveRunnerPluginSpawnPlan({
-                ...baseInput,
-                environmentProviders: [{
-                    pluginId: 'com.example.slow',
-                    id: 'slow',
+        const result = await resolveRunnerPluginSpawnPlan({
+            ...baseInput,
+            timeoutMs: 5,
+            environmentProviders: [{
+                pluginId: 'com.example.slow',
+                id: 'slow',
+                priority: 0,
+                order: 0,
+                contribution: { id: 'slow', provide: () => new Promise(() => undefined) }
+            }],
+            commandResolvers: [],
+            spawnHooks: []
+        })
+        expect(result.diagnostics.map((entry) => entry.code)).toContain('runner-extension-environment-failed')
+    })
+
+    it('sanitizes thrown provider errors and plugin diagnostics', async () => {
+        const result = await resolveRunnerPluginSpawnPlan({
+            ...baseInput,
+            environmentProviders: [
+                {
+                    pluginId: 'com.example.throw',
+                    id: 'throw',
                     priority: 0,
                     order: 0,
-                    contribution: { id: 'slow', provide: () => new Promise(() => undefined) }
-                }],
-                commandResolvers: [],
-                spawnHooks: []
-            })
-            await vi.advanceTimersByTimeAsync(25)
-            const result = await pending
-            expect(result.diagnostics.map((entry) => entry.code)).toContain('runner-extension-environment-failed')
-        } finally {
-            vi.useRealTimers()
-        }
+                    contribution: { id: 'throw', provide: () => { throw new Error('boom secret-value') } }
+                },
+                {
+                    pluginId: 'com.example.diag',
+                    id: 'diag',
+                    priority: 1,
+                    order: 1,
+                    contribution: {
+                        id: 'diag',
+                        provide: () => ({ diagnostics: [{ severity: 'warning', code: 'custom', message: 'custom secret-value' }] })
+                    }
+                }
+            ],
+            commandResolvers: [],
+            spawnHooks: [],
+            sanitizeDiagnostic: (_pluginId, value) => String(value instanceof Error ? value.message : value).replaceAll('secret-value', '[REDACTED]')
+        })
+
+        expect(result.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'runner-extension-environment-failed', message: expect.stringContaining('[REDACTED]') }),
+            expect.objectContaining({ code: 'custom', message: 'custom [REDACTED]' })
+        ]))
+        expect(JSON.stringify(result.diagnostics)).not.toContain('secret-value')
+    })
+
+    it('preserves Windows env casing and protects HAPI env keys case-insensitively', async () => {
+        const result = await resolveRunnerPluginSpawnPlan({
+            ...baseInput,
+            basePlan: {
+                ...baseInput.basePlan,
+                env: { Path: 'C:\\Windows', HAPI_INVOKED_CWD: 'C:\\repo', CODEX_HOME: 'C:\\codex' }
+            },
+            environmentProviders: [{
+                pluginId: 'com.example.win',
+                id: 'win',
+                priority: 0,
+                order: 0,
+                contribution: {
+                    id: 'win',
+                    provide: () => ({
+                        env: { codex_home: 'C:\\evil', hapi_invoked_cwd: 'C:\\evil', NORMAL: 'ok' },
+                        pathPrepend: ['D:\\Tools']
+                    })
+                }
+            }],
+            commandResolvers: [],
+            spawnHooks: [],
+            pathDelimiter: ';',
+            platform: 'win32'
+        })
+
+        expect(result.env.Path).toBe('D:\\Tools;C:\\Windows')
+        expect(result.env.CODEX_HOME).toBe('C:\\codex')
+        expect(result.env.HAPI_INVOKED_CWD).toBe('C:\\repo')
+        expect(result.env.NORMAL).toBe('ok')
+        expect(result.diagnostics.filter((entry) => entry.code === 'runner-extension-env-protected')).toHaveLength(2)
+    })
+
+    it('treats toolPaths as reserved instead of mutating env', async () => {
+        const result = await resolveRunnerPluginSpawnPlan({
+            ...baseInput,
+            environmentProviders: [{
+                pluginId: 'com.example.tools',
+                id: 'tools',
+                priority: 0,
+                order: 0,
+                contribution: { id: 'tools', provide: () => ({ toolPaths: { git: '/custom/git' } }) }
+            }],
+            commandResolvers: [],
+            spawnHooks: []
+        })
+
+        expect(result.env.git).toBeUndefined()
+        expect(result.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'runner-extension-tool-paths-reserved' })
+        ]))
+    })
+
+    it('skips launch-option proposals for manual fields', async () => {
+        const result = await resolveRunnerPluginSpawnOptions({
+            machineId: 'runner-1',
+            agent: 'codex',
+            cwd: '/repo',
+            options: {
+                directory: '/repo',
+                agent: 'codex',
+                model: 'manual-model',
+                permissionMode: 'default',
+                yolo: false,
+                manualFields: ['model', 'permissionMode']
+            },
+            spawnOptionsProviders: [{
+                pluginId: 'com.example.defaults',
+                id: 'defaults',
+                priority: 0,
+                order: 0,
+                contribution: {
+                    id: 'defaults',
+                    provide: () => ({
+                        options: {
+                            model: 'plugin-model',
+                            permissionMode: 'yolo',
+                            yolo: true,
+                            modelReasoningEffort: 'high'
+                        },
+                        applied: [{ label: 'Defaults' }]
+                    })
+                }
+            }]
+        })
+
+        expect(result.options.model).toBe('manual-model')
+        expect(result.options.permissionMode).toBe('default')
+        expect(result.options.yolo).toBe(false)
+        expect(result.options.modelReasoningEffort).toBe('high')
+        expect(result.diagnostics.filter((entry) => entry.code === 'runner-extension-manual-field-skipped')).toHaveLength(3)
+        expect(result.applied[0]?.fields).toEqual(['modelReasoningEffort'])
     })
 })
 

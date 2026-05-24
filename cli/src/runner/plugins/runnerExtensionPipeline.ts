@@ -36,6 +36,7 @@ const PROTECTED_ENV_KEYS = new Set([
 const ALLOWED_HAPI_SUBCOMMANDS = new Set(['claude', 'codex', 'cursor', 'gemini', 'opencode', 'agent-plugin'])
 
 type MaybePromise<T> = T | Promise<T>
+export type RunnerPluginDiagnosticSanitizer = (pluginId: string, value: unknown) => string
 
 export type {
     RunnerCommandResolverContribution,
@@ -71,6 +72,8 @@ export type ResolveRunnerSpawnPlanInput = {
     spawnHooks: RegisteredRunnerContribution<RunnerSpawnHookContribution>[]
     timeoutMs?: number
     pathDelimiter?: string
+    sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer
+    platform?: NodeJS.Platform
 }
 
 export type ResolveRunnerSpawnOptionsInput = {
@@ -80,6 +83,7 @@ export type ResolveRunnerSpawnOptionsInput = {
     cwd: string
     spawnOptionsProviders: RegisteredRunnerContribution<RunnerSpawnOptionsProviderContribution>[]
     timeoutMs?: number
+    sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer
 }
 
 function contributionSort<T>(left: RegisteredRunnerContribution<T>, right: RegisteredRunnerContribution<T>): number {
@@ -87,10 +91,6 @@ function contributionSort<T>(left: RegisteredRunnerContribution<T>, right: Regis
         || left.pluginId.localeCompare(right.pluginId)
         || left.id.localeCompare(right.id)
         || left.order - right.order
-}
-
-function diagnostic(severity: PluginDiagnostic['severity'], code: string, message: string): PluginDiagnostic {
-    return { severity, code, message }
 }
 
 function contributionDiagnostic(
@@ -104,6 +104,13 @@ function contributionDiagnostic(
 
 function contributionLabel(entry: { pluginId: string; id: string }): string {
     return `${entry.pluginId}:${entry.id}`
+}
+
+function sanitizeForPlugin(input: { sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer }, pluginId: string, value: unknown): string {
+    if (input.sanitizeDiagnostic) {
+        return input.sanitizeDiagnostic(pluginId, value)
+    }
+    return value instanceof Error ? value.message : String(value)
 }
 
 function withTimeout<T>(work: MaybePromise<T>, timeoutMs: number, label: string): Promise<T> {
@@ -126,8 +133,21 @@ function normalizeBaseEnv(env: NodeJS.ProcessEnv): Record<string, string> {
     return Object.fromEntries(Object.entries(env).filter((entry): entry is [string, string] => typeof entry[1] === 'string'))
 }
 
-function envKeyIsProtected(key: string): boolean {
+function envKeyIsProtected(key: string, platform: NodeJS.Platform): boolean {
+    if (platform === 'win32') {
+        const normalized = key.toUpperCase()
+        return normalized.startsWith('HAPI_') || PROTECTED_ENV_KEYS.has(normalized)
+    }
     return key.startsWith('HAPI_') || PROTECTED_ENV_KEYS.has(key)
+}
+
+function findEnvKeyCaseInsensitive(env: Record<string, string>, key: string): string | undefined {
+    const normalized = key.toUpperCase()
+    return Object.keys(env).find((candidate) => candidate.toUpperCase() === normalized)
+}
+
+function isPathEnvKey(key: string, platform: NodeJS.Platform): boolean {
+    return platform === 'win32' ? key.toUpperCase() === 'PATH' : key === 'PATH'
 }
 
 export function mergePathValue(args: {
@@ -198,11 +218,29 @@ function applySpawnOptionsProposal(args: {
     options: SpawnSessionOptions
     proposal: RunnerSpawnOptionDefaults
     audit: RunnerExtensionAuditEvent[]
+    diagnostics: PluginDiagnostic[]
 }): string[] {
     const source = contributionLabel(args.entry)
     const fields: string[] = []
+    const manualFields = new Set(args.options.manualFields ?? [])
     for (const [key, value] of Object.entries(args.proposal) as Array<[keyof RunnerSpawnOptionDefaults, unknown]>) {
         if (value === undefined) continue
+        if (isManualSpawnOption(manualFields, key)) {
+            args.diagnostics.push(contributionDiagnostic(
+                args.entry,
+                'info',
+                'runner-extension-manual-field-skipped',
+                `${source} proposed launch option ${key}, but the user set it manually; proposal ignored.`
+            ))
+            args.audit.push({
+                phase: 'spawnOptions',
+                pluginId: args.entry.pluginId,
+                contributionId: args.entry.id,
+                field: `options.${key}`,
+                message: `${source} skipped manual launch option ${key}`
+            })
+            continue
+        }
         ;(args.options as unknown as Record<string, unknown>)[key] = value
         fields.push(key)
         args.audit.push({
@@ -216,6 +254,13 @@ function applySpawnOptionsProposal(args: {
     return fields
 }
 
+function isManualSpawnOption(manualFields: Set<string>, key: keyof RunnerSpawnOptionDefaults): boolean {
+    if (key === 'permissionMode' || key === 'yolo') {
+        return manualFields.has('permissionMode') || manualFields.has('yolo')
+    }
+    return manualFields.has(key)
+}
+
 function stripControlOnlySpawnOptions(options: SpawnSessionOptions): SpawnSessionOptions {
     const clean = { ...options } as SpawnSessionOptions & { machineId?: unknown }
     delete clean.machineId
@@ -226,14 +271,16 @@ function applyEnvPatch(args: {
     phase: RunnerExtensionAuditEvent['phase']
     entry: { pluginId: string; id: string }
     env: Record<string, string>
-    proposal: { env?: Record<string, string>; pathPrepend?: string[]; pathAppend?: string[]; cwd?: string; diagnostics?: PluginDiagnostic[] }
+    proposal: { env?: Record<string, string>; pathPrepend?: string[]; pathAppend?: string[]; cwd?: string; toolPaths?: Record<string, string>; diagnostics?: PluginDiagnostic[] }
     audit: RunnerExtensionAuditEvent[]
     diagnostics: PluginDiagnostic[]
     pathDelimiter: string
+    sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer
+    platform: NodeJS.Platform
 }): { cwd?: string } {
     const source = contributionLabel(args.entry)
     for (const [key, value] of Object.entries(args.proposal.env ?? {})) {
-        if (envKeyIsProtected(key) || key.toUpperCase() === 'PATH') {
+        if (envKeyIsProtected(key, args.platform) || isPathEnvKey(key, args.platform)) {
             args.diagnostics.push(contributionDiagnostic(args.entry, 'warning', 'runner-extension-env-protected', `${source} attempted to modify protected env ${key}; proposal ignored.`))
             continue
         }
@@ -242,18 +289,26 @@ function applyEnvPatch(args: {
     }
 
     if (args.proposal.pathPrepend?.length || args.proposal.pathAppend?.length) {
-        args.env.PATH = mergePathValue({
-            base: args.env.PATH,
+        const pathKey = args.platform === 'win32'
+            ? findEnvKeyCaseInsensitive(args.env, 'PATH') ?? 'PATH'
+            : 'PATH'
+        args.env[pathKey] = mergePathValue({
+            base: args.env[pathKey],
             prepend: args.proposal.pathPrepend,
             append: args.proposal.pathAppend,
             delimiter: args.pathDelimiter
         })
-        args.audit.push({ phase: args.phase, pluginId: args.entry.pluginId, contributionId: args.entry.id, field: 'env.PATH', message: `${source} updated PATH segments` })
+        args.audit.push({ phase: args.phase, pluginId: args.entry.pluginId, contributionId: args.entry.id, field: `env.${pathKey}`, message: `${source} updated PATH segments` })
+    }
+
+    if (args.proposal.toolPaths && Object.keys(args.proposal.toolPaths).length > 0) {
+        args.diagnostics.push(contributionDiagnostic(args.entry, 'warning', 'runner-extension-tool-paths-reserved', `${source} proposed toolPaths, but toolPaths is reserved and is not applied by this Runner.`))
     }
 
     for (const pluginDiagnostic of args.proposal.diagnostics ?? []) {
         args.diagnostics.push({
             ...pluginDiagnostic,
+            message: sanitizeForPlugin(args, args.entry.pluginId, pluginDiagnostic.message),
             pluginId: args.entry.pluginId
         } as PluginDiagnostic & { pluginId: string })
     }
@@ -263,7 +318,8 @@ function applyEnvPatch(args: {
             args.diagnostics.push(contributionDiagnostic(args.entry, 'warning', 'runner-extension-cwd-invalid', `${source} proposed a non-absolute cwd; proposal ignored.`))
             return {}
         }
-        args.audit.push({ phase: args.phase, pluginId: args.entry.pluginId, contributionId: args.entry.id, field: 'cwd', message: `${source} proposed cwd ${args.proposal.cwd}` })
+        const cwd = sanitizeForPlugin(args, args.entry.pluginId, args.proposal.cwd)
+        args.audit.push({ phase: args.phase, pluginId: args.entry.pluginId, contributionId: args.entry.id, field: 'cwd', message: `${source} proposed cwd ${cwd}` })
         return { cwd: args.proposal.cwd }
     }
 
@@ -313,11 +369,13 @@ async function runEnvironmentProviders(input: ResolveRunnerSpawnPlanInput, state
                 proposal: parsed,
                 audit: state.audit,
                 diagnostics: state.diagnostics,
-                pathDelimiter: input.pathDelimiter ?? delimiter
+                pathDelimiter: input.pathDelimiter ?? delimiter,
+                sanitizeDiagnostic: input.sanitizeDiagnostic,
+                platform: input.platform ?? process.platform
             })
             if (cwdPatch.cwd) state.cwd = cwdPatch.cwd
         } catch (error) {
-            state.diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-environment-failed', `${contributionLabel(entry)} environment provider failed: ${error instanceof Error ? error.message : String(error)}`))
+            state.diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-environment-failed', `${contributionLabel(entry)} environment provider failed: ${sanitizeForPlugin(input, entry.pluginId, error)}`))
         }
     }
 }
@@ -353,11 +411,13 @@ async function runCommandResolvers(input: ResolveRunnerSpawnPlanInput, state: {
                 proposal: parsed,
                 audit: state.audit,
                 diagnostics: state.diagnostics,
-                pathDelimiter: input.pathDelimiter ?? delimiter
+                pathDelimiter: input.pathDelimiter ?? delimiter,
+                sanitizeDiagnostic: input.sanitizeDiagnostic,
+                platform: input.platform ?? process.platform
             })
             if (cwdPatch.cwd) state.cwd = cwdPatch.cwd
         } catch (error) {
-            state.diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-command-failed', `${source} command resolver failed: ${error instanceof Error ? error.message : String(error)}`))
+            state.diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-command-failed', `${source} command resolver failed: ${sanitizeForPlugin(input, entry.pluginId, error)}`))
         }
     }
 }
@@ -385,15 +445,17 @@ async function runBeforeSpawnHooks(input: ResolveRunnerSpawnPlanInput, state: {
                 proposal: parsed,
                 audit: state.audit,
                 diagnostics: state.diagnostics,
-                pathDelimiter: input.pathDelimiter ?? delimiter
+                pathDelimiter: input.pathDelimiter ?? delimiter,
+                sanitizeDiagnostic: input.sanitizeDiagnostic,
+                platform: input.platform ?? process.platform
             })
             if (cwdPatch.cwd) state.cwd = cwdPatch.cwd
             if (parsed.block) {
-                state.audit.push({ phase: 'beforeSpawn', pluginId: entry.pluginId, contributionId: entry.id, message: `${source} blocked spawn: ${parsed.block.reason}` })
-                return { blocked: parsed.block }
+                state.audit.push({ phase: 'beforeSpawn', pluginId: entry.pluginId, contributionId: entry.id, message: `${source} blocked spawn: ${sanitizeForPlugin(input, entry.pluginId, parsed.block.reason)}` })
+                return { blocked: { reason: sanitizeForPlugin(input, entry.pluginId, parsed.block.reason) } }
             }
         } catch (error) {
-            state.diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-before-spawn-failed', `${source} beforeSpawn hook failed: ${error instanceof Error ? error.message : String(error)}`))
+            state.diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-before-spawn-failed', `${source} beforeSpawn hook failed: ${sanitizeForPlugin(input, entry.pluginId, error)}`))
         }
     }
     return {}
@@ -412,40 +474,47 @@ export async function resolveRunnerPluginSpawnOptions(input: ResolveRunnerSpawnO
         try {
             const context = buildOptionsContext(input, options)
             const parsed = RunnerSpawnOptionsProviderProposalSchema.parse(await withTimeout(entry.contribution.provide(context), timeoutMs, source))
+            let appliedOptionFields: string[] = []
             for (const pluginDiagnostic of parsed.diagnostics ?? []) {
                 diagnostics.push({
                     ...pluginDiagnostic,
+                    message: sanitizeForPlugin(input, entry.pluginId, pluginDiagnostic.message),
                     pluginId: entry.pluginId
                 } as PluginDiagnostic & { pluginId: string })
             }
             if (parsed.options) {
-                const fields = applySpawnOptionsProposal({
+                appliedOptionFields = applySpawnOptionsProposal({
                     entry,
                     options,
                     proposal: parsed.options,
-                    audit
+                    audit,
+                    diagnostics
                 })
-                if (!parsed.applied?.length && fields.length > 0) {
+                if (!parsed.applied?.length && appliedOptionFields.length > 0) {
                     applied.push({
                         pluginId: entry.pluginId,
                         contributionId: entry.id,
                         label: entry.id,
-                        fields
+                        fields: appliedOptionFields
                     })
                 }
             }
+            const appliedFieldSet = new Set(appliedOptionFields)
             for (const item of parsed.applied ?? []) {
                 const fields = item.fields ?? (parsed.options ? proposalFields(parsed.options) : undefined)
+                const appliedFields = parsed.options && fields
+                    ? fields.filter((field) => appliedFieldSet.has(field))
+                    : fields
                 applied.push({
                     pluginId: entry.pluginId,
                     contributionId: entry.id,
                     label: item.label ?? entry.id,
                     ...(item.description ? { description: item.description } : {}),
-                    ...(fields && fields.length > 0 ? { fields } : {})
+                    ...(appliedFields && appliedFields.length > 0 ? { fields: appliedFields } : {})
                 })
             }
         } catch (error) {
-            diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-spawn-options-failed', `${source} spawn options provider failed: ${error instanceof Error ? error.message : String(error)}`))
+            diagnostics.push(contributionDiagnostic(entry, 'warning', 'runner-extension-spawn-options-failed', `${source} spawn options provider failed: ${sanitizeForPlugin(input, entry.pluginId, error)}`))
         }
     }
 
@@ -485,6 +554,7 @@ export async function runRunnerPluginAfterSpawnHooks(args: {
     hooks: RegisteredRunnerContribution<RunnerSpawnHookContribution>[]
     timeoutMs?: number
     onDiagnostic?: (diagnostic: PluginDiagnostic) => void
+    sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer
 }): Promise<void> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_EXTENSION_TIMEOUT_MS
     for (const entry of [...args.hooks].sort(contributionSort)) {
@@ -493,7 +563,7 @@ export async function runRunnerPluginAfterSpawnHooks(args: {
         try {
             await withTimeout(entry.contribution.afterSpawn({ ...args.baseContext, pid: args.pid }), timeoutMs, source)
         } catch (error) {
-            args.onDiagnostic?.(contributionDiagnostic(entry, 'warning', 'runner-extension-after-spawn-failed', `${source} afterSpawn hook failed: ${error instanceof Error ? error.message : String(error)}`))
+            args.onDiagnostic?.(contributionDiagnostic(entry, 'warning', 'runner-extension-after-spawn-failed', `${source} afterSpawn hook failed: ${sanitizeForPlugin(args, entry.pluginId, error)}`))
         }
     }
 }
@@ -506,6 +576,7 @@ export async function runRunnerPluginExitHooks(args: {
     hooks: RegisteredRunnerContribution<RunnerSpawnHookContribution>[]
     timeoutMs?: number
     onDiagnostic?: (diagnostic: PluginDiagnostic) => void
+    sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer
 }): Promise<void> {
     const timeoutMs = args.timeoutMs ?? DEFAULT_EXTENSION_TIMEOUT_MS
     for (const entry of [...args.hooks].sort(contributionSort)) {
@@ -514,7 +585,7 @@ export async function runRunnerPluginExitHooks(args: {
         try {
             await withTimeout(entry.contribution.onExit({ ...args.baseContext, pid: args.pid, exitCode: args.exitCode, signal: args.signal }), timeoutMs, source)
         } catch (error) {
-            args.onDiagnostic?.(contributionDiagnostic(entry, 'warning', 'runner-extension-on-exit-failed', `${source} onExit hook failed: ${error instanceof Error ? error.message : String(error)}`))
+            args.onDiagnostic?.(contributionDiagnostic(entry, 'warning', 'runner-extension-on-exit-failed', `${source} onExit hook failed: ${sanitizeForPlugin(args, entry.pluginId, error)}`))
         }
     }
 }

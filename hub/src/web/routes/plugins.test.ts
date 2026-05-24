@@ -585,6 +585,64 @@ describe('plugin admin routes', () => {
         }
     })
 
+    it('allows uploaded package install on Runner without host info when no compatibility constraints exist', async () => {
+        const online = makeMachine('runner-1', true)
+        const { hostInfo: _hostInfo, ...inventoryWithoutHostInfo } = online.runnerState!.pluginInventory!
+        online.runnerState!.pluginInventory = inventoryWithoutHostInfo
+        const calls: string[] = []
+        const packageFixture = makeTgzPackage()
+        try {
+            const app = createApp({ listPlugins: () => [] } as never, {
+                getMachineByNamespace: () => online,
+                installRunnerPluginPackage: async (machineId: string) => {
+                    calls.push(machineId)
+                    return runnerInstallResult(machineId)
+                }
+            } as never)
+
+            const response = await app.request('/api/plugins/install-package?target=runner:runner-1', {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+                body: JSON.stringify(packageFixture.body)
+            })
+
+            expect(response.status).toBe(200)
+            expect(calls).toEqual(['runner-1'])
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
+    it('returns 409 before Runner package install when compatibility is unsupported', async () => {
+        const online = makeMachine('runner-1', true)
+        const calls: string[] = []
+        const packageFixture = makeTgzPackage('com.example.incompatible', 'com.example.incompatible', {
+            runtimes: { runner: { entry: 'runner.js' } },
+            compatibility: { runner: { extensionPoints: ['runner.spawnOptionsProvider'] } }
+        })
+        try {
+            const app = createApp({ listPlugins: () => [] } as never, {
+                getMachineByNamespace: () => online,
+                installRunnerPluginPackage: async (machineId: string) => {
+                    calls.push(machineId)
+                    return runnerInstallResult(machineId)
+                }
+            } as never)
+
+            const response = await app.request('/api/plugins/install-package?target=runner:runner-1', {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+                body: JSON.stringify(packageFixture.body)
+            })
+
+            expect(response.status).toBe(409)
+            expect((await response.json() as { error: string }).error).toContain('runner.spawnOptionsProvider')
+            expect(calls).toEqual([])
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
     it('returns per-target results for uploaded package all-runners distribution', async () => {
         const online = makeMachine('runner-online', true)
         const offline = makeMachine('runner-offline', false)
@@ -607,6 +665,41 @@ describe('plugin admin routes', () => {
             expect(payload.targetResults).toHaveLength(2)
             expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-online')?.ok).toBe(true)
             expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-offline')?.error).toBe('Runner target is offline')
+        } finally {
+            packageFixture.cleanup()
+        }
+    })
+
+    it('skips incompatible runners before uploaded package all-runners distribution', async () => {
+        const compatible = makeMachine('runner-compatible', true)
+        const incompatible = makeMachine('runner-incompatible', true)
+        incompatible.runnerState!.pluginInventory!.hostInfo!.supportedExtensionPoints = []
+        const calls: string[] = []
+        const packageFixture = makeTgzPackage('com.example.incompatible-somewhere', 'com.example.incompatible-somewhere', {
+            runtimes: { runner: { entry: 'runner.js' } },
+            compatibility: { runner: { extensionPoints: ['runner.spawnHook'] } }
+        })
+        try {
+            const app = createApp({ listPlugins: () => [] } as never, {
+                getMachinesByNamespace: () => [compatible, incompatible],
+                installRunnerPluginPackage: async (machineId: string) => {
+                    calls.push(machineId)
+                    return runnerInstallResult(machineId)
+                }
+            } as never)
+
+            const response = await app.request('/api/plugins/install-package?target=all-runners', {
+                method: 'POST',
+                headers: { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' },
+                body: JSON.stringify(packageFixture.body)
+            })
+
+            expect(response.status).toBe(200)
+            const payload = await response.json() as PluginInstallResult
+            expect(payload.ok).toBe(false)
+            expect(calls).toEqual(['runner-compatible'])
+            expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-compatible')?.ok).toBe(true)
+            expect(payload.targetResults?.find((entry) => entry.target.scope === 'runner:runner-incompatible')?.error).toContain('runner.spawnHook')
         } finally {
             packageFixture.cleanup()
         }
@@ -715,6 +808,17 @@ describe('plugin admin routes', () => {
             expect(list.entries).toHaveLength(1)
             expect(list.entries[0]).toMatchObject({ id: 'com.example.package', repo: 'example/package-plugin' })
 
+            const refreshResponse = await app.request('/api/plugins/marketplace/refresh', { method: 'POST', headers })
+            expect(refreshResponse.status).toBe(200)
+            const refreshed = await refreshResponse.json() as { entries: Array<{ id: string }> }
+            expect(refreshed.entries.map((entry) => entry.id)).toEqual(['com.example.package'])
+
+            const detailResponse = await app.request('/api/plugins/marketplace/com.example.package', { headers })
+            expect(detailResponse.status).toBe(200)
+            const detail = await detailResponse.json() as { entry: { id: string; releases: Array<{ version: string }> } }
+            expect(detail.entry.id).toBe('com.example.package')
+            expect(detail.entry.releases[0]?.version).toBe('0.1.0')
+
             const planResponse = await app.request('/api/plugins/marketplace/com.example.package/install-plan', {
                 method: 'POST',
                 headers,
@@ -743,6 +847,14 @@ describe('plugin admin routes', () => {
                     version: '0.1.0'
                 }
             })
+
+            const directInstallResponse = await app.request('/api/plugins/marketplace/com.example.package/install', {
+                method: 'POST',
+                headers,
+                body: JSON.stringify({ enable: true })
+            })
+            expect(directInstallResponse.status).toBe(200)
+            expect(installRequests).toHaveLength(2)
         } finally {
             packageFixture.cleanup()
         }

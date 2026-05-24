@@ -79,7 +79,7 @@ const echoAgentRuntime = `function createEchoBackend() {
 
 export function activate(ctx) {
     ctx.runtime.registerAgentAdapter({
-        id: 'example:echo',
+        id: 'example-echo-agent',
         descriptor: {
             id: 'example:echo',
             displayName: 'Example Echo Agent',
