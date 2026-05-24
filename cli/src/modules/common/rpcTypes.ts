@@ -1,5 +1,4 @@
 export interface SpawnSessionOptions {
-    machineId?: string
     directory: string
     sessionId?: string
     resumeSessionId?: string
@@ -10,6 +9,7 @@ export interface SpawnSessionOptions {
     modelReasoningEffort?: string
     yolo?: boolean
     permissionMode?: string
+    manualFields?: string[]
     token?: string
     sessionType?: 'simple' | 'worktree'
     worktreeName?: string

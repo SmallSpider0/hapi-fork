@@ -154,7 +154,7 @@ export async function loadServerSettings(dataDir: string): Promise<ServerSetting
         sources.serverChanSendKey = 'file'
     }
 
-    // serverChanNotification: env > file > true
+    // serverChanNotification: legacy env/file flag retained only for migration diagnostics
     let serverChanNotification = true
     if (process.env.SERVERCHAN_NOTIFICATION !== undefined) {
         serverChanNotification = process.env.SERVERCHAN_NOTIFICATION === 'true'

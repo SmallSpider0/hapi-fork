@@ -40,8 +40,8 @@ import {
     type NewSessionPluginField
 } from './pluginFields'
 
-type LaunchPresetNotice = {
-    matched: string[]
+type SpawnOptionsPreviewNotice = {
+    sources: string[]
     applied: Array<{ key: string; value: string }>
     manual: string[]
 }
@@ -73,8 +73,8 @@ export function NewSession(props: {
     const [modelReasoningEffort, setModelReasoningEffort] = useState<CodexReasoningEffort>('default')
     const [yoloMode, setYoloMode] = useState(loadPreferredYoloMode)
     const [permissionMode, setPermissionMode] = useState<string | undefined>(undefined)
-    const [manualLaunchFields, setManualLaunchFields] = useState<string[]>([])
-    const [launchPresetNotice, setLaunchPresetNotice] = useState<LaunchPresetNotice | null>(null)
+    const [manualSpawnFields, setManualSpawnFields] = useState<string[]>([])
+    const [spawnOptionsPreviewNotice, setSpawnOptionsPreviewNotice] = useState<SpawnOptionsPreviewNotice | null>(null)
     const [sessionType, setSessionType] = useState<SessionType>('simple')
     const [worktreeName, setWorktreeName] = useState('')
     const [pluginFieldValues, setPluginFieldValues] = useState<Record<string, unknown>>({})
@@ -89,8 +89,8 @@ export function NewSession(props: {
         }
     }, [sessionType])
 
-    const markLaunchFieldManual = useCallback((field: string) => {
-        setManualLaunchFields((current) => current.includes(field) ? current : [...current, field])
+    const markSpawnFieldManual = useCallback((field: string) => {
+        setManualSpawnFields((current) => current.includes(field) ? current : [...current, field])
     }, [])
 
     useEffect(() => {
@@ -98,7 +98,7 @@ export function NewSession(props: {
         setEffort('auto')
         setModelReasoningEffort('default')
         setPermissionMode(undefined)
-        setManualLaunchFields([])
+        setManualSpawnFields([])
     }, [agent])
 
     useEffect(() => {
@@ -160,12 +160,9 @@ export function NewSession(props: {
         () => buildNewSessionPluginFieldPayload(newSessionPluginFields, pluginFieldValues),
         [newSessionPluginFields, pluginFieldValues]
     )
-    const launchPresetPluginFields = useMemo(
-        () => ({
-            ...newSessionPluginFieldPayload,
-            ...(manualLaunchFields.length > 0 ? { launchPresetManualFields: manualLaunchFields } : {})
-        }),
-        [manualLaunchFields, newSessionPluginFieldPayload]
+    const spawnPluginFields = useMemo(
+        () => newSessionPluginFieldPayload,
+        [newSessionPluginFieldPayload]
     )
     useEffect(() => {
         if (agentDescriptors.some((descriptor) => descriptor.id === agent && descriptor.available !== false)) {
@@ -275,12 +272,12 @@ export function NewSession(props: {
     })
     useEffect(() => {
         if (!props.api || !machineId || !deferredDirectory) {
-            setLaunchPresetNotice(null)
+            setSpawnOptionsPreviewNotice(null)
             return
         }
         let cancelled = false
-        const manual = new Set(manualLaunchFields)
-        void props.api.resolveRunnerLaunchPresets(machineId, {
+        const manual = new Set(manualSpawnFields)
+        void props.api.previewRunnerSpawnOptions(machineId, {
             directory: deferredDirectory,
             agent,
             model: manual.has('model') && model !== 'auto' ? model : undefined,
@@ -288,8 +285,9 @@ export function NewSession(props: {
             modelReasoningEffort: manual.has('modelReasoningEffort') && modelReasoningEffort !== 'default' ? modelReasoningEffort : undefined,
             permissionMode: manual.has('permissionMode') ? permissionMode : undefined,
             yolo: manual.has('yolo') || manual.has('permissionMode') ? yoloMode : undefined,
+            manualFields: manualSpawnFields,
             sessionType,
-            pluginFields: launchPresetPluginFields
+            pluginFields: spawnPluginFields
         }).then((result) => {
             if (cancelled) return
             const options = result.options ?? {}
@@ -311,17 +309,17 @@ export function NewSession(props: {
                 yoloModeFromPresetRef.current = true
                 setYoloMode(options.yolo)
             }
-            const matched = result.matchedRules.map((rule) => rule.label)
+            const sources = result.applied.map((entry) => entry.label ?? `${entry.pluginId}:${entry.contributionId}`)
             const applied = Object.entries(options)
                 .filter(([, value]) => value !== undefined)
                 .map(([key, value]) => ({ key, value: String(value) }))
-            setLaunchPresetNotice(matched.length > 0 ? {
-                matched,
+            setSpawnOptionsPreviewNotice(sources.length > 0 ? {
+                sources,
                 applied,
-                manual: manualLaunchFields
+                manual: manualSpawnFields
             } : null)
         }).catch(() => {
-            if (!cancelled) setLaunchPresetNotice(null)
+            if (!cancelled) setSpawnOptionsPreviewNotice(null)
         })
         return () => {
             cancelled = true
@@ -337,8 +335,8 @@ export function NewSession(props: {
         permissionMode,
         yoloMode,
         sessionType,
-        manualLaunchFields,
-        launchPresetPluginFields
+        manualSpawnFields,
+        spawnPluginFields
     ])
     useEffect(() => {
         // Auto-pick the OpenCode default model when discovery finishes, so the
@@ -400,7 +398,7 @@ export function NewSession(props: {
 
     const handleMachineChange = useCallback((newMachineId: string) => {
         setMachineId(newMachineId)
-        setManualLaunchFields([])
+        setManualSpawnFields([])
         setPermissionMode(undefined)
         const paths = getRecentPaths(newMachineId)
         if (paths[0]) {
@@ -509,9 +507,10 @@ export function NewSession(props: {
                 modelReasoningEffort: resolvedModelReasoningEffort,
                 permissionMode,
                 yolo: resolvedYolo,
+                manualFields: manualSpawnFields,
                 sessionType,
                 worktreeName: sessionType === 'worktree' ? (worktreeName.trim() || undefined) : undefined,
-                pluginFields: launchPresetPluginFields
+                pluginFields: spawnPluginFields
             })
 
             if (result.type === 'success') {
@@ -546,8 +545,8 @@ export function NewSession(props: {
                     Runner last spawn error: {runnerSpawnError}
                 </div>
             ) : null}
-            {launchPresetNotice ? (
-                <LaunchPresetNoticeCard notice={launchPresetNotice} />
+            {spawnOptionsPreviewNotice ? (
+                <SpawnOptionsPreviewNoticeCard notice={spawnOptionsPreviewNotice} />
             ) : null}
             <DirectorySection
                 directory={directory}
@@ -578,7 +577,7 @@ export function NewSession(props: {
                 agents={agentDescriptors}
                 isDisabled={isFormDisabled}
                 onAgentChange={(nextAgent) => {
-                    setManualLaunchFields([])
+                    setManualSpawnFields([])
                     setPermissionMode(undefined)
                     setAgent(nextAgent)
                 }}
@@ -606,7 +605,7 @@ export function NewSession(props: {
                     currentModelId={opencodeModelsState.currentModelId}
                     selectedModel={opencodeSelectedModel}
                     onModelChange={(value) => {
-                        markLaunchFieldManual('model')
+                        markSpawnFieldManual('model')
                         setOpencodeSelectedModel(value)
                     }}
                     onRetry={opencodeModelsState.refetch}
@@ -622,7 +621,7 @@ export function NewSession(props: {
                         ? `${t('newSession.model.loadFailed')}: ${codexModelsState.error}`
                         : null}
                     onModelChange={(value) => {
-                        markLaunchFieldManual('model')
+                        markSpawnFieldManual('model')
                         setModel(value)
                     }}
                 />
@@ -632,7 +631,7 @@ export function NewSession(props: {
                 effort={effort}
                 isDisabled={isFormDisabled}
                 onEffortChange={(value) => {
-                    markLaunchFieldManual('effort')
+                    markSpawnFieldManual('effort')
                     setEffort(value)
                 }}
             />
@@ -641,7 +640,7 @@ export function NewSession(props: {
                 value={modelReasoningEffort}
                 isDisabled={isFormDisabled}
                 onChange={(value) => {
-                    markLaunchFieldManual('modelReasoningEffort')
+                    markSpawnFieldManual('modelReasoningEffort')
                     setModelReasoningEffort(value)
                 }}
             />
@@ -649,8 +648,8 @@ export function NewSession(props: {
                 yoloMode={yoloMode}
                 isDisabled={isFormDisabled || !selectedAgentSupportsYolo}
                 onToggle={(value) => {
-                    markLaunchFieldManual('permissionMode')
-                    markLaunchFieldManual('yolo')
+                    markSpawnFieldManual('permissionMode')
+                    markSpawnFieldManual('yolo')
                     setPermissionMode(undefined)
                     setYoloMode(value)
                 }}
@@ -674,7 +673,7 @@ export function NewSession(props: {
     )
 }
 
-function launchPresetFieldLabel(field: string): string {
+function spawnOptionFieldLabel(field: string): string {
     if (field === 'model') return 'model'
     if (field === 'effort') return 'Claude effort'
     if (field === 'modelReasoningEffort') return 'reasoning'
@@ -682,21 +681,21 @@ function launchPresetFieldLabel(field: string): string {
     return field
 }
 
-function LaunchPresetNoticeCard(props: { notice: LaunchPresetNotice }) {
+function SpawnOptionsPreviewNoticeCard(props: { notice: SpawnOptionsPreviewNotice }) {
     const applied = props.notice.applied
-    const manual = Array.from(new Set(props.notice.manual.map(launchPresetFieldLabel)))
+    const manual = Array.from(new Set(props.notice.manual.map(spawnOptionFieldLabel)))
     return (
         <div className="px-3 py-2">
             <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2 text-xs">
                 <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 font-medium text-[var(--app-link)]">启动预设</span>
-                    <span className="min-w-0 break-words text-[var(--app-fg)]">{props.notice.matched.join(', ')}</span>
+                    <span className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 font-medium text-[var(--app-link)]">插件默认值</span>
+                    <span className="min-w-0 break-words text-[var(--app-fg)]">{props.notice.sources.join(', ')}</span>
                 </div>
                 {applied.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                         {applied.map((entry) => (
                             <span key={`${entry.key}-${entry.value}`} className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 text-[var(--app-fg)]">
-                                {launchPresetFieldLabel(entry.key)}={entry.value}
+                                {spawnOptionFieldLabel(entry.key)}={entry.value}
                             </span>
                         ))}
                     </div>

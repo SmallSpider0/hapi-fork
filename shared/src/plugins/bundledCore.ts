@@ -5,7 +5,6 @@ import { getBundledPluginsRoot, prepareBundledPlugins, type BundledPlugin } from
 export const HAPI_BUNDLED_CORE_PLUGINS_DIR = 'bundled-core-plugins'
 export const HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID = 'com.hapi.core.schedule-send'
 export const HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID = 'com.hapi.core.serverchan-notifier'
-export const HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID = 'com.hapi.core.runner-env-profiles'
 export const HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID = 'com.hapi.core.runner-launch-presets'
 
 export type BundledCorePlugin = BundledPlugin
@@ -267,172 +266,6 @@ export function activate(ctx) {
 }
 `.trim()
 
-const runnerEnvProfilesRuntime = `
-function textConfig(ctx, key) {
-    const value = ctx.config.get(key)
-    return typeof value === 'string' && value.trim() ? value.trim() : ''
-}
-
-function listFromValue(value) {
-    if (Array.isArray(value)) {
-        return value.map((entry) => String(entry).trim()).filter(Boolean)
-    }
-    if (typeof value !== 'string') return []
-    return value
-        .split(/[\\n,]/)
-        .map((entry) => entry.trim())
-        .filter(Boolean)
-}
-
-function listConfig(ctx, key) {
-    return listFromValue(ctx.config.get(key))
-}
-
-function normalizePath(value) {
-    if (typeof value !== 'string') return ''
-    let normalized = value.trim().split(String.fromCharCode(92)).join('/')
-    while (normalized.includes('//')) normalized = normalized.split('//').join('/')
-    while (normalized.length > 1 && normalized.endsWith('/')) normalized = normalized.slice(0, -1)
-    return normalized
-}
-
-function pathMatchesPrefix(actual, prefix) {
-    const path = normalizePath(actual)
-    const base = normalizePath(prefix)
-    if (!path || !base) return false
-    if (base === '/' || (base.length === 3 && base[1] === ':' && base[2] === '/' && /^[A-Za-z]$/.test(base[0]))) return path.startsWith(base)
-    return path === base || path.startsWith(base + '/')
-}
-
-function matchesList(values, actual) {
-    return values.length === 0 || values.includes(actual)
-}
-
-function matchesPrefix(prefixes, context) {
-    if (prefixes.length === 0) return true
-    return prefixes.some((prefix) => pathMatchesPrefix(context.cwd, prefix) || pathMatchesPrefix(context.directory, prefix))
-}
-
-function addIfPresent(env, key, value) {
-    if (value) env[key] = value
-}
-
-function isSecretLikeKey(key) {
-    return /(?:SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE|CREDENTIAL|API[_-]?KEY|ACCESS[_-]?KEY)/i.test(key)
-}
-
-function readProfilesJson(ctx, diagnostics) {
-    const text = textConfig(ctx, 'profilesJson')
-    if (!text) return []
-    try {
-        const parsed = JSON.parse(text)
-        if (!Array.isArray(parsed)) {
-            diagnostics.push({ severity: 'warning', code: 'runner-env-profiles-invalid-json', message: 'profilesJson must be a JSON array.' })
-            return []
-        }
-        return parsed
-    } catch (error) {
-        diagnostics.push({ severity: 'warning', code: 'runner-env-profiles-invalid-json', message: 'profilesJson parse failed: ' + (error instanceof Error ? error.message : String(error)) })
-        return []
-    }
-}
-
-function normalizeEnvMap(value, diagnostics, profileName) {
-    if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
-    const env = {}
-    for (const [key, rawValue] of Object.entries(value)) {
-        if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-            diagnostics.push({ severity: 'warning', code: 'runner-env-profiles-env-key-invalid', message: 'Profile ' + profileName + ' ignored invalid env key ' + key })
-            continue
-        }
-        if (key.toUpperCase() === 'PATH' || key.startsWith('HAPI_') || isSecretLikeKey(key)) {
-            diagnostics.push({ severity: 'warning', code: 'runner-env-profiles-env-key-rejected', message: 'Profile ' + profileName + ' ignored protected or secret-like env key ' + key })
-            continue
-        }
-        if (rawValue !== undefined && rawValue !== null) env[key] = String(rawValue)
-    }
-    return env
-}
-
-function normalizeProfile(raw, index, diagnostics) {
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-        diagnostics.push({ severity: 'warning', code: 'runner-env-profiles-invalid-profile', message: 'Profile #' + (index + 1) + ' must be an object.' })
-        return null
-    }
-    const name = typeof raw.name === 'string' && raw.name.trim() ? raw.name.trim() : 'profile-' + (index + 1)
-    return {
-        name,
-        agentIds: listFromValue(raw.agentIds),
-        directoryPrefixes: listFromValue(raw.directoryPrefixes),
-        env: normalizeEnvMap(raw.env, diagnostics, name),
-        pathPrepend: listFromValue(raw.pathPrepend),
-        pathAppend: listFromValue(raw.pathAppend)
-    }
-}
-
-function flatProfile(ctx) {
-    const env = {}
-    addIfPresent(env, 'HTTP_PROXY', textConfig(ctx, 'httpProxy'))
-    addIfPresent(env, 'HTTPS_PROXY', textConfig(ctx, 'httpsProxy'))
-    addIfPresent(env, 'NO_PROXY', textConfig(ctx, 'noProxy'))
-    addIfPresent(env, 'GOPROXY', textConfig(ctx, 'goProxy'))
-    addIfPresent(env, 'NPM_CONFIG_REGISTRY', textConfig(ctx, 'npmRegistry'))
-    const pathPrepend = listConfig(ctx, 'pathPrepend')
-    if (Object.keys(env).length === 0 && pathPrepend.length === 0) return null
-    return {
-        name: 'default',
-        agentIds: listConfig(ctx, 'agentIds'),
-        directoryPrefixes: listConfig(ctx, 'directoryPrefixes'),
-        env,
-        pathPrepend,
-        pathAppend: []
-    }
-}
-
-function collectProfiles(ctx, diagnostics) {
-    return [flatProfile(ctx), ...readProfilesJson(ctx, diagnostics).map((profile, index) => normalizeProfile(profile, index, diagnostics))]
-        .filter(Boolean)
-}
-
-export function activate(ctx) {
-    ctx.runtime.registerEnvironmentProvider({
-        id: 'runner-env-profiles',
-        priority: -20,
-        provide(context) {
-            const diagnostics = []
-            const env = {}
-            const pathPrepend = []
-            const pathAppend = []
-            const applied = []
-
-            for (const profile of collectProfiles(ctx, diagnostics)) {
-                if (!matchesList(profile.agentIds, context.agent)) continue
-                if (!matchesPrefix(profile.directoryPrefixes, context)) continue
-                Object.assign(env, profile.env)
-                pathPrepend.push(...profile.pathPrepend)
-                pathAppend.push(...profile.pathAppend)
-                applied.push(profile.name)
-            }
-
-            if (applied.length === 0 && diagnostics.length === 0) return {}
-            if (applied.length > 0) {
-                diagnostics.push({
-                    severity: 'info',
-                    code: 'runner-env-profiles-applied',
-                    message: 'Runner environment profiles applied to ' + context.agent + ' in ' + context.cwd + ': ' + applied.join(', ')
-                })
-            }
-            return {
-                ...(Object.keys(env).length > 0 ? { env } : {}),
-                ...(pathPrepend.length > 0 ? { pathPrepend } : {}),
-                ...(pathAppend.length > 0 ? { pathAppend } : {}),
-                diagnostics
-            }
-        }
-    })
-}
-`.trim()
-
 const runnerLaunchPresetsRuntime = `
 function boolConfig(ctx, key, fallback) {
     const value = ctx.config.get(key)
@@ -484,7 +317,9 @@ function matchesList(list, actual) {
 }
 
 function readManualFields(context) {
-    const value = context.pluginFields && context.pluginFields.launchPresetManualFields
+    const value = Array.isArray(context.manualFields)
+        ? context.manualFields
+        : context.pluginFields && context.pluginFields.spawnOptionManualFields
     if (!Array.isArray(value)) return []
     return value.map((entry) => String(entry)).filter(Boolean)
 }
@@ -591,6 +426,7 @@ function collectDefaults(ctx, context) {
     const options = {}
     const applied = []
     for (const rule of matched) {
+        const fields = []
         for (const key of ['model', 'effort', 'modelReasoningEffort', 'permissionMode', 'yolo']) {
             const value = rule.defaults[key]
             if (value === undefined || value === '') continue
@@ -601,14 +437,15 @@ function collectDefaults(ctx, context) {
             if (key === 'permissionMode' && context.permissionMode) continue
             if (key === 'yolo' && context.yolo !== undefined) continue
             options[key] = value
+            fields.push(key)
         }
-        applied.push(rule.label)
+        applied.push({ label: rule.label, fields })
     }
     if (applied.length > 0) {
         diagnostics.push({
             severity: 'info',
             code: 'runner-launch-presets-applied',
-            message: 'Runner launch presets matched ' + context.agent + ' in ' + context.cwd + ': ' + applied.join(', ')
+            message: 'Runner launch presets matched ' + context.agent + ' in ' + context.cwd + ': ' + applied.map((entry) => entry.label).join(', ')
         })
     }
     return { options, diagnostics, matched }
@@ -622,41 +459,8 @@ export function activate(ctx) {
             const result = collectDefaults(ctx, context)
             return {
                 ...(Object.keys(result.options).length > 0 ? { options: result.options } : {}),
+                applied: result.applied,
                 diagnostics: result.diagnostics
-            }
-        }
-    })
-
-    ctx.actions.register({
-        id: 'runner-launch-presets.resolve',
-        kind: 'runner.spawnExtension',
-        run(input) {
-            const payload = input.payload && typeof input.payload === 'object' && !Array.isArray(input.payload) ? input.payload : {}
-            const context = {
-                machineId: ctx.machineId,
-                agent: typeof payload.agent === 'string' && payload.agent.trim() ? payload.agent.trim() : 'claude',
-                directory: typeof payload.directory === 'string' && payload.directory.trim() ? payload.directory.trim() : (input.cwd || ''),
-                cwd: typeof payload.cwd === 'string' && payload.cwd.trim() ? payload.cwd.trim() : (typeof payload.directory === 'string' ? payload.directory : input.cwd || ''),
-                ...(typeof payload.sessionType === 'string' ? { sessionType: payload.sessionType } : {}),
-                ...(typeof payload.resumeSessionId === 'string' ? { resumeSessionId: payload.resumeSessionId } : {}),
-                ...(typeof payload.model === 'string' ? { model: payload.model } : {}),
-                ...(typeof payload.effort === 'string' ? { effort: payload.effort } : {}),
-                ...(typeof payload.modelReasoningEffort === 'string' ? { modelReasoningEffort: payload.modelReasoningEffort } : {}),
-                ...(typeof payload.permissionMode === 'string' ? { permissionMode: payload.permissionMode } : {}),
-                ...(typeof payload.yolo === 'boolean' ? { yolo: payload.yolo } : {}),
-                ...(payload.pluginFields && typeof payload.pluginFields === 'object' && !Array.isArray(payload.pluginFields) ? { pluginFields: payload.pluginFields } : {})
-            }
-            if (!context.directory || !context.cwd) {
-                return { ok: false, code: 'missing-directory', message: 'directory is required.' }
-            }
-            const result = collectDefaults(ctx, context)
-            return {
-                ok: true,
-                result: {
-                    options: result.options,
-                    diagnostics: result.diagnostics,
-                    matchedRules: result.matched.map((rule) => ({ id: rule.id, label: rule.label }))
-                }
             }
         }
     })
@@ -804,8 +608,8 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                                 kind: 'text',
                                 tone: 'info',
                                 text: {
-                                    en: 'Set SERVERCHAN_SENDKEY in the Hub environment, enable this plugin on Hub, and keep legacy SERVERCHAN_NOTIFICATION disabled to avoid duplicate notifications.',
-                                    'zh-CN': '在 Hub 环境变量中设置 SERVERCHAN_SENDKEY 后启用此插件；请关闭旧的 SERVERCHAN_NOTIFICATION，避免重复通知。'
+                                    en: 'Set SERVERCHAN_SENDKEY in the Hub environment, then enable this plugin on Hub. Legacy SERVERCHAN_NOTIFICATION no longer creates a core notification channel.',
+                                    'zh-CN': '在 Hub 环境变量中设置 SERVERCHAN_SENDKEY 后启用此插件。旧的 SERVERCHAN_NOTIFICATION 不再创建核心通知通道。'
                                 }
                             },
                             {
@@ -841,14 +645,14 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                                         label: { en: 'Agents', 'zh-CN': 'Agent' },
                                         description: { en: 'Matches the agent label in notifications, for example Codex or Claude.', 'zh-CN': '匹配通知中的 Agent 名称，例如 Codex 或 Claude。' },
                                         type: 'multiSelect',
-                                        optionsSource: 'notification.agents'
+                                        optionsSource: 'sessions.agents'
                                     },
                                     {
                                         key: 'sessionPathPrefixes',
                                         label: { en: 'Workspaces', 'zh-CN': '工作区' },
                                         description: { en: 'Selected paths also match subdirectories. Empty = all workspaces.', 'zh-CN': '选择的路径会同时匹配其子目录。留空 = 全部工作区。' },
                                         type: 'multiSelect',
-                                        optionsSource: 'notification.workspaces'
+                                        optionsSource: 'sessions.workspaces'
                                     }
                                 ]
                             },
@@ -880,132 +684,6 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             }
         }),
         files: [{ path: 'dist/hub.js', content: serverChanNotifierHubRuntime }]
-    },
-    {
-        manifest: manifestBase({
-            id: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
-            name: 'Runner Environment Profiles',
-            description: 'First-party Runner plugin for applying non-secret proxy, registry, and PATH environment profiles before spawning agents.',
-            display: displayMetadata(
-                'Runner Environment Profiles',
-                'Runner 环境配置',
-                'Applies non-secret proxy, registry, and PATH profiles before Runner-spawned agents start.',
-                '在 Runner 启动 agent 前应用非敏感的代理、包源和 PATH 环境配置。',
-                [
-                    '- Applies HTTP proxy, registry, and PATH values before spawning agents.',
-                    '- Supports flat settings or multiple JSON profiles with agent-id and workspace-prefix filters.',
-                    '- Uses path-boundary prefix matching so `/repo` does not match `/repo2`.',
-                    '- Runs on selected Runner targets; values are non-secret config.'
-                ].join('\n'),
-                [
-                    '- 在启动 agent 前注入 HTTP 代理、包源和 PATH 等环境变量。',
-                    '- 支持简单字段或多个 JSON Profile，并可按 Agent ID 与工作区前缀限定生效范围。',
-                    '- 使用路径边界匹配，`/repo` 不会误匹配 `/repo2`。',
-                    '- 在指定 Runner 目标运行；配置值不应包含密钥。'
-                ].join('\n')
-            ),
-            capabilities: [{
-                id: 'runner-env-profiles',
-                kind: 'runner.spawnExtension',
-                displayName: 'Runner Environment Profiles',
-                description: 'Applies common non-secret environment variables to Runner-spawned agent processes.',
-                display: labelMetadata(
-                    'Runner Environment Profiles',
-                    'Runner 环境配置',
-                    'Applies common non-secret environment variables to Runner-spawned agent processes.',
-                    '为 Runner 启动的 agent 进程应用常用非敏感环境变量。'
-                ),
-                parts: {
-                    web: {
-                        required: true,
-                        contributions: [{ type: 'settingsPanel', id: 'runner-env-profiles' }]
-                    },
-                    runner: {
-                        required: true,
-                        target: 'selected-runner',
-                        contributions: [{ type: 'environmentProvider', id: 'runner-env-profiles' }]
-                    }
-                }
-            }],
-            runtimes: {
-                runner: { entry: 'dist/runner.js' }
-            },
-            contributions: {
-                runner: {
-                    environmentProviders: [{
-                        id: 'runner-env-profiles',
-                        displayName: 'Runner Environment Profiles',
-                        description: 'Applies proxy, registry, and PATH settings to spawned agents.',
-                        display: labelMetadata(
-                            'Runner Environment Profiles',
-                            'Runner 环境配置',
-                            'Applies proxy, registry, and PATH settings to spawned agents.',
-                            '为启动的 agent 应用代理、包源与 PATH 设置。'
-                        )
-                    }]
-                },
-                web: {
-                    settingsPanels: [{
-                        id: 'runner-env-profiles',
-                        title: {
-                            en: 'Runner Environment Profiles',
-                            'zh-CN': 'Runner 环境配置'
-                        },
-                        description: {
-                            en: 'Configure non-secret environment values for agents spawned on a Runner.',
-                            'zh-CN': '为 Runner 启动的 agent 配置非敏感环境变量。'
-                        },
-                        components: [
-                            {
-                                kind: 'text',
-                                tone: 'info',
-                                text: {
-                                    en: 'Use the simple fields for one profile, or profilesJson for multiple profiles. Secret-like env keys are rejected.',
-                                    'zh-CN': '单组配置使用下方简单字段；多组规则使用 profilesJson。疑似密钥的环境变量名会被拒绝。'
-                                }
-                            },
-                            {
-                                kind: 'schemaForm',
-                                title: { en: 'Default profile', 'zh-CN': '默认 Profile' },
-                                fields: [
-                                    { key: 'agentIds', label: { en: 'Agent ids (comma-separated, blank = all)', 'zh-CN': 'Agent ID（逗号分隔，留空表示全部）' }, type: 'text' },
-                                    { key: 'directoryPrefixes', label: { en: 'Workspace prefixes (comma/newline, blank = all)', 'zh-CN': '工作区前缀（逗号/换行，留空表示全部）' }, type: 'text' },
-                                    { key: 'httpProxy', label: 'HTTP_PROXY', type: 'text' },
-                                    { key: 'httpsProxy', label: 'HTTPS_PROXY', type: 'text' },
-                                    { key: 'noProxy', label: 'NO_PROXY', type: 'text', defaultValue: 'localhost,127.0.0.1,::1' },
-                                    { key: 'goProxy', label: 'GOPROXY', type: 'text' },
-                                    { key: 'npmRegistry', label: 'NPM registry', type: 'text' },
-                                    { key: 'pathPrepend', label: { en: 'PATH prepend entries', 'zh-CN': 'PATH 前置目录' }, type: 'text' }
-                                ]
-                            },
-                            {
-                                kind: 'schemaForm',
-                                title: { en: 'Advanced profiles JSON', 'zh-CN': '高级 Profile JSON' },
-                                description: {
-                                    en: 'JSON array, e.g. [{"name":"cn","agentIds":["codex"],"directoryPrefixes":["/repo"],"env":{"NPM_CONFIG_REGISTRY":"https://registry.npmmirror.com"},"pathPrepend":["/opt/bin"]}].',
-                                    'zh-CN': 'JSON 数组，例如 [{"name":"cn","agentIds":["codex"],"directoryPrefixes":["/repo"],"env":{"NPM_CONFIG_REGISTRY":"https://registry.npmmirror.com"},"pathPrepend":["/opt/bin"]}]。'
-                                },
-                                fields: [
-                                    { key: 'profilesJson', label: { en: 'profilesJson', 'zh-CN': 'profilesJson' }, type: 'text' }
-                                ]
-                            }
-                        ]
-                    }]
-                }
-            },
-            compatibility: {
-                pluginApi: '>=0.1 <0.2',
-                runner: {
-                    extensionPoints: ['runner.environmentProvider']
-                }
-            },
-            install: {
-                runnerPlacement: 'compatible-runners',
-                offlineRunnerPolicy: 'skip',
-                minReadyRunnerCount: 1
-            }
-        }),
-        files: [{ path: 'dist/runner.js', content: runnerEnvProfilesRuntime }]
     },
     {
         manifest: manifestBase({
@@ -1050,8 +728,7 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                         required: true,
                         target: 'selected-runner',
                         contributions: [
-                            { type: 'spawnOptionsProvider', id: 'runner-launch-presets' },
-                            { type: 'action', id: 'runner-launch-presets.resolve' }
+                            { type: 'spawnOptionsProvider', id: 'runner-launch-presets' }
                         ]
                     }
                 }
@@ -1086,12 +763,9 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                         },
                         components: [
                             {
-                                kind: 'text',
-                                tone: 'info',
-                                text: {
-                                    en: 'This first-party plugin uses the built-in visual preset editor in HAPI Web. Configure presets from the plugin detail page; raw JSON remains available in developer details.',
-                                    'zh-CN': '该一方插件使用 HAPI Web 内置的可视化预设编辑器。请在插件详情页配置预设；原始 JSON 仍可在开发者详情中查看。'
-                                }
+                                id: 'runner-launch-presets-editor',
+                                kind: 'runnerSpawnDefaultsEditor',
+                                configKey: 'rulesJson'
                             }
                         ]
                     }]
@@ -1100,7 +774,7 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             compatibility: {
                 pluginApi: '>=0.1 <0.2',
                 runner: {
-                    extensionPoints: ['runner.spawnOptionsProvider', 'runner.action']
+                    extensionPoints: ['runner.spawnOptionsProvider']
                 }
             },
             install: {
@@ -1114,6 +788,9 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
 ]
 
 export const defaultEnabledBundledPluginIds = [HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID]
+export const defaultEnabledBundledRunnerPluginIds = bundledCorePlugins
+    .filter((plugin) => defaultEnabledBundledPluginIds.includes(plugin.manifest.id) && Boolean(plugin.manifest.runtimes?.runner))
+    .map((plugin) => plugin.manifest.id)
 
 export function getBundledCorePluginsRoot(hapiHome: string): string {
     return getBundledPluginsRoot(hapiHome, HAPI_BUNDLED_CORE_PLUGINS_DIR)

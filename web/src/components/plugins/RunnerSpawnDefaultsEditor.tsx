@@ -11,21 +11,28 @@ import {
 } from '@hapi/protocol'
 import {
     builtinAgentDescriptors,
+    type WebSchemaFormOption,
+    type WebSchemaFormOptionsSource,
     type AgentCapabilityProviderSnapshot,
     type AgentDescriptor
 } from '@hapi/protocol/plugins'
-import type { DescriptorOptionSources } from './DescriptorRenderer'
+
+type DescriptorOption = WebSchemaFormOption & {
+    count?: number
+    lastSeenAt?: number
+}
+type DescriptorOptionSources = Partial<Record<WebSchemaFormOptionsSource, DescriptorOption[]>>
 
 type PresetScopeMode = 'all' | 'selected'
 
-type LaunchPresetDefaults = {
+type SpawnDefaultOptions = {
     model?: string
     permissionMode?: string
     modelReasoningEffort?: string
     effort?: string
 }
 
-export type RunnerLaunchPresetDraft = {
+export type RunnerSpawnDefaultDraft = {
     id: string
     label: string
     enabled: boolean
@@ -34,7 +41,7 @@ export type RunnerLaunchPresetDraft = {
     directoryMode: PresetScopeMode
     directoryPrefixes: string[]
     applyToResume: boolean
-    defaults: LaunchPresetDefaults
+    defaults: SpawnDefaultOptions
 }
 
 type PickerOption = {
@@ -51,8 +58,8 @@ type MatchInput = {
 }
 
 type MatchResult = {
-    matched: RunnerLaunchPresetDraft[]
-    options: LaunchPresetDefaults
+    matched: RunnerSpawnDefaultDraft[]
+    options: SpawnDefaultOptions
 }
 
 const KNOWN_CONFIG_KEYS = [
@@ -90,7 +97,7 @@ function uniqueList(entries: string[]): string[] {
     return result
 }
 
-export function launchPresetListFromValue(value: unknown): string[] {
+export function spawnDefaultListFromValue(value: unknown): string[] {
     if (Array.isArray(value)) return uniqueList(value.map((entry) => String(entry)))
     if (typeof value === 'string') return uniqueList(value.split(/[\n,]/))
     return []
@@ -102,18 +109,18 @@ function normalizeDefaultValue(value: unknown): string | undefined {
     return text
 }
 
-function hasDefaults(defaults: LaunchPresetDefaults): boolean {
+function hasDefaults(defaults: SpawnDefaultOptions): boolean {
     return Boolean(defaults.model || defaults.permissionMode || defaults.modelReasoningEffort || defaults.effort)
 }
 
-function normalizeRule(raw: unknown, fallbackId: string): RunnerLaunchPresetDraft | null {
+function normalizeRule(raw: unknown, fallbackId: string): RunnerSpawnDefaultDraft | null {
     if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null
     const obj = raw as Record<string, unknown>
     const rawDefaults = obj.defaults && typeof obj.defaults === 'object' && !Array.isArray(obj.defaults)
         ? obj.defaults as Record<string, unknown>
         : obj
-    const agentIds = launchPresetListFromValue(obj.agentIds)
-    const directoryPrefixes = launchPresetListFromValue(obj.directoryPrefixes)
+    const agentIds = spawnDefaultListFromValue(obj.agentIds)
+    const directoryPrefixes = spawnDefaultListFromValue(obj.directoryPrefixes)
     const permissionMode = normalizeDefaultValue(rawDefaults.permissionMode)
         ?? (typeof rawDefaults.yolo === 'boolean' && rawDefaults.yolo ? 'yolo' : undefined)
     return {
@@ -134,16 +141,16 @@ function normalizeRule(raw: unknown, fallbackId: string): RunnerLaunchPresetDraf
     }
 }
 
-function flatPresetFromConfig(config: Record<string, unknown>): RunnerLaunchPresetDraft | null {
-    const defaults: LaunchPresetDefaults = {
+function flatPresetFromConfig(config: Record<string, unknown>): RunnerSpawnDefaultDraft | null {
+    const defaults: SpawnDefaultOptions = {
         model: normalizeDefaultValue(config.model),
         permissionMode: normalizeDefaultValue(config.permissionMode) ?? (config.yolo === true ? 'yolo' : undefined),
         modelReasoningEffort: normalizeDefaultValue(config.modelReasoningEffort),
         effort: normalizeDefaultValue(config.effort)
     }
     if (!hasDefaults(defaults)) return null
-    const agentIds = launchPresetListFromValue(config.agentIds)
-    const directoryPrefixes = launchPresetListFromValue(config.directoryPrefixes)
+    const agentIds = spawnDefaultListFromValue(config.agentIds)
+    const directoryPrefixes = spawnDefaultListFromValue(config.directoryPrefixes)
     return {
         id: 'default',
         label: 'Default preset',
@@ -157,16 +164,16 @@ function flatPresetFromConfig(config: Record<string, unknown>): RunnerLaunchPres
     }
 }
 
-export function parseRunnerLaunchPresetConfig(config: Record<string, unknown>): { presets: RunnerLaunchPresetDraft[]; jsonError?: string } {
-    const presets: RunnerLaunchPresetDraft[] = []
+export function parseRunnerSpawnDefaultConfig(config: Record<string, unknown>, configKey = 'rulesJson'): { presets: RunnerSpawnDefaultDraft[]; jsonError?: string } {
+    const presets: RunnerSpawnDefaultDraft[] = []
     const flat = flatPresetFromConfig(config)
     if (flat) presets.push(flat)
 
-    const rulesJson = cleanString(config.rulesJson)
+    const rulesJson = cleanString(config[configKey])
     if (!rulesJson) return { presets }
     try {
         const parsed = JSON.parse(rulesJson) as unknown
-        if (!Array.isArray(parsed)) return { presets, jsonError: 'rulesJson must be a JSON array.' }
+        if (!Array.isArray(parsed)) return { presets, jsonError: `${configKey} must be a JSON array.` }
         parsed.forEach((rule, index) => {
             const normalized = normalizeRule(rule, `preset-${index + 1}`)
             if (normalized) presets.push(normalized)
@@ -177,7 +184,7 @@ export function parseRunnerLaunchPresetConfig(config: Record<string, unknown>): 
     }
 }
 
-function serializePreset(preset: RunnerLaunchPresetDraft): Record<string, unknown> {
+function serializePreset(preset: RunnerSpawnDefaultDraft): Record<string, unknown> {
     const defaults: Record<string, unknown> = {}
     if (preset.defaults.model) defaults.model = preset.defaults.model
     if (preset.defaults.permissionMode) defaults.permissionMode = preset.defaults.permissionMode
@@ -195,12 +202,13 @@ function serializePreset(preset: RunnerLaunchPresetDraft): Record<string, unknow
     }
 }
 
-export function serializeRunnerLaunchPresetConfig(presets: RunnerLaunchPresetDraft[], baseConfig: Record<string, unknown> = {}): Record<string, unknown> {
+export function serializeRunnerSpawnDefaultConfig(presets: RunnerSpawnDefaultDraft[], baseConfig: Record<string, unknown> = {}, configKey = 'rulesJson'): Record<string, unknown> {
     const next: Record<string, unknown> = { ...baseConfig }
     for (const key of KNOWN_CONFIG_KEYS) delete next[key]
+    delete next[configKey]
     const serializable = presets.map(serializePreset)
     if (serializable.length > 0) {
-        next.rulesJson = JSON.stringify(serializable, null, 2)
+        next[configKey] = JSON.stringify(serializable, null, 2)
     }
     return next
 }
@@ -223,7 +231,7 @@ function pathMatchesPrefix(actual: string | undefined, prefix: string): boolean 
     return path === base || path.startsWith(`${base}/`)
 }
 
-function presetMatches(preset: RunnerLaunchPresetDraft, input: MatchInput): boolean {
+function presetMatches(preset: RunnerSpawnDefaultDraft, input: MatchInput): boolean {
     if (!preset.enabled) return false
     if (input.resumeSessionId && !preset.applyToResume) return false
     if (preset.agentMode === 'selected' && preset.agentIds.length > 0 && (!input.agent || !preset.agentIds.includes(input.agent))) return false
@@ -233,7 +241,7 @@ function presetMatches(preset: RunnerLaunchPresetDraft, input: MatchInput): bool
     return true
 }
 
-function specificity(preset: RunnerLaunchPresetDraft): number {
+function specificity(preset: RunnerSpawnDefaultDraft): number {
     const agentScore = preset.agentMode === 'selected' && preset.agentIds.length > 0 ? 100000 : 0
     const pathScore = preset.directoryMode === 'selected'
         ? preset.directoryPrefixes.reduce((max, prefix) => Math.max(max, normalizePath(prefix).length), 0)
@@ -241,11 +249,11 @@ function specificity(preset: RunnerLaunchPresetDraft): number {
     return agentScore + pathScore
 }
 
-export function resolveRunnerLaunchPresetDrafts(presets: RunnerLaunchPresetDraft[], input: MatchInput): MatchResult {
+export function resolveRunnerSpawnDefaultDrafts(presets: RunnerSpawnDefaultDraft[], input: MatchInput): MatchResult {
     const matched = presets
         .filter((preset) => presetMatches(preset, input))
         .sort((left, right) => specificity(left) - specificity(right))
-    const options: LaunchPresetDefaults = {}
+    const options: SpawnDefaultOptions = {}
     for (const preset of matched) {
         if (preset.defaults.model) options.model = preset.defaults.model
         if (preset.defaults.permissionMode) options.permissionMode = preset.defaults.permissionMode
@@ -255,7 +263,7 @@ export function resolveRunnerLaunchPresetDrafts(presets: RunnerLaunchPresetDraft
     return { matched, options }
 }
 
-function nextPresetId(presets: RunnerLaunchPresetDraft[]): string {
+function nextPresetId(presets: RunnerSpawnDefaultDraft[]): string {
     const used = new Set(presets.map((preset) => preset.id))
     for (let index = presets.length + 1; index < presets.length + 1000; index += 1) {
         const candidate = `preset-${index}`
@@ -264,7 +272,7 @@ function nextPresetId(presets: RunnerLaunchPresetDraft[]): string {
     return `preset-${Date.now()}`
 }
 
-function fallbackPreset(presets: RunnerLaunchPresetDraft[], firstAgentId?: string, firstWorkspace?: string): RunnerLaunchPresetDraft {
+function fallbackPreset(presets: RunnerSpawnDefaultDraft[], firstAgentId?: string, firstWorkspace?: string): RunnerSpawnDefaultDraft {
     const id = nextPresetId(presets)
     return {
         id,
@@ -307,7 +315,11 @@ function uniqueOptions(options: PickerOption[]): PickerOption[] {
 
 function workspaceOptions(machine: Machine | null, optionSources?: DescriptorOptionSources): PickerOption[] {
     const rootOptions = (machine?.metadata?.workspaceRoots ?? []).map((path) => ({ value: path, label: path }))
-    const recentOptions = (optionSources?.['notification.workspaces'] ?? []).map((option) => ({
+    const recentOptions = [
+        ...(optionSources?.['runner.workspaces'] ?? []),
+        ...(optionSources?.['sessions.workspaces'] ?? []),
+        ...(optionSources?.['notification.workspaces'] ?? [])
+    ].map((option) => ({
         value: option.value,
         label: typeof option.label === 'string' ? option.label : option.value,
         description: option.description ? (typeof option.description === 'string' ? option.description : undefined) : undefined
@@ -366,7 +378,7 @@ function modeDescription(mode: PermissionMode, locale: 'en' | 'zh-CN'): string {
     return mode
 }
 
-function targetAgentIds(preset: RunnerLaunchPresetDraft, descriptors: AgentDescriptor[]): string[] {
+function targetAgentIds(preset: RunnerSpawnDefaultDraft, descriptors: AgentDescriptor[]): string[] {
     if (preset.agentMode === 'selected') return preset.agentIds.filter((id) => descriptors.some((descriptor) => descriptor.id === id))
     return descriptors.map((descriptor) => descriptor.id)
 }
@@ -379,7 +391,7 @@ function supportsCodexReasoning(agentIds: string[]): boolean {
     return agentIds.includes('codex')
 }
 
-function defaultsSummary(defaults: LaunchPresetDefaults, locale: 'en' | 'zh-CN'): string[] {
+function defaultsSummary(defaults: SpawnDefaultOptions, locale: 'en' | 'zh-CN'): string[] {
     const entries: string[] = []
     if (defaults.model) entries.push(`model=${defaults.model}`)
     if (defaults.permissionMode) entries.push(`${local(locale, '权限', 'permission')}=${defaults.permissionMode}`)
@@ -412,7 +424,7 @@ function ChipMultiPicker(props: {
     }
     const remove = (value: string) => props.onChange(props.values.filter((entry) => entry !== value))
     const addCustom = () => {
-        const values = launchPresetListFromValue(query)
+        const values = spawnDefaultListFromValue(query)
         if (values.length === 0) return
         props.onChange(uniqueList([...props.values, ...values]))
         setQuery('')
@@ -455,7 +467,7 @@ function ChipMultiPicker(props: {
                         className="min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)] placeholder:text-[var(--app-hint)]"
                     />
                     {props.allowCustom !== false ? (
-                        <Button type="button" size="sm" variant="outline" disabled={props.disabled || launchPresetListFromValue(query).length === 0} onClick={addCustom}>
+                        <Button type="button" size="sm" variant="outline" disabled={props.disabled || spawnDefaultListFromValue(query).length === 0} onClick={addCustom}>
                             {props.addLabel}
                         </Button>
                     ) : null}
@@ -536,7 +548,7 @@ function SelectField(props: {
 }
 
 function PresetEditorCard(props: {
-    preset: RunnerLaunchPresetDraft
+    preset: RunnerSpawnDefaultDraft
     descriptors: AgentDescriptor[]
     snapshots: AgentCapabilityProviderSnapshot[]
     workspaceOptions: PickerOption[]
@@ -544,7 +556,7 @@ function PresetEditorCard(props: {
     disabled?: boolean
     expanded: boolean
     onToggleExpanded: () => void
-    onUpdate: (preset: RunnerLaunchPresetDraft) => void
+    onUpdate: (preset: RunnerSpawnDefaultDraft) => void
     onDelete: () => void
     onDuplicate: () => void
 }) {
@@ -576,7 +588,7 @@ function PresetEditorCard(props: {
         ? local(props.locale, '所有工作区', 'All workspaces')
         : props.preset.directoryPrefixes.join(', ')
 
-    const updateDefaults = (defaults: Partial<LaunchPresetDefaults>) => props.onUpdate({
+    const updateDefaults = (defaults: Partial<SpawnDefaultOptions>) => props.onUpdate({
         ...props.preset,
         defaults: { ...props.preset.defaults, ...defaults }
     })
@@ -751,7 +763,7 @@ function PresetEditorCard(props: {
 }
 
 function TestMatchPanel(props: {
-    presets: RunnerLaunchPresetDraft[]
+    presets: RunnerSpawnDefaultDraft[]
     descriptors: AgentDescriptor[]
     workspaceOptions: PickerOption[]
     locale: 'en' | 'zh-CN'
@@ -759,7 +771,7 @@ function TestMatchPanel(props: {
     const [agent, setAgent] = useState(props.descriptors[0]?.id ?? 'codex')
     const [directory, setDirectory] = useState(props.workspaceOptions[0]?.value ?? '')
     const [resume, setResume] = useState(false)
-    const result = useMemo(() => resolveRunnerLaunchPresetDrafts(props.presets, {
+    const result = useMemo(() => resolveRunnerSpawnDefaultDrafts(props.presets, {
         agent,
         directory: directory || '/',
         cwd: directory || '/',
@@ -784,8 +796,8 @@ function TestMatchPanel(props: {
                 </label>
                 <label className="block space-y-1 text-sm">
                     <span className="font-medium">{local(props.locale, '工作区', 'Workspace')}</span>
-                    <input value={directory} list="launch-preset-test-workspaces" onChange={(event) => setDirectory(event.target.value)} className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]" />
-                    <datalist id="launch-preset-test-workspaces">
+                    <input value={directory} list="spawn-default-test-workspaces" onChange={(event) => setDirectory(event.target.value)} className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]" />
+                    <datalist id="spawn-default-test-workspaces">
                         {props.workspaceOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
                     </datalist>
                 </label>
@@ -796,7 +808,7 @@ function TestMatchPanel(props: {
             </label>
             <div className="mt-3 space-y-2 rounded-lg bg-[var(--app-subtle-bg)] p-3 text-sm">
                 <div className="font-medium">{local(props.locale, '匹配顺序', 'Match order')}</div>
-                {result.matched.length === 0 ? <div className="text-[var(--app-hint)]">{local(props.locale, '没有预设会应用。', 'No presets would apply.')}</div> : (
+                {result.matched.length === 0 ? <div className="text-[var(--app-hint)]">{local(props.locale, '没有默认值会应用。', 'No presets would apply.')}</div> : (
                     <ol className="list-inside list-decimal space-y-1">
                         {result.matched.map((preset) => <li key={preset.id}>{preset.label || preset.id}</li>)}
                     </ol>
@@ -808,13 +820,14 @@ function TestMatchPanel(props: {
     )
 }
 
-export function RunnerLaunchPresetsEditor(props: {
+export function RunnerSpawnDefaultsEditor(props: {
     config: Record<string, unknown>
     machines: Machine[]
     targetMachineId?: string | null
     optionSources?: DescriptorOptionSources
     dirty?: boolean
     disabled?: boolean
+    configKey?: string
     onConfigChange: (config: Record<string, unknown>) => void
 }) {
     const { locale } = useTranslation()
@@ -827,7 +840,8 @@ export function RunnerLaunchPresetsEditor(props: {
     const descriptors = useMemo(() => agentDescriptorsForMachine(machine), [machine])
     const snapshots = useMemo(() => machine?.runnerState?.agentCapabilities ?? [], [machine])
     const workspaces = useMemo(() => workspaceOptions(machine, props.optionSources), [machine, props.optionSources])
-    const parsed = useMemo(() => parseRunnerLaunchPresetConfig(props.config), [props.config])
+    const configKey = props.configKey ?? 'rulesJson'
+    const parsed = useMemo(() => parseRunnerSpawnDefaultConfig(props.config, configKey), [props.config, configKey])
     const starterPreset = useMemo(
         () => fallbackPreset([], descriptors[0]?.id, workspaces[0]?.value),
         [descriptors, workspaces]
@@ -836,10 +850,10 @@ export function RunnerLaunchPresetsEditor(props: {
     const [expandedId, setExpandedId] = useState<string | null>(parsed.presets[0]?.id ?? starterPreset.id)
     const activeExpandedId = expandedId ?? (parsed.presets.length === 0 ? starterPreset.id : null)
 
-    const commit = (presets: RunnerLaunchPresetDraft[]) => {
-        props.onConfigChange(serializeRunnerLaunchPresetConfig(presets, props.config))
+    const commit = (presets: RunnerSpawnDefaultDraft[]) => {
+        props.onConfigChange(serializeRunnerSpawnDefaultConfig(presets, props.config, configKey))
     }
-    const updatePreset = (preset: RunnerLaunchPresetDraft) => {
+    const updatePreset = (preset: RunnerSpawnDefaultDraft) => {
         if (parsed.presets.length === 0) {
             commit([preset])
             setExpandedId(preset.id)
@@ -853,7 +867,7 @@ export function RunnerLaunchPresetsEditor(props: {
         commit([...basePresets, next])
         setExpandedId(next.id)
     }
-    const duplicatePreset = (preset: RunnerLaunchPresetDraft) => {
+    const duplicatePreset = (preset: RunnerSpawnDefaultDraft) => {
         const basePresets = parsed.presets.length > 0 ? parsed.presets : [starterPreset]
         const id = nextPresetId(basePresets)
         const copy = { ...preset, id, label: `${preset.label || preset.id} copy` }
@@ -867,7 +881,7 @@ export function RunnerLaunchPresetsEditor(props: {
                 <div className="flex min-w-0 flex-wrap items-start justify-between gap-3">
                     <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2">
-                            <h3 className="font-semibold">{local(locale, 'Runner 启动预设', 'Runner Launch Presets')}</h3>
+                            <h3 className="font-semibold">{local(locale, 'Runner 启动默认值', 'Runner spawn defaults')}</h3>
                             {props.dirty ? <Badge variant="warning">{local(locale, '未保存', 'Unsaved')}</Badge> : <Badge variant="success">{local(locale, '已保存', 'Saved')}</Badge>}
                         </div>
                         <div className="mt-1 text-sm text-[var(--app-hint)]">
@@ -875,15 +889,15 @@ export function RunnerLaunchPresetsEditor(props: {
                         </div>
                         {machine ? <div className="mt-1 text-xs text-[var(--app-hint)]">{local(locale, '目标 Runner', 'Target runner')}: {machine.metadata?.displayName ?? machine.id}</div> : null}
                     </div>
-                    <Button type="button" size="sm" disabled={props.disabled} onClick={addPreset}>+ {local(locale, '新建预设', 'New preset')}</Button>
+                    <Button type="button" size="sm" disabled={props.disabled} onClick={addPreset}>+ {local(locale, '新建默认值', 'New preset')}</Button>
                 </div>
-                {parsed.jsonError ? <div className="mt-3 rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-sm text-[var(--app-badge-warning-text)]">rulesJson: {parsed.jsonError}</div> : null}
+                {parsed.jsonError ? <div className="mt-3 rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-sm text-[var(--app-badge-warning-text)]">{configKey}: {parsed.jsonError}</div> : null}
             </div>
 
             <div className="space-y-3">
                 {parsed.presets.length === 0 ? (
                     <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-3 text-sm text-[var(--app-hint)]">
-                        {local(locale, '当前还没有已保存预设；下方已展开第一条预设草稿，填写任意默认值后右上角保存并重载即可生效。', 'No saved presets yet; the first preset draft is expanded below. Set any default and save/reload from the top-right to apply.')}
+                        {local(locale, '当前还没有已保存默认值；下方已展开第一条默认值草稿，填写任意默认值后右上角保存并重载即可生效。', 'No saved presets yet; the first preset draft is expanded below. Set any default and save/reload from the top-right to apply.')}
                     </div>
                 ) : null}
                 {visiblePresets.map((preset) => (

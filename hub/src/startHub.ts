@@ -14,9 +14,7 @@ import { PushNotificationChannel } from './push/pushNotificationChannel'
 import { VisibilityTracker } from './visibility/visibilityTracker'
 import { TunnelManager } from './tunnel'
 import { waitForTunnelTlsReady } from './tunnel/tlsGate'
-import { ServerChanChannel } from './serverchan/channel'
 import { HubPluginManager } from './plugins/pluginManager'
-import { HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID } from '@hapi/protocol/plugins/bundledCore'
 import QRCode from 'qrcode'
 import type { Server as BunServer } from 'bun'
 import type { WebSocketData } from '@socket.io/bun-engine'
@@ -153,11 +151,12 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
     }
     if (config.serverChanSendKey) {
         const source = formatSource(config.sources.serverChanSendKey)
-        const notificationSource = formatSource(config.sources.serverChanNotification)
-        console.log(`[Hub] ServerChan: enabled (${source})`)
-        console.log(`[Hub] ServerChan notifications: ${config.serverChanNotification ? 'enabled' : 'disabled'} (${notificationSource})`)
+        console.log(`[Hub] ServerChan secret: available for plugins (${source})`)
+        if (config.serverChanNotification) {
+            console.log('[Hub] SERVERCHAN_NOTIFICATION is legacy and no longer registers a core notification channel; enable the ServerChan Notifier plugin instead.')
+        }
     } else {
-        console.log('[Hub] ServerChan: disabled (no SERVERCHAN_SENDKEY)')
+        console.log('[Hub] ServerChan secret: unavailable (no SERVERCHAN_SENDKEY)')
     }
 
     // Display tunnel status
@@ -217,15 +216,6 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
             console.warn(message)
         } else {
             console.log(message)
-        }
-    }
-
-    const serverChanPluginEnabled = pluginManager.getPlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)?.enabled === true
-    if (config.serverChanSendKey && config.serverChanNotification) {
-        if (serverChanPluginEnabled) {
-            console.log('[Hub] ServerChan: legacy env notification channel skipped because ServerChan Notifier plugin is enabled.')
-        } else {
-            notificationChannels.push(new ServerChanChannel(config.serverChanSendKey, config.publicUrl))
         }
     }
 

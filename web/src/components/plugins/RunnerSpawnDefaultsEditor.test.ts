@@ -4,20 +4,20 @@ import { describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { builtinAgentDescriptors } from '@hapi/protocol/plugins'
 import {
-    RunnerLaunchPresetsEditor,
+    RunnerSpawnDefaultsEditor,
     commonPermissionModesForAgents,
-    parseRunnerLaunchPresetConfig,
-    resolveRunnerLaunchPresetDrafts,
-    serializeRunnerLaunchPresetConfig,
-    type RunnerLaunchPresetDraft
-} from './RunnerLaunchPresetsEditor'
+    parseRunnerSpawnDefaultConfig,
+    resolveRunnerSpawnDefaultDrafts,
+    serializeRunnerSpawnDefaultConfig,
+    type RunnerSpawnDefaultDraft
+} from './RunnerSpawnDefaultsEditor'
 
-describe('RunnerLaunchPresetsEditor helpers', () => {
+describe('RunnerSpawnDefaultsEditor helpers', () => {
     it('renders an expanded editable draft when config is empty', () => {
         render(createElement(
             I18nProvider,
             null,
-            createElement(RunnerLaunchPresetsEditor, {
+            createElement(RunnerSpawnDefaultsEditor, {
                 config: {},
                 machines: [],
                 onConfigChange: vi.fn()
@@ -32,7 +32,7 @@ describe('RunnerLaunchPresetsEditor helpers', () => {
     })
 
     it('stores all-agent/all-workspace mode as empty scope instead of copying every option', () => {
-        const presets: RunnerLaunchPresetDraft[] = [{
+        const presets: RunnerSpawnDefaultDraft[] = [{
             id: 'all-default',
             label: 'All default',
             enabled: true,
@@ -44,7 +44,7 @@ describe('RunnerLaunchPresetsEditor helpers', () => {
             defaults: { permissionMode: 'default', model: 'gpt-5-codex' }
         }]
 
-        const serialized = serializeRunnerLaunchPresetConfig(presets)
+        const serialized = serializeRunnerSpawnDefaultConfig(presets)
         const rules = JSON.parse(String(serialized.rulesJson)) as Array<Record<string, unknown>>
         expect(rules[0]?.agentIds).toBeUndefined()
         expect(rules[0]?.directoryPrefixes).toBeUndefined()
@@ -52,7 +52,7 @@ describe('RunnerLaunchPresetsEditor helpers', () => {
     })
 
     it('migrates legacy flat config into a visual preset and serializes to rulesJson', () => {
-        const parsed = parseRunnerLaunchPresetConfig({
+        const parsed = parseRunnerSpawnDefaultConfig({
             agentIds: 'codex',
             directoryPrefixes: '/repo',
             permissionMode: 'yolo',
@@ -66,7 +66,7 @@ describe('RunnerLaunchPresetsEditor helpers', () => {
             defaults: { permissionMode: 'yolo', modelReasoningEffort: 'xhigh' }
         })
 
-        const serialized = serializeRunnerLaunchPresetConfig(parsed.presets, { agentIds: 'codex', permissionMode: 'yolo' })
+        const serialized = serializeRunnerSpawnDefaultConfig(parsed.presets, { agentIds: 'codex', permissionMode: 'yolo' })
         expect(serialized.agentIds).toBeUndefined()
         expect(serialized.permissionMode).toBeUndefined()
         expect(typeof serialized.rulesJson).toBe('string')
@@ -79,7 +79,7 @@ describe('RunnerLaunchPresetsEditor helpers', () => {
     })
 
     it('resolves draft presets by specificity for test matching', () => {
-        const presets: RunnerLaunchPresetDraft[] = [
+        const presets: RunnerSpawnDefaultDraft[] = [
             {
                 id: 'all',
                 label: 'All',
@@ -103,7 +103,7 @@ describe('RunnerLaunchPresetsEditor helpers', () => {
                 defaults: { model: 'gpt-5-codex', permissionMode: 'yolo' }
             }
         ]
-        const result = resolveRunnerLaunchPresetDrafts(presets, { agent: 'codex', directory: '/repo/app' })
+        const result = resolveRunnerSpawnDefaultDrafts(presets, { agent: 'codex', directory: '/repo/app' })
         expect(result.matched.map((preset) => preset.id)).toEqual(['all', 'codex-repo'])
         expect(result.options).toEqual({ model: 'gpt-5-codex', permissionMode: 'yolo' })
     })

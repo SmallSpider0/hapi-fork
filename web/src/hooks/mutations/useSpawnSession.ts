@@ -12,6 +12,7 @@ type SpawnInput = {
     modelReasoningEffort?: string
     permissionMode?: string
     yolo?: boolean
+    manualFields?: string[]
     sessionType?: 'simple' | 'worktree'
     worktreeName?: string
     pluginFields?: Record<string, unknown>
@@ -40,7 +41,8 @@ export function useSpawnSession(api: ApiClient | null): {
                 input.worktreeName,
                 input.effort,
                 input.permissionMode,
-                input.pluginFields
+                input.pluginFields,
+                input.manualFields
             )
         },
         onSuccess: () => {

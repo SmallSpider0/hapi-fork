@@ -33,6 +33,7 @@ export const RunnerSpawnContextSchema = z.object({
     modelReasoningEffort: z.string().optional(),
     permissionMode: z.string().optional(),
     yolo: z.boolean().optional(),
+    manualFields: z.array(z.string().min(1)).optional(),
     pluginFields: z.record(z.string(), z.unknown()).optional()
 }).strict()
 export type RunnerSpawnContext = z.infer<typeof RunnerSpawnContextSchema>
@@ -50,6 +51,7 @@ export const RunnerSpawnOptionsContextSchema = z.object({
     modelReasoningEffort: z.string().optional(),
     permissionMode: z.string().optional(),
     yolo: z.boolean().optional(),
+    manualFields: z.array(z.string().min(1)).optional(),
     pluginFields: z.record(z.string(), z.unknown()).optional()
 }).strict()
 export type RunnerSpawnOptionsContext = z.infer<typeof RunnerSpawnOptionsContextSchema>
@@ -65,9 +67,23 @@ export type RunnerSpawnOptionDefaults = z.infer<typeof RunnerSpawnOptionDefaults
 
 export const RunnerSpawnOptionsProviderProposalSchema = z.object({
     options: RunnerSpawnOptionDefaultsSchema.optional(),
+    applied: z.array(z.object({
+        label: z.string().min(1).optional(),
+        description: z.string().min(1).optional(),
+        fields: z.array(z.string().min(1)).optional()
+    }).strict()).optional(),
     diagnostics: z.array(PluginDiagnosticSchema).optional()
 }).strict()
 export type RunnerSpawnOptionsProviderProposal = z.infer<typeof RunnerSpawnOptionsProviderProposalSchema>
+
+export const RunnerSpawnOptionsAppliedEntrySchema = z.object({
+    pluginId: z.string().min(1),
+    contributionId: RunnerExtensionContributionIdSchema,
+    label: z.string().min(1).optional(),
+    description: z.string().min(1).optional(),
+    fields: z.array(z.string().min(1)).optional()
+}).strict()
+export type RunnerSpawnOptionsAppliedEntry = z.infer<typeof RunnerSpawnOptionsAppliedEntrySchema>
 
 export const RunnerEnvironmentProposalSchema = z.object({
     env: z.record(z.string(), z.string()).optional(),
@@ -149,12 +165,14 @@ export const RunnerResolvedSpawnOptionsSchema = z.object({
         modelReasoningEffort: z.string().optional(),
         permissionMode: z.string().optional(),
         yolo: z.boolean().optional(),
+        manualFields: z.array(z.string().min(1)).optional(),
         token: z.string().optional(),
         sessionType: z.enum(['simple', 'worktree']).optional(),
         worktreeName: z.string().optional(),
         pluginFields: z.record(z.string(), z.unknown()).optional()
     }).strict(),
     diagnostics: z.array(RunnerExtensionDiagnosticSchema),
-    audit: z.array(RunnerExtensionAuditEventSchema)
+    audit: z.array(RunnerExtensionAuditEventSchema),
+    applied: z.array(RunnerSpawnOptionsAppliedEntrySchema).default([])
 }).strict()
 export type RunnerResolvedSpawnOptions = z.infer<typeof RunnerResolvedSpawnOptionsSchema>

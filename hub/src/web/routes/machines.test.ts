@@ -63,21 +63,18 @@ describe('machines routes', () => {
         expect(calls).toEqual([{ machineId: 'machine-1', directory: '/repo', agent: 'vendor:example-agent' }])
     })
 
-    it('resolves Runner launch presets through the selected machine', async () => {
+    it('previews Runner spawn options through the selected machine', async () => {
         const machine = createMachine()
         const calls: unknown[] = []
         const engine = {
             getMachine: () => machine,
             getMachineByNamespace: () => machine,
-            invokeRunnerPluginAction: async (_machineId: string, payload: unknown) => {
+            previewRunnerSpawnOptions: async (_machineId: string, payload: unknown) => {
                 calls.push(payload)
                 return {
-                    ok: true,
-                    result: {
-                        options: { permissionMode: 'yolo', modelReasoningEffort: 'xhigh' },
-                        matchedRules: [{ id: 'codex-repo', label: 'Codex repo' }],
-                        diagnostics: []
-                    }
+                    options: { permissionMode: 'yolo', modelReasoningEffort: 'xhigh' },
+                    applied: [{ pluginId: 'test.runner-defaults', contributionId: 'defaults', label: 'Codex repo' }],
+                    diagnostics: []
                 }
             }
         } as Partial<SyncEngine>
@@ -89,11 +86,12 @@ describe('machines routes', () => {
         })
         app.route('/api', createMachinesRoutes(() => engine as SyncEngine))
 
-        const response = await app.request('/api/machines/machine-1/launch-presets/resolve', {
+        const response = await app.request('/api/machines/machine-1/spawn-options/preview', {
             method: 'POST',
             body: JSON.stringify({
                 directory: '/repo',
-                agent: 'codex'
+                agent: 'codex',
+                manualFields: ['model']
             }),
             headers: { 'content-type': 'application/json' }
         })
@@ -101,15 +99,10 @@ describe('machines routes', () => {
         expect(response.status).toBe(200)
         expect(await response.json()).toEqual({
             options: { permissionMode: 'yolo', modelReasoningEffort: 'xhigh' },
-            matchedRules: [{ id: 'codex-repo', label: 'Codex repo' }],
+            applied: [{ pluginId: 'test.runner-defaults', contributionId: 'defaults', label: 'Codex repo' }],
             diagnostics: []
         })
-        expect(calls).toEqual([expect.objectContaining({
-            actionId: 'runner-launch-presets.resolve',
-            namespace: 'default',
-            cwd: '/repo',
-            payload: expect.objectContaining({ directory: '/repo', agent: 'codex' })
-        })])
+        expect(calls).toEqual([expect.objectContaining({ directory: '/repo', agent: 'codex', manualFields: ['model'] })])
     })
 
     it('returns Codex models for an online machine', async () => {

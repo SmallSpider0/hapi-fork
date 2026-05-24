@@ -27,7 +27,8 @@ import type {
     OpencodeModelsResponse,
     AgentHistoryImportResponse,
     PluginMessageActionRequest,
-    RunnerLaunchPresetResolveResponse,
+    RunnerSpawnOptionsPreviewRequest,
+    RunnerSpawnOptionsPreviewResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
 import type { CancelMessageResponse } from '@hapi/protocol/schemas'
@@ -659,32 +660,21 @@ export class ApiClient {
         worktreeName?: string,
         effort?: string,
         permissionMode?: string,
-        pluginFields?: Record<string, unknown>
+        pluginFields?: Record<string, unknown>,
+        manualFields?: string[]
     ): Promise<SpawnResponse> {
         return await this.request<SpawnResponse>(`/api/machines/${encodeURIComponent(machineId)}/spawn`, {
             method: 'POST',
-            body: JSON.stringify({ directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, effort, permissionMode, pluginFields })
+            body: JSON.stringify({ directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, effort, permissionMode, pluginFields, manualFields })
         })
     }
 
-    async resolveRunnerLaunchPresets(
+    async previewRunnerSpawnOptions(
         machineId: string,
-        input: {
-            directory: string
-            cwd?: string
-            agent?: string
-            model?: string
-            effort?: string
-            modelReasoningEffort?: string
-            permissionMode?: string
-            yolo?: boolean
-            sessionType?: 'simple' | 'worktree'
-            resumeSessionId?: string
-            pluginFields?: Record<string, unknown>
-        }
-    ): Promise<RunnerLaunchPresetResolveResponse> {
-        return await this.request<RunnerLaunchPresetResolveResponse>(
-            `/api/machines/${encodeURIComponent(machineId)}/launch-presets/resolve`,
+        input: RunnerSpawnOptionsPreviewRequest
+    ): Promise<RunnerSpawnOptionsPreviewResponse> {
+        return await this.request<RunnerSpawnOptionsPreviewResponse>(
+            `/api/machines/${encodeURIComponent(machineId)}/spawn-options/preview`,
             {
                 method: 'POST',
                 body: JSON.stringify(input)

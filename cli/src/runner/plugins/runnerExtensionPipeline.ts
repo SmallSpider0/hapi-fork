@@ -15,6 +15,7 @@ import {
     type RunnerEnvironmentProposal,
     type RunnerEnvironmentProviderContribution,
     type RunnerResolvedSpawnOptions,
+    type RunnerSpawnOptionsAppliedEntry,
     type RunnerExtensionAuditEvent,
     type RunnerResolvedSpawnPlan,
     type RunnerSpawnOptionDefaults,
@@ -162,6 +163,7 @@ function buildContext(input: ResolveRunnerSpawnPlanInput, plan: RunnerSpawnBaseP
         ...(input.options.modelReasoningEffort ? { modelReasoningEffort: input.options.modelReasoningEffort } : {}),
         ...(input.options.permissionMode ? { permissionMode: input.options.permissionMode } : {}),
         ...(input.options.yolo !== undefined ? { yolo: input.options.yolo } : {}),
+        ...(input.options.manualFields?.length ? { manualFields: input.options.manualFields } : {}),
         ...(input.options.pluginFields ? { pluginFields: input.options.pluginFields } : {})
     })
 }
@@ -180,8 +182,15 @@ function buildOptionsContext(input: ResolveRunnerSpawnOptionsInput, options: Spa
         ...(options.modelReasoningEffort ? { modelReasoningEffort: options.modelReasoningEffort } : {}),
         ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
         ...(options.yolo !== undefined ? { yolo: options.yolo } : {}),
+        ...(options.manualFields?.length ? { manualFields: options.manualFields } : {}),
         ...(options.pluginFields ? { pluginFields: options.pluginFields } : {})
     })
+}
+
+function proposalFields(proposal: RunnerSpawnOptionDefaults): string[] {
+    return (Object.entries(proposal) as Array<[keyof RunnerSpawnOptionDefaults, unknown]>)
+        .filter(([, value]) => value !== undefined)
+        .map(([key]) => key)
 }
 
 function applySpawnOptionsProposal(args: {
@@ -189,11 +198,13 @@ function applySpawnOptionsProposal(args: {
     options: SpawnSessionOptions
     proposal: RunnerSpawnOptionDefaults
     audit: RunnerExtensionAuditEvent[]
-}): void {
+}): string[] {
     const source = contributionLabel(args.entry)
+    const fields: string[] = []
     for (const [key, value] of Object.entries(args.proposal) as Array<[keyof RunnerSpawnOptionDefaults, unknown]>) {
         if (value === undefined) continue
         ;(args.options as unknown as Record<string, unknown>)[key] = value
+        fields.push(key)
         args.audit.push({
             phase: 'spawnOptions',
             pluginId: args.entry.pluginId,
@@ -202,6 +213,13 @@ function applySpawnOptionsProposal(args: {
             message: `${source} set launch option ${key}`
         })
     }
+    return fields
+}
+
+function stripControlOnlySpawnOptions(options: SpawnSessionOptions): SpawnSessionOptions {
+    const clean = { ...options } as SpawnSessionOptions & { machineId?: unknown }
+    delete clean.machineId
+    return clean
 }
 
 function applyEnvPatch(args: {
@@ -382,9 +400,10 @@ async function runBeforeSpawnHooks(input: ResolveRunnerSpawnPlanInput, state: {
 }
 
 export async function resolveRunnerPluginSpawnOptions(input: ResolveRunnerSpawnOptionsInput): Promise<RunnerResolvedSpawnOptions> {
-    const options: SpawnSessionOptions = { ...input.options, agent: input.agent }
+    const options: SpawnSessionOptions = { ...stripControlOnlySpawnOptions(input.options), agent: input.agent }
     const diagnostics: PluginDiagnostic[] = []
     const audit: RunnerExtensionAuditEvent[] = []
+    const applied: RunnerSpawnOptionsAppliedEntry[] = []
     const timeoutMs = input.timeoutMs ?? DEFAULT_EXTENSION_TIMEOUT_MS
 
     for (const entry of [...input.spawnOptionsProviders].sort(contributionSort)) {
@@ -400,11 +419,29 @@ export async function resolveRunnerPluginSpawnOptions(input: ResolveRunnerSpawnO
                 } as PluginDiagnostic & { pluginId: string })
             }
             if (parsed.options) {
-                applySpawnOptionsProposal({
+                const fields = applySpawnOptionsProposal({
                     entry,
                     options,
                     proposal: parsed.options,
                     audit
+                })
+                if (!parsed.applied?.length && fields.length > 0) {
+                    applied.push({
+                        pluginId: entry.pluginId,
+                        contributionId: entry.id,
+                        label: entry.id,
+                        fields
+                    })
+                }
+            }
+            for (const item of parsed.applied ?? []) {
+                const fields = item.fields ?? (parsed.options ? proposalFields(parsed.options) : undefined)
+                applied.push({
+                    pluginId: entry.pluginId,
+                    contributionId: entry.id,
+                    label: item.label ?? entry.id,
+                    ...(item.description ? { description: item.description } : {}),
+                    ...(fields && fields.length > 0 ? { fields } : {})
                 })
             }
         } catch (error) {
@@ -412,7 +449,7 @@ export async function resolveRunnerPluginSpawnOptions(input: ResolveRunnerSpawnO
         }
     }
 
-    return RunnerResolvedSpawnOptionsSchema.parse({ options, diagnostics, audit })
+    return RunnerResolvedSpawnOptionsSchema.parse({ options, diagnostics, audit, applied })
 }
 
 export async function resolveRunnerPluginSpawnPlan(input: ResolveRunnerSpawnPlanInput): Promise<RunnerResolvedSpawnPlan> {

@@ -14,7 +14,6 @@ import { ConfirmDialog } from '@/components/ui/ConfirmDialog'
 import { LoadingState } from '@/components/LoadingState'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import { PluginDescriptorPanels, type DescriptorActionHandler, type DescriptorOptionSources } from '@/components/plugins/DescriptorRenderer'
-import { RunnerLaunchPresetsEditor } from '@/components/plugins/RunnerLaunchPresetsEditor'
 import {
     localizedCapabilityDescription,
     localizedCapabilityName,
@@ -26,7 +25,6 @@ import {
 import { PluginTargetScopeSchema, type PluginCapabilityView, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
-const RUNNER_LAUNCH_PRESETS_PLUGIN_ID = 'com.hapi.core.runner-launch-presets'
 type ResultState = {
     title: string
     lines: string[]
@@ -83,6 +81,19 @@ function targetScopeLabel(t: (key: string, params?: Record<string, string | numb
     if (scope === 'all-runners') return t('settings.plugins.target.allRunners')
     if (scope.startsWith('runner:')) return t('settings.plugins.target.runner', { name: scope.slice('runner:'.length) })
     return scope
+}
+
+function webContributionsHaveComponent(contributions: unknown, kind: string): boolean {
+    if (!contributions || typeof contributions !== 'object') return false
+    const panels = (contributions as { settingsPanels?: unknown }).settingsPanels
+    if (!Array.isArray(panels)) return false
+    return panels.some((panel) => {
+        if (!panel || typeof panel !== 'object') return false
+        const components = (panel as { components?: unknown }).components
+        return Array.isArray(components) && components.some((component) => (
+            Boolean(component && typeof component === 'object' && (component as { kind?: unknown }).kind === kind)
+        ))
+    })
 }
 
 function runtimeActive(plugin: PluginDetail, runtime: string): boolean {
@@ -488,8 +499,8 @@ export default function PluginPage() {
     const { plugin, isLoading, error } = usePlugin(api, pluginId, target)
     const capabilityState = usePluginCapabilities(api, { target })
     const actions = usePluginActions(api)
-    const isRunnerLaunchPresetsRoute = pluginId === RUNNER_LAUNCH_PRESETS_PLUGIN_ID
-    const machineState = useMachines(api, isRunnerLaunchPresetsRoute)
+    const needsRunnerDescriptorContext = webContributionsHaveComponent(plugin?.contributions.web, 'runnerSpawnDefaultsEditor')
+    const machineState = useMachines(api, needsRunnerDescriptorContext)
     const [configText, setConfigText] = useState('{}')
     const [initialConfigText, setInitialConfigText] = useState('{}')
     const [result, setResult] = useState<ResultState>(null)
@@ -513,7 +524,9 @@ export default function PluginPage() {
                 setDescriptorOptionSources({
                     'notification.namespaces': options.namespaces,
                     'notification.agents': options.agents,
-                    'notification.workspaces': options.workspaces
+                    'notification.workspaces': options.workspaces,
+                    'sessions.agents': options.agents,
+                    'sessions.workspaces': options.workspaces
                 })
             })
             .catch(() => {
@@ -521,7 +534,9 @@ export default function PluginPage() {
                     setDescriptorOptionSources({
                         'notification.namespaces': [],
                         'notification.agents': [],
-                        'notification.workspaces': []
+                        'notification.workspaces': [],
+                        'sessions.agents': [],
+                        'sessions.workspaces': []
                     })
                 }
             })
@@ -535,9 +550,26 @@ export default function PluginPage() {
     const canEnablePlugin = plugin ? !['invalid', 'incompatible', 'blocked'].includes(plugin.status) : false
     const canDeletePlugin = plugin?.source === 'user-home'
     const hasConfig = Boolean(plugin && (Object.keys(plugin.config ?? {}).length > 0 || dirtyConfig))
-    const isRunnerLaunchPresetsPlugin = plugin?.id === RUNNER_LAUNCH_PRESETS_PLUGIN_ID
     const runnerTargetMachineId = plugin?.target?.machineId
         ?? (typeof target === 'string' && target.startsWith('runner:') ? target.slice('runner:'.length) : null)
+    const mergedDescriptorOptionSources = useMemo((): DescriptorOptionSources | undefined => {
+        if (!descriptorOptionSources && machineState.machines.length === 0) return descriptorOptionSources
+        const runnerAgents = machineState.machines.flatMap((machine) => (
+            (machine.runnerState?.agentDescriptors ?? []).map((descriptor) => ({
+                value: descriptor.id,
+                label: descriptor.displayName || descriptor.id,
+                ...(descriptor.description ? { description: descriptor.description } : {})
+            }))
+        ))
+        const runnerWorkspaces = machineState.machines.flatMap((machine) => (
+            (machine.metadata?.workspaceRoots ?? []).map((path) => ({ value: path, label: path }))
+        ))
+        return {
+            ...(descriptorOptionSources ?? {}),
+            ...(runnerAgents.length > 0 ? { 'runner.agents': runnerAgents } : {}),
+            ...(runnerWorkspaces.length > 0 ? { 'runner.workspaces': runnerWorkspaces } : {})
+        }
+    }, [descriptorOptionSources, machineState.machines])
     const pluginCapabilities = useMemo(
         () => capabilityState.capabilities.filter((capability) => capability.pluginId === plugin?.id),
         [capabilityState.capabilities, plugin?.id]
@@ -724,28 +756,21 @@ export default function PluginPage() {
                                 {!plugin.enabled && !canEnablePlugin ? <div className="mt-2 text-sm text-[var(--app-hint)]">{t('settings.plugins.action.cannotEnableStatus', { status: t(`settings.plugins.status.${plugin.status}`) })}</div> : null}
                             </SectionCard>
 
-                            {isRunnerLaunchPresetsPlugin ? (
-                                <RunnerLaunchPresetsEditor
-                                    config={descriptorConfig}
-                                    machines={machineState.machines}
-                                    targetMachineId={runnerTargetMachineId}
-                                    optionSources={descriptorOptionSources}
-                                    dirty={dirtyConfig}
-                                    disabled={actions.isPending || machineState.isLoading}
-                                    onConfigChange={draftConfigObject}
-                                />
-                            ) : plugin.contributions.web?.settingsPanels?.length ? (
+                            {plugin.contributions.web?.settingsPanels?.length ? (
                                 <PluginDescriptorPanels
                                     contributions={plugin.contributions.web}
                                     config={descriptorConfig}
-                                    disabled={actions.isPending}
-                                    optionSources={descriptorOptionSources}
+                                    disabled={actions.isPending || (needsRunnerDescriptorContext && machineState.isLoading)}
+                                    optionSources={mergedDescriptorOptionSources}
                                     onAction={runDescriptorAction}
                                     onConfigChange={draftConfigObject}
+                                    machines={machineState.machines}
+                                    targetMachineId={runnerTargetMachineId}
+                                    dirty={dirtyConfig}
                                 />
                             ) : null}
 
-                            {hasConfig && !isRunnerLaunchPresetsPlugin ? <SectionCard title={t('settings.plugins.config.title')}>
+                            {hasConfig ? <SectionCard title={t('settings.plugins.config.title')}>
                                 <div className="space-y-2">
                                     <div className="flex flex-wrap items-center justify-between gap-2">
                                         <label className="text-sm font-medium" htmlFor="plugin-config-json">{t('settings.plugins.config.textareaLabel')}</label>

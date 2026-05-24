@@ -6,7 +6,6 @@ import type { Session } from '../sync/syncEngine'
 import { HubPluginManager } from './pluginManager'
 import { writePluginState } from '@hapi/protocol/plugins/foundation'
 import {
-    HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
     HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
     HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
     HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
@@ -329,12 +328,6 @@ describe('HubPluginManager', () => {
             active: false,
             install: { sourceType: 'bundled' }
         })
-        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID)).toMatchObject({
-            source: 'bundled',
-            enabled: false,
-            active: false,
-            runtimes: { runner: { entry: 'dist/runner.js', active: false } }
-        })
         expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
             source: 'bundled',
             enabled: false,
@@ -363,12 +356,6 @@ describe('HubPluginManager', () => {
                 status: 'disabled'
             }),
             expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
-                capabilityId: 'runner-env-profiles',
-                kind: 'runner.spawnExtension',
-                status: 'disabled'
-            }),
-            expect.objectContaining({
                 pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
                 capabilityId: 'runner-launch-presets',
                 kind: 'runner.spawnExtension',
@@ -393,9 +380,9 @@ describe('HubPluginManager', () => {
         ]))
         const launchPresetsPanel = manager.getPlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)?.contributions.web?.settingsPanels?.[0]
         expect(launchPresetsPanel?.components).toEqual([
-            expect.objectContaining({ kind: 'text', tone: 'info' })
+            expect.objectContaining({ kind: 'runnerSpawnDefaultsEditor', configKey: 'rulesJson' })
         ])
-        expect(JSON.stringify(launchPresetsPanel)).not.toMatch(/blocked|allowed|permissionMode|rulesJson/)
+        expect(JSON.stringify(launchPresetsPanel)).not.toMatch(/blocked|allowed|permissionMode/)
 
         await manager.disablePlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
         expect(manager.getPlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({

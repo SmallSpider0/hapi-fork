@@ -2,11 +2,9 @@ import {
     AgentHistoryImportRequestSchema,
     MachineListDirectoryRequestSchema,
     MachinePathsExistsRequestSchema,
-    RunnerLaunchPresetResolveRequestSchema,
-    RunnerLaunchPresetResolveResponseSchema,
+    RunnerSpawnOptionsPreviewRequestSchema,
     SpawnSessionRequestSchema
 } from '@hapi/protocol'
-import { HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID } from '@hapi/protocol/plugins/bundledCore'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -56,12 +54,13 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
             undefined,
             parsed.data.effort,
             parsed.data.permissionMode,
-            parsed.data.pluginFields
+            parsed.data.pluginFields,
+            parsed.data.manualFields
         )
         return c.json(result)
     })
 
-    app.post('/machines/:id/launch-presets/resolve', async (c) => {
+    app.post('/machines/:id/spawn-options/preview', async (c) => {
         const engine = getSyncEngine()
         if (!engine) {
             return c.json({ error: 'Not connected' }, 503)
@@ -74,26 +73,12 @@ export function createMachinesRoutes(getSyncEngine: () => SyncEngine | null): Ho
         }
 
         const body = await c.req.json().catch(() => null)
-        const parsed = RunnerLaunchPresetResolveRequestSchema.safeParse(body)
+        const parsed = RunnerSpawnOptionsPreviewRequestSchema.safeParse(body)
         if (!parsed.success) {
             return c.json({ error: 'Invalid body' }, 400)
         }
 
-        const result = await engine.invokeRunnerPluginAction(machineId, {
-            pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
-            capabilityId: 'runner-launch-presets',
-            actionId: 'runner-launch-presets.resolve',
-            namespace: c.get('namespace'),
-            cwd: parsed.data.cwd ?? parsed.data.directory,
-            payload: parsed.data
-        })
-        if (!result.ok) {
-            return c.json(RunnerLaunchPresetResolveResponseSchema.parse({ options: {}, matchedRules: [], diagnostics: [] }))
-        }
-        const resolved = RunnerLaunchPresetResolveResponseSchema.safeParse(result.result)
-        return c.json(resolved.success
-            ? resolved.data
-            : RunnerLaunchPresetResolveResponseSchema.parse({ options: {}, matchedRules: [], diagnostics: [] }))
+        return c.json(await engine.previewRunnerSpawnOptions(machineId, parsed.data))
     })
 
     app.post('/machines/:id/list-directory', async (c) => {

@@ -20,6 +20,8 @@ vi.mock('../modules/common/opencodeModels', () => ({
 
 import { ApiMachineClient } from './apiMachine'
 import type { Machine } from './types'
+import type { SpawnSessionOptions, SpawnSessionResult } from '../modules/common/rpcTypes'
+import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 
 function makeMachine(id: string): Machine {
     return {
@@ -151,6 +153,37 @@ async function callMachineRpc(client: ApiMachineClient, machineId: string, metho
     })
     return JSON.parse(raw) as unknown
 }
+
+describe('ApiMachineClient spawn handler', () => {
+    it('does not forward client-supplied machineId into spawn options', async () => {
+        const machine = makeMachine('machine-spawn')
+        const client = new ApiMachineClient('cli-token', machine)
+        const spawnSession = vi.fn(async (_options: SpawnSessionOptions): Promise<SpawnSessionResult> => ({ type: 'success', sessionId: 'session-1' }))
+
+        client.setRPCHandlers({
+            spawnSession,
+            stopSession: () => true,
+            requestShutdown: () => undefined
+        })
+
+        try {
+            expect(await callMachineRpc(client, machine.id, RPC_METHODS.SpawnHappySession, {
+                directory: '/repo',
+                agent: 'codex',
+                machineId: 'spoofed-runner'
+            })).toEqual({ type: 'success', sessionId: 'session-1' })
+            expect(spawnSession).toHaveBeenCalledTimes(1)
+            const forwardedOptions = spawnSession.mock.calls[0]?.[0]
+            expect(forwardedOptions).toMatchObject({
+                directory: '/repo',
+                agent: 'codex'
+            })
+            expect(forwardedOptions).not.toHaveProperty('machineId')
+        } finally {
+            client.shutdown()
+        }
+    })
+})
 
 describe('ApiMachineClient runner plugin RPC handlers', () => {
     it('registers machine-scoped runner plugin handlers and validates request schema', async () => {

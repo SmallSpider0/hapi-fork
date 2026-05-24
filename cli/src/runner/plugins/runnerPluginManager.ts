@@ -38,7 +38,7 @@ import {
     runnerPluginConfigScope,
     sanitizePluginConfigForView
 } from '@hapi/protocol/plugins'
-import { HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID, defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
+import { defaultEnabledBundledRunnerPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
 import packageJson from '../../../package.json'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import {
@@ -1160,7 +1160,7 @@ export class RunnerPluginManager {
 
     private defaultEnabledPluginIds(): string[] {
         return this.options.includeBundledCore === true
-            ? defaultEnabledBundledPluginIds.filter((pluginId) => pluginId !== HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
+            ? defaultEnabledBundledRunnerPluginIds
             : []
     }
 
