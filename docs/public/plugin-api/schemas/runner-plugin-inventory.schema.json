@@ -741,6 +741,56 @@
         "extensions": {
             "type": "object",
             "properties": {
+                "spawnOptionsProviders": {
+                    "default": [],
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "pluginId": {
+                                "type": "string",
+                                "minLength": 1
+                            },
+                            "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 128,
+                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                            },
+                            "type": {
+                                "type": "string",
+                                "enum": [
+                                    "spawnOptionsProvider",
+                                    "environmentProvider",
+                                    "commandResolver",
+                                    "spawnHook"
+                                ]
+                            },
+                            "displayName": {
+                                "type": "string"
+                            },
+                            "description": {
+                                "type": "string"
+                            },
+                            "priority": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991
+                            },
+                            "active": {
+                                "default": true,
+                                "type": "boolean"
+                            }
+                        },
+                        "required": [
+                            "pluginId",
+                            "id",
+                            "type",
+                            "active"
+                        ],
+                        "additionalProperties": false
+                    }
+                },
                 "environmentProviders": {
                     "default": [],
                     "type": "array",
@@ -760,6 +810,7 @@
                             "type": {
                                 "type": "string",
                                 "enum": [
+                                    "spawnOptionsProvider",
                                     "environmentProvider",
                                     "commandResolver",
                                     "spawnHook"
@@ -809,6 +860,7 @@
                             "type": {
                                 "type": "string",
                                 "enum": [
+                                    "spawnOptionsProvider",
                                     "environmentProvider",
                                     "commandResolver",
                                     "spawnHook"
@@ -858,6 +910,7 @@
                             "type": {
                                 "type": "string",
                                 "enum": [
+                                    "spawnOptionsProvider",
                                     "environmentProvider",
                                     "commandResolver",
                                     "spawnHook"
@@ -890,6 +943,7 @@
                 }
             },
             "required": [
+                "spawnOptionsProviders",
                 "environmentProviders",
                 "commandResolvers",
                 "spawnHooks"
@@ -1418,7 +1472,8 @@
                                                                                 "text",
                                                                                 "number",
                                                                                 "boolean",
-                                                                                "select"
+                                                                                "select",
+                                                                                "multiSelect"
                                                                             ]
                                                                         },
                                                                         "required": {
@@ -1470,6 +1525,25 @@
                                                                                                 }
                                                                                             }
                                                                                         ]
+                                                                                    },
+                                                                                    "description": {
+                                                                                        "anyOf": [
+                                                                                            {
+                                                                                                "type": "string",
+                                                                                                "minLength": 1
+                                                                                            },
+                                                                                            {
+                                                                                                "type": "object",
+                                                                                                "propertyNames": {
+                                                                                                    "type": "string",
+                                                                                                    "minLength": 1
+                                                                                                },
+                                                                                                "additionalProperties": {
+                                                                                                    "type": "string",
+                                                                                                    "minLength": 1
+                                                                                                }
+                                                                                            }
+                                                                                        ]
                                                                                     }
                                                                                 },
                                                                                 "required": [
@@ -1477,6 +1551,22 @@
                                                                                 ],
                                                                                 "additionalProperties": false
                                                                             }
+                                                                        },
+                                                                        "optionsSource": {
+                                                                            "type": "string",
+                                                                            "enum": [
+                                                                                "notification.namespaces",
+                                                                                "notification.agents",
+                                                                                "notification.workspaces",
+                                                                                "sessions.agents",
+                                                                                "sessions.workspaces",
+                                                                                "runner.agents",
+                                                                                "runner.workspaces",
+                                                                                "runner.models"
+                                                                            ]
+                                                                        },
+                                                                        "allowCustom": {
+                                                                            "type": "boolean"
                                                                         }
                                                                     },
                                                                     "required": [
@@ -1491,6 +1581,71 @@
                                                         "required": [
                                                             "kind",
                                                             "fields"
+                                                        ],
+                                                        "additionalProperties": false
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "string",
+                                                                "minLength": 1,
+                                                                "maxLength": 128,
+                                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                                            },
+                                                            "kind": {
+                                                                "type": "string",
+                                                                "const": "runnerSpawnDefaultsEditor"
+                                                            },
+                                                            "title": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "configKey": {
+                                                                "default": "rulesJson",
+                                                                "type": "string",
+                                                                "minLength": 1,
+                                                                "maxLength": 128,
+                                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "kind",
+                                                            "configKey"
                                                         ],
                                                         "additionalProperties": false
                                                     }
@@ -2053,7 +2208,8 @@
                                                                             "text",
                                                                             "number",
                                                                             "boolean",
-                                                                            "select"
+                                                                            "select",
+                                                                            "multiSelect"
                                                                         ]
                                                                     },
                                                                     "required": {
@@ -2105,6 +2261,25 @@
                                                                                             }
                                                                                         }
                                                                                     ]
+                                                                                },
+                                                                                "description": {
+                                                                                    "anyOf": [
+                                                                                        {
+                                                                                            "type": "string",
+                                                                                            "minLength": 1
+                                                                                        },
+                                                                                        {
+                                                                                            "type": "object",
+                                                                                            "propertyNames": {
+                                                                                                "type": "string",
+                                                                                                "minLength": 1
+                                                                                            },
+                                                                                            "additionalProperties": {
+                                                                                                "type": "string",
+                                                                                                "minLength": 1
+                                                                                            }
+                                                                                        }
+                                                                                    ]
                                                                                 }
                                                                             },
                                                                             "required": [
@@ -2112,6 +2287,22 @@
                                                                             ],
                                                                             "additionalProperties": false
                                                                         }
+                                                                    },
+                                                                    "optionsSource": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "notification.namespaces",
+                                                                            "notification.agents",
+                                                                            "notification.workspaces",
+                                                                            "sessions.agents",
+                                                                            "sessions.workspaces",
+                                                                            "runner.agents",
+                                                                            "runner.workspaces",
+                                                                            "runner.models"
+                                                                        ]
+                                                                    },
+                                                                    "allowCustom": {
+                                                                        "type": "boolean"
                                                                     }
                                                                 },
                                                                 "required": [
@@ -4382,7 +4573,8 @@
                                                                                 "text",
                                                                                 "number",
                                                                                 "boolean",
-                                                                                "select"
+                                                                                "select",
+                                                                                "multiSelect"
                                                                             ]
                                                                         },
                                                                         "required": {
@@ -4434,6 +4626,25 @@
                                                                                                 }
                                                                                             }
                                                                                         ]
+                                                                                    },
+                                                                                    "description": {
+                                                                                        "anyOf": [
+                                                                                            {
+                                                                                                "type": "string",
+                                                                                                "minLength": 1
+                                                                                            },
+                                                                                            {
+                                                                                                "type": "object",
+                                                                                                "propertyNames": {
+                                                                                                    "type": "string",
+                                                                                                    "minLength": 1
+                                                                                                },
+                                                                                                "additionalProperties": {
+                                                                                                    "type": "string",
+                                                                                                    "minLength": 1
+                                                                                                }
+                                                                                            }
+                                                                                        ]
                                                                                     }
                                                                                 },
                                                                                 "required": [
@@ -4441,6 +4652,22 @@
                                                                                 ],
                                                                                 "additionalProperties": false
                                                                             }
+                                                                        },
+                                                                        "optionsSource": {
+                                                                            "type": "string",
+                                                                            "enum": [
+                                                                                "notification.namespaces",
+                                                                                "notification.agents",
+                                                                                "notification.workspaces",
+                                                                                "sessions.agents",
+                                                                                "sessions.workspaces",
+                                                                                "runner.agents",
+                                                                                "runner.workspaces",
+                                                                                "runner.models"
+                                                                            ]
+                                                                        },
+                                                                        "allowCustom": {
+                                                                            "type": "boolean"
                                                                         }
                                                                     },
                                                                     "required": [
@@ -4455,6 +4682,71 @@
                                                         "required": [
                                                             "kind",
                                                             "fields"
+                                                        ],
+                                                        "additionalProperties": false
+                                                    },
+                                                    {
+                                                        "type": "object",
+                                                        "properties": {
+                                                            "id": {
+                                                                "type": "string",
+                                                                "minLength": 1,
+                                                                "maxLength": 128,
+                                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]*$"
+                                                            },
+                                                            "kind": {
+                                                                "type": "string",
+                                                                "const": "runnerSpawnDefaultsEditor"
+                                                            },
+                                                            "title": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "description": {
+                                                                "anyOf": [
+                                                                    {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    },
+                                                                    {
+                                                                        "type": "object",
+                                                                        "propertyNames": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        },
+                                                                        "additionalProperties": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    }
+                                                                ]
+                                                            },
+                                                            "configKey": {
+                                                                "default": "rulesJson",
+                                                                "type": "string",
+                                                                "minLength": 1,
+                                                                "maxLength": 128,
+                                                                "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+                                                            }
+                                                        },
+                                                        "required": [
+                                                            "kind",
+                                                            "configKey"
                                                         ],
                                                         "additionalProperties": false
                                                     }
@@ -5017,7 +5309,8 @@
                                                                             "text",
                                                                             "number",
                                                                             "boolean",
-                                                                            "select"
+                                                                            "select",
+                                                                            "multiSelect"
                                                                         ]
                                                                     },
                                                                     "required": {
@@ -5069,6 +5362,25 @@
                                                                                             }
                                                                                         }
                                                                                     ]
+                                                                                },
+                                                                                "description": {
+                                                                                    "anyOf": [
+                                                                                        {
+                                                                                            "type": "string",
+                                                                                            "minLength": 1
+                                                                                        },
+                                                                                        {
+                                                                                            "type": "object",
+                                                                                            "propertyNames": {
+                                                                                                "type": "string",
+                                                                                                "minLength": 1
+                                                                                            },
+                                                                                            "additionalProperties": {
+                                                                                                "type": "string",
+                                                                                                "minLength": 1
+                                                                                            }
+                                                                                        }
+                                                                                    ]
                                                                                 }
                                                                             },
                                                                             "required": [
@@ -5076,6 +5388,22 @@
                                                                             ],
                                                                             "additionalProperties": false
                                                                         }
+                                                                    },
+                                                                    "optionsSource": {
+                                                                        "type": "string",
+                                                                        "enum": [
+                                                                            "notification.namespaces",
+                                                                            "notification.agents",
+                                                                            "notification.workspaces",
+                                                                            "sessions.agents",
+                                                                            "sessions.workspaces",
+                                                                            "runner.agents",
+                                                                            "runner.workspaces",
+                                                                            "runner.models"
+                                                                        ]
+                                                                    },
+                                                                    "allowCustom": {
+                                                                        "type": "boolean"
                                                                     }
                                                                 },
                                                                 "required": [

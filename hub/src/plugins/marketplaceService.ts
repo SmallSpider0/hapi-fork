@@ -76,7 +76,7 @@ function parseNumericVersion(version: string): NumericVersion {
     return [Number(match[1]), Number(match[2]), Number(match[3])]
 }
 
-function compareVersions(leftRaw: string, rightRaw: string): number {
+export function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
     const left = parseNumericVersion(leftRaw)
     const right = parseNumericVersion(rightRaw)
     for (let index = 0; index < 3; index += 1) {
@@ -135,7 +135,7 @@ export class PluginMarketplaceService {
     selectRelease(entry: PluginMarketplaceEntry, version?: string): PluginMarketplaceRelease {
         const candidates = entry.releases
             .filter((release) => !release.yanked)
-            .sort((left, right) => compareVersions(right.version, left.version))
+            .sort((left, right) => compareMarketplaceVersions(right.version, left.version))
         if (version) {
             const exact = candidates.find((release) => release.version === version)
             if (!exact) {

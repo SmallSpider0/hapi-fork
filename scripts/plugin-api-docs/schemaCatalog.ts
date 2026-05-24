@@ -22,7 +22,13 @@ import {
     PluginLocalDirectoryListRequestSchema,
     PluginLocalDirectoryListResponseSchema,
     PluginManifestLiteSchema,
+    PluginMarketplaceCatalogSchema,
+    PluginMarketplaceDetailResponseSchema,
+    PluginMarketplaceInstallPlanResponseSchema,
+    PluginMarketplaceInstallRequestSchema,
+    PluginMarketplaceListResponseSchema,
     PluginNotificationEventSchema,
+    PluginNotificationFilterOptionsResponseSchema,
     PluginReloadResultSchema,
     PluginStateFileSchema,
     PluginTargetScopeSchema,
@@ -31,12 +37,15 @@ import {
     RunnerCommandResolverProposalSchema,
     RunnerEnvironmentProposalSchema,
     RunnerPluginInventorySchema,
+    RunnerResolvedSpawnOptionsSchema,
     RunnerResolvedSpawnPlanSchema,
     RunnerSpawnContextSchema,
-    RunnerSpawnHookProposalSchema
+    RunnerSpawnHookProposalSchema,
+    RunnerSpawnOptionsContextSchema,
+    RunnerSpawnOptionsProviderProposalSchema
 } from '../../shared/src/plugins'
 
-export type SchemaGroup = 'manifest' | 'admin' | 'runtime' | 'runner' | 'agent' | 'web' | 'state'
+export type SchemaGroup = 'manifest' | 'admin' | 'runtime' | 'runner' | 'agent' | 'web' | 'state' | 'marketplace'
 
 export type SchemaDoc = {
     id: string
@@ -109,6 +118,13 @@ export const schemaCatalog: SchemaDoc[] = [
         group: 'admin',
         description: 'One user-facing plugin capability with per-position part status and Web-safe descriptors.',
         schema: PluginCapabilityViewSchema
+    },
+    {
+        id: 'plugin-notification-filter-options-response',
+        title: 'PluginNotificationFilterOptionsResponse',
+        group: 'admin',
+        description: 'Recent namespace, agent, and workspace option values for descriptor option sources.',
+        schema: PluginNotificationFilterOptionsResponseSchema
     },
     {
         id: 'plugin-reload-result',
@@ -216,6 +232,20 @@ export const schemaCatalog: SchemaDoc[] = [
         schema: RunnerSpawnContextSchema
     },
     {
+        id: 'runner-spawn-options-context',
+        title: 'RunnerSpawnOptionsContext',
+        group: 'runner',
+        description: 'Runner spawn-options context visible to spawn options providers before command construction.',
+        schema: RunnerSpawnOptionsContextSchema
+    },
+    {
+        id: 'runner-spawn-options-provider-proposal',
+        title: 'RunnerSpawnOptionsProviderProposal',
+        group: 'runner',
+        description: 'Spawn-options provider proposal. Core applies defaults before command construction.',
+        schema: RunnerSpawnOptionsProviderProposalSchema
+    },
+    {
         id: 'runner-environment-proposal',
         title: 'RunnerEnvironmentProposal',
         group: 'runner',
@@ -235,6 +265,13 @@ export const schemaCatalog: SchemaDoc[] = [
         group: 'runner',
         description: 'Spawn hook proposal, including optional block reason.',
         schema: RunnerSpawnHookProposalSchema
+    },
+    {
+        id: 'runner-resolved-spawn-options',
+        title: 'RunnerResolvedSpawnOptions',
+        group: 'runner',
+        description: 'Resolved spawn options after Runner spawn-options providers are applied and audited.',
+        schema: RunnerResolvedSpawnOptionsSchema
     },
     {
         id: 'runner-resolved-spawn-plan',
@@ -284,6 +321,41 @@ export const schemaCatalog: SchemaDoc[] = [
         group: 'web',
         description: 'Plugin Web contributions with plugin and target metadata.',
         schema: PluginWebContributionViewSchema
+    },
+    {
+        id: 'plugin-marketplace-catalog',
+        title: 'PluginMarketplaceCatalog',
+        group: 'marketplace',
+        description: 'Static marketplace catalog metadata.',
+        schema: PluginMarketplaceCatalogSchema
+    },
+    {
+        id: 'plugin-marketplace-list-response',
+        title: 'PluginMarketplaceListResponse',
+        group: 'marketplace',
+        description: 'Marketplace catalog list response with installed state.',
+        schema: PluginMarketplaceListResponseSchema
+    },
+    {
+        id: 'plugin-marketplace-detail-response',
+        title: 'PluginMarketplaceDetailResponse',
+        group: 'marketplace',
+        description: 'Marketplace detail response for one catalog entry.',
+        schema: PluginMarketplaceDetailResponseSchema
+    },
+    {
+        id: 'plugin-marketplace-install-request',
+        title: 'PluginMarketplaceInstallRequest',
+        group: 'marketplace',
+        description: 'Marketplace install request selecting version, Runner placement, enable, reload, and overwrite options.',
+        schema: PluginMarketplaceInstallRequestSchema
+    },
+    {
+        id: 'plugin-marketplace-install-plan-response',
+        title: 'PluginMarketplaceInstallPlanResponse',
+        group: 'marketplace',
+        description: 'Marketplace install-plan response with source metadata and the normal plugin install plan.',
+        schema: PluginMarketplaceInstallPlanResponseSchema
     }
 ]
 

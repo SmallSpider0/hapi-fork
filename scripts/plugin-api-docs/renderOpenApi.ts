@@ -1,4 +1,4 @@
-import type { EndpointDoc } from './endpointCatalog'
+import type { EndpointDoc, EndpointQueryParamDoc } from './endpointCatalog'
 import type { JsonSchema } from './renderMarkdown'
 import type { SchemaDoc } from './schemaCatalog'
 
@@ -46,21 +46,16 @@ export function renderOpenApi(args: {
 
 function renderOperation(endpoint: EndpointDoc): Record<string, unknown> {
     const parameters: Record<string, unknown>[] = []
-    if (endpoint.path.includes('{id}')) {
+    for (const name of pathParamNames(endpoint.path)) {
         parameters.push({
-            name: 'id',
+            name,
             in: 'path',
             required: true,
             schema: { type: 'string', minLength: 1 }
         })
     }
-    if (endpoint.targetQuery) {
-        parameters.push({
-            name: 'target',
-            in: 'query',
-            required: false,
-            schema: { $ref: '#/components/schemas/PluginTargetScope' }
-        })
+    for (const query of queryParams(endpoint)) {
+        parameters.push(renderQueryParam(query))
     }
 
     return {
@@ -92,5 +87,30 @@ function renderOperation(endpoint: EndpointDoc): Record<string, unknown> {
             '409': { description: 'Conflict' },
             '500': { description: 'Server error' }
         }
+    }
+}
+
+function pathParamNames(path: string): string[] {
+    return Array.from(path.matchAll(/\{([^}]+)\}/g), (match) => match[1]!).filter(Boolean)
+}
+
+function queryParams(endpoint: EndpointDoc): EndpointQueryParamDoc[] {
+    return [
+        ...(endpoint.targetQuery ? [{
+            name: 'target',
+            description: 'Plugin target scope.',
+            schemaRef: 'PluginTargetScope'
+        }] : []),
+        ...(endpoint.queryParams ?? [])
+    ]
+}
+
+function renderQueryParam(query: EndpointQueryParamDoc): Record<string, unknown> {
+    return {
+        name: query.name,
+        in: 'query',
+        required: query.required === true,
+        description: query.description,
+        schema: query.schemaRef ? { $ref: `#/components/schemas/${query.schemaRef}` } : query.schema ?? { type: 'string' }
     }
 }

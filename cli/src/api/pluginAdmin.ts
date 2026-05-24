@@ -153,6 +153,14 @@ export async function getRemotePluginMarketplaceEntry(accessToken: string, plugi
     }, timeoutMs)
 }
 
+export async function refreshRemotePluginMarketplace(accessToken: string, timeoutMs = 5000): Promise<PluginMarketplaceListResponse> {
+    const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
+    return await fetchJson<PluginMarketplaceListResponse>('/api/plugins/marketplace/refresh', {
+        method: 'POST',
+        headers: buildHubRequestHeaders({ Authorization: `Bearer ${jwt}` })
+    }, timeoutMs)
+}
+
 export async function createRemoteMarketplaceInstallPlan(accessToken: string, pluginId: string, body: PluginMarketplaceInstallRequest, timeoutMs = 120000): Promise<PluginMarketplaceInstallPlanResponse> {
     const jwt = await getPluginAdminJwt(accessToken, timeoutMs)
     return await fetchJson<PluginMarketplaceInstallPlanResponse>(`/api/plugins/marketplace/${encodeURIComponent(pluginId)}/install-plan`, {

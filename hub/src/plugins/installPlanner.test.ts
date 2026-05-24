@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'bun:test'
 import { HAPI_PLUGIN_API_VERSION, type PluginManifestLite } from '@hapi/protocol/plugins'
+import {
+    HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+    HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+    bundledCorePlugins
+} from '@hapi/protocol/plugins/bundledCore'
 import { buildPluginInstallPlan, inferPluginInstallPositions } from './installPlanner'
 import type { PluginInstallTargetCandidate } from './installPlanner'
 
@@ -13,7 +18,42 @@ function manifest(overrides: Partial<PluginManifestLite> = {}): PluginManifestLi
     }
 }
 
-function hubCandidate(plugins: PluginInstallTargetCandidate['plugins'] = []): PluginInstallTargetCandidate {
+const CURRENT_HUB_EXTENSION_POINTS = [
+    'hub.notificationChannel',
+    'hub.messageAction',
+    'hub.action',
+    'web.settingsPanel',
+    'web.newSessionField',
+    'web.action',
+    'web.badge',
+    'web.composerAction'
+]
+
+const CURRENT_RUNNER_EXTENSION_POINTS = [
+    'runner.spawnOptionsProvider',
+    'runner.environmentProvider',
+    'runner.commandResolver',
+    'runner.spawnHook',
+    'runner.action',
+    'agent.adapter',
+    'agent.capabilityProvider',
+    'web.settingsPanel',
+    'web.newSessionField',
+    'web.action',
+    'web.badge',
+    'web.composerAction'
+]
+
+function corePluginManifest(id: string): PluginManifestLite {
+    const plugin = bundledCorePlugins.find((entry) => entry.manifest.id === id)
+    if (!plugin) throw new Error(`Missing bundled core plugin ${id}`)
+    return plugin.manifest
+}
+
+function hubCandidate(
+    plugins: PluginInstallTargetCandidate['plugins'] = [],
+    options: { supportedExtensionPoints?: string[] } = {}
+): PluginInstallTargetCandidate {
     return {
         target: {
             scope: 'hub',
@@ -25,7 +65,7 @@ function hubCandidate(plugins: PluginInstallTargetCandidate['plugins'] = []): Pl
                 pluginApiVersion: HAPI_PLUGIN_API_VERSION,
                 os: 'linux',
                 arch: 'x64',
-                supportedExtensionPoints: ['hub.messageAction', 'web.composerAction']
+                supportedExtensionPoints: options.supportedExtensionPoints ?? ['hub.messageAction', 'web.composerAction']
             }
         },
         plugins
@@ -36,6 +76,7 @@ function runnerCandidate(machineId: string, options: {
     hapiVersion?: string
     active?: boolean
     plugins?: PluginInstallTargetCandidate['plugins']
+    supportedExtensionPoints?: string[]
 } = {}): PluginInstallTargetCandidate {
     return {
         target: {
@@ -50,7 +91,7 @@ function runnerCandidate(machineId: string, options: {
                 pluginApiVersion: HAPI_PLUGIN_API_VERSION,
                 os: 'linux',
                 arch: 'x64',
-                supportedExtensionPoints: ['runner.spawnHook', 'agent.capabilityProvider']
+                supportedExtensionPoints: options.supportedExtensionPoints ?? ['runner.spawnHook', 'agent.capabilityProvider']
             }
         },
         plugins: options.plugins ?? []
@@ -74,6 +115,52 @@ function planFor(manifestValue: PluginManifestLite, candidates: PluginInstallTar
 }
 
 describe('plugin install planner', () => {
+    it('plans all bundled core plugin manifests against current Hub and Runner extension points', () => {
+        const candidates = [
+            hubCandidate([], { supportedExtensionPoints: CURRENT_HUB_EXTENSION_POINTS }),
+            runnerCandidate('runner-current', { supportedExtensionPoints: CURRENT_RUNNER_EXTENSION_POINTS })
+        ]
+
+        for (const plugin of bundledCorePlugins) {
+            const plan = planFor(plugin.manifest, candidates)
+            expect({ pluginId: plugin.manifest.id, blockingErrors: plan.blockingErrors }).toEqual({ pluginId: plugin.manifest.id, blockingErrors: [] })
+            expect({ pluginId: plugin.manifest.id, allTargetsCompatible: plan.targets.every((target) => target.status === 'compatible') }).toEqual({ pluginId: plugin.manifest.id, allTargetsCompatible: true })
+        }
+    })
+
+    it('marks Schedule Send incompatible without required Hub/Web extension points', () => {
+        const plan = planFor(
+            corePluginManifest(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID),
+            [hubCandidate([], { supportedExtensionPoints: ['web.settingsPanel'] })]
+        )
+
+        expect(plan.targets[0]?.status).toBe('incompatible')
+        expect(plan.targets[0]?.action).toBe('block')
+        expect(plan.targets[0]?.reason).toContain('hub.messageAction')
+        expect(plan.targets[0]?.reason).toContain('web.composerAction')
+    })
+
+    it('marks Runner Launch Presets incompatible without its Hub settings panel or Runner spawn defaults extension point', () => {
+        const plugin = corePluginManifest(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)
+        const missingHubPanel = planFor(plugin, [
+            hubCandidate([], { supportedExtensionPoints: ['hub.messageAction'] }),
+            runnerCandidate('runner-current', { supportedExtensionPoints: CURRENT_RUNNER_EXTENSION_POINTS })
+        ])
+        expect(missingHubPanel.targets.find((target) => target.target.scope === 'hub')?.status).toBe('incompatible')
+        expect(missingHubPanel.targets.find((target) => target.target.scope === 'hub')?.action).toBe('block')
+        expect(missingHubPanel.blockingErrors.join(' ')).toContain('web.settingsPanel')
+
+        const missingRunnerProvider = planFor(plugin, [
+            hubCandidate([], { supportedExtensionPoints: CURRENT_HUB_EXTENSION_POINTS }),
+            runnerCandidate('runner-missing', { supportedExtensionPoints: ['runner.spawnHook'] })
+        ])
+        const runnerTarget = missingRunnerProvider.targets.find((target) => target.target.scope === 'runner:runner-missing')
+        expect(runnerTarget?.status).toBe('incompatible')
+        expect(runnerTarget?.action).toBe('skip')
+        expect(runnerTarget?.reason).toContain('runner.spawnOptionsProvider')
+        expect(missingRunnerProvider.blockingErrors).toContain('Plugin requires at least 1 compatible Runner target(s), but only 0 are ready.')
+    })
+
     it('routes Web-only descriptors through Hub installation', () => {
         const plugin = manifest({
             contributions: {

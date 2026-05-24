@@ -6,16 +6,20 @@ import { usePlugins } from '@/hooks/queries/usePlugins'
 import { usePluginMarketplace } from '@/hooks/queries/usePluginMarketplace'
 import { usePluginActions } from '@/hooks/mutations/usePluginActions'
 import { useTranslation } from '@/lib/use-translation'
-import { localizedPluginDescription, localizedPluginName } from '@/lib/plugin-metadata'
+import { localizedPluginDescription, localizedPluginName, localizedText } from '@/lib/plugin-metadata'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingState } from '@/components/LoadingState'
+import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import type { PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import type { PluginMarketplaceEntryView, PluginMarketplaceInstallPlanResponse } from '@hapi/protocol/plugins/marketplace'
 
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
+type PluginSettingsTab = 'installed' | 'marketplace'
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
+type MarketplacePendingAction = 'preview' | 'install'
+export const DEFAULT_PLUGIN_SETTINGS_TAB = 'installed' satisfies PluginSettingsTab
 export type PluginDisplayGroup = {
     id: string
     name?: string
@@ -245,6 +249,10 @@ function ResultCard(props: { result: ResultState; onDismiss: () => void }) {
 function PluginCard(props: {
     group: PluginDisplayGroup
     onClick: () => void
+    marketplaceEntry?: PluginMarketplaceEntryView
+    updatePending?: boolean
+    onReviewUpdate?: () => void
+    onUpdate?: () => void
     t: (key: string, params?: Record<string, string | number>) => string
     locale: 'en' | 'zh-CN'
 }) {
@@ -252,43 +260,116 @@ function PluginCard(props: {
     const issueCount = group.diagnostics.filter((diagnostic) => diagnostic.severity !== 'info').length
     const name = localizedPluginName(group, locale)
     const description = localizedPluginDescription(group, locale)
+    const latest = props.marketplaceEntry ? latestMarketplaceRelease(props.marketplaceEntry) : undefined
     return (
-        <button
-            type="button"
-            onClick={props.onClick}
-            className="group flex w-full gap-3 rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 text-left shadow-sm transition hover:border-[var(--app-link)] hover:bg-[var(--app-subtle-bg)]"
-        >
-            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--app-secondary-bg)] text-[var(--app-link)]"><PuzzleIcon /></div>
-            <div className="min-w-0 flex-1 space-y-2">
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                        <div className="truncate font-medium">{name}</div>
-                        <div className="truncate text-xs text-[var(--app-hint)]">{pluginMeta(t, group, issueCount)}</div>
+        <div className="rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-3 shadow-sm transition hover:border-[var(--app-link)] hover:bg-[var(--app-subtle-bg)]">
+            <button
+                type="button"
+                onClick={props.onClick}
+                className="group flex w-full gap-3 text-left"
+            >
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--app-secondary-bg)] text-[var(--app-link)]"><PuzzleIcon /></div>
+                <div className="min-w-0 flex-1 space-y-2">
+                    <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="min-w-0">
+                            <div className="truncate font-medium">{name}</div>
+                            <div className="truncate text-xs text-[var(--app-hint)]">{pluginMeta(t, group, issueCount)}</div>
+                        </div>
+                        <div className="flex flex-wrap justify-end gap-1">
+                            <Badge variant={statusVariant(group.status)}>{t(`settings.plugins.status.${group.status}`)}</Badge>
+                            {props.marketplaceEntry?.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: latest.version })}</Badge> : null}
+                            {props.marketplaceEntry?.installed?.yanked ? <Badge variant="destructive">{t('settings.plugins.marketplace.yanked')}</Badge> : null}
+                        </div>
                     </div>
-                    <Badge variant={statusVariant(group.status)}>{t(`settings.plugins.status.${group.status}`)}</Badge>
+                    {description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
+                    {group.plugins.length > 1 ? (
+                        <div className="flex flex-wrap gap-1">
+                            {group.plugins.map((plugin) => (
+                                <Chip
+                                    key={`${group.id}-${plugin.target?.scope ?? 'local'}`}
+                                    label={pluginTargetLabel(t, plugin)}
+                                    variant={plugin.active ? 'success' : plugin.enabled ? 'warning' : 'default'}
+                                />
+                            ))}
+                        </div>
+                    ) : null}
+                    {issueCount > 0 ? <div><Chip icon={<AlertIcon />} label={t('settings.plugins.list.diagnostics', { count: issueCount })} variant="warning" /></div> : null}
                 </div>
-                {description ? <div className="line-clamp-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
-                {group.plugins.length > 1 ? (
-                    <div className="flex flex-wrap gap-1">
-                        {group.plugins.map((plugin) => (
-                            <Chip
-                                key={`${group.id}-${plugin.target?.scope ?? 'local'}`}
-                                label={pluginTargetLabel(t, plugin)}
-                                variant={plugin.active ? 'success' : plugin.enabled ? 'warning' : 'default'}
-                            />
-                        ))}
-                    </div>
-                ) : null}
-                {issueCount > 0 ? <div><Chip icon={<AlertIcon />} label={t('settings.plugins.list.diagnostics', { count: issueCount })} variant="warning" /></div> : null}
-            </div>
-        </button>
+            </button>
+            {props.marketplaceEntry?.installed?.updateAvailable ? (
+                <div className="mt-3 flex flex-wrap justify-end gap-2 border-t border-[var(--app-border)] pt-3">
+                    <Button type="button" variant="outline" size="sm" disabled={props.updatePending} onClick={props.onReviewUpdate}>
+                        {props.updatePending ? t('settings.plugins.marketplace.reviewing') : t('settings.plugins.marketplace.reviewUpdate')}
+                    </Button>
+                    <Button type="button" size="sm" disabled={props.updatePending} onClick={props.onUpdate}>
+                        {props.updatePending ? t('settings.plugins.marketplace.updating') : t('settings.plugins.marketplace.action.update')}
+                    </Button>
+                </div>
+            ) : null}
+        </div>
     )
 }
 
 function latestMarketplaceRelease(entry: PluginMarketplaceEntryView): PluginMarketplaceEntryView['releases'][number] | undefined {
     return [...entry.releases]
         .filter((release) => !release.yanked)
-        .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true, sensitivity: 'base' }))[0]
+        .sort((left, right) => compareMarketplaceVersions(right.version, left.version))[0]
+}
+
+function marketplaceReleaseForVersion(entry: PluginMarketplaceEntryView, version?: string): PluginMarketplaceEntryView['releases'][number] | undefined {
+    if (!version) return latestMarketplaceRelease(entry)
+    return entry.releases.find((release) => release.version === version && !release.yanked) ?? latestMarketplaceRelease(entry)
+}
+
+function marketplaceEntryMatchesSearch(entry: PluginMarketplaceEntryView, query: string): boolean {
+    const normalized = query.trim().toLowerCase()
+    if (!normalized) return true
+    const haystack = [
+        entry.id,
+        entry.name,
+        entry.description ?? '',
+        entry.repo,
+        ...(entry.keywords ?? []),
+        ...(entry.categories ?? [])
+    ].join('\n').toLowerCase()
+    return haystack.includes(normalized)
+}
+
+type NumericVersion = [number, number, number]
+type MarketplaceInstallIntent = 'install' | 'update' | 'reinstall' | 'installed'
+
+function parseMarketplaceVersion(version: string): NumericVersion {
+    const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/)
+    if (!match) return [0, 0, 0]
+    return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
+    const left = parseMarketplaceVersion(leftRaw)
+    const right = parseMarketplaceVersion(rightRaw)
+    for (let index = 0; index < 3; index += 1) {
+        if (left[index] > right[index]) return 1
+        if (left[index] < right[index]) return -1
+    }
+    return leftRaw.localeCompare(rightRaw)
+}
+
+function marketplaceInstallIntent(entry: PluginMarketplaceEntryView, overwrite: boolean): MarketplaceInstallIntent {
+    if (!entry.installed) return 'install'
+    if (entry.installed.updateAvailable) return 'update'
+    if (overwrite) return 'reinstall'
+    return 'installed'
+}
+
+function marketplaceInstallButtonLabel(
+    t: (key: string, params?: Record<string, string | number>) => string,
+    intent: MarketplaceInstallIntent
+): string {
+    return t(`settings.plugins.marketplace.action.${intent}`)
+}
+
+function marketplaceActionEnabled(intent: MarketplaceInstallIntent): boolean {
+    return intent !== 'installed'
 }
 
 function MarketplacePluginCard(props: {
@@ -296,50 +377,64 @@ function MarketplacePluginCard(props: {
     t: (key: string, params?: Record<string, string | number>) => string
     locale: 'en' | 'zh-CN'
     disabled: boolean
+    overwrite: boolean
+    pendingAction: MarketplacePendingAction | null
     selected: boolean
+    onDetails: () => void
     onPreview: () => void
     onInstall: () => void
 }) {
     const { entry, t, locale } = props
     const latest = latestMarketplaceRelease(entry)
+    const intent = marketplaceInstallIntent(entry, props.overwrite)
     const name = localizedPluginName(entry, locale)
     const description = localizedPluginDescription(entry, locale)
+    const installLabel = props.pendingAction === 'install'
+        ? t('settings.plugins.marketplace.installing')
+        : marketplaceInstallButtonLabel(t, intent)
+    const reviewLabel = props.pendingAction === 'preview'
+        ? t('settings.plugins.marketplace.reviewing')
+        : t('settings.plugins.install.previewPlan')
     const tags = [
         ...(entry.categories ?? []),
         ...(entry.runtimes ?? []).map((runtime) => t(`settings.plugins.runtime.${runtime}`))
     ]
     return (
-        <div className={`rounded-xl border bg-[var(--app-bg)] p-3 shadow-sm ${props.selected ? 'border-[var(--app-link)]' : 'border-[var(--app-border)]'}`}>
-            <div className="flex flex-wrap items-start justify-between gap-2">
-                <div className="min-w-0">
+        <div className={`min-w-0 overflow-hidden rounded-xl border bg-[var(--app-bg)] p-3 shadow-sm ${props.selected ? 'border-[var(--app-link)]' : 'border-[var(--app-border)]'}`}>
+            <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
+                <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{name}</div>
                     <div className="truncate text-xs text-[var(--app-hint)]">
                         {entry.id} · {latest?.version ?? t('settings.plugins.unknown')} · {entry.repo}
                     </div>
                 </div>
-                <div className="flex flex-wrap gap-1">
+                <div className="flex min-w-0 flex-wrap justify-start gap-1 sm:justify-end">
                     {entry.installed ? <Badge variant="success">{t('settings.plugins.marketplace.installed', { version: entry.installed.version ?? '' })}</Badge> : null}
-                    {latest?.yanked ? <Badge variant="warning">{t('settings.plugins.marketplace.yanked')}</Badge> : null}
+                    {entry.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: latest.version })}</Badge> : null}
+                    {entry.installed?.yanked ? <Badge variant="destructive">{t('settings.plugins.marketplace.yanked')}</Badge> : null}
                 </div>
             </div>
-            {description ? <div className="mt-2 line-clamp-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
+            {description ? <div className="mt-2 line-clamp-2 min-w-0 break-words text-sm text-[var(--app-hint)]">{description}</div> : null}
             {tags.length > 0 ? (
-                <div className="mt-2 flex flex-wrap gap-1">
+                <div className="mt-2 flex min-w-0 flex-wrap gap-1">
                     {tags.map((tag) => <Chip key={`${entry.id}-${tag}`} label={tag} />)}
                 </div>
             ) : null}
-            <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+            <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <a
                     href={`https://github.com/${entry.repo}`}
                     target="_blank"
                     rel="noreferrer"
-                    className="text-xs text-[var(--app-link)] hover:underline"
+                    className="min-w-0 break-all text-xs text-[var(--app-link)] hover:underline"
                 >
                     {t('settings.plugins.marketplace.viewRepo')}
                 </a>
-                <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" size="sm" disabled={props.disabled} onClick={props.onPreview}>{t('settings.plugins.install.previewPlan')}</Button>
-                    <Button type="button" size="sm" disabled={props.disabled} onClick={props.onInstall}>{t('settings.plugins.marketplace.install')}</Button>
+                <div className="grid min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
+                    <Button type="button" variant="secondary" size="sm" disabled={props.disabled} onClick={props.onDetails} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">{t('settings.plugins.marketplace.details')}</Button>
+                    <Button type="button" variant="outline" size="sm" disabled={props.disabled || Boolean(props.pendingAction)} onClick={props.onPreview} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">{reviewLabel}</Button>
+                    <Button type="button" size="sm" disabled={props.disabled || Boolean(props.pendingAction) || !marketplaceActionEnabled(intent)} onClick={props.onInstall} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">
+                        {installLabel}
+                    </Button>
                 </div>
             </div>
         </div>
@@ -443,6 +538,132 @@ function InstallPlanCard(props: {
     )
 }
 
+function formatPackageSize(size?: number): string {
+    if (size === undefined) return ''
+    if (size < 1024) return `${size} B`
+    if (size < 1024 * 1024) return `${(size / 1024).toFixed(1)} KiB`
+    return `${(size / (1024 * 1024)).toFixed(1)} MiB`
+}
+
+function MarketplaceDetailCard(props: {
+    entry: PluginMarketplaceEntryView
+    version?: string
+    plan: PluginInstallPlanResponse | null
+    pendingAction: MarketplacePendingAction | null
+    disabled: boolean
+    overwrite: boolean
+    t: (key: string, params?: Record<string, string | number>) => string
+    locale: 'en' | 'zh-CN'
+    onVersionChange: (version: string) => void
+    onPreview: () => void
+    onInstall: () => void
+    onClose: () => void
+}) {
+    const { entry, t, locale } = props
+    const release = marketplaceReleaseForVersion(entry, props.version)
+    const intent = marketplaceInstallIntent(entry, props.overwrite)
+    const name = localizedPluginName(entry, locale)
+    const description = localizedPluginDescription(entry, locale)
+    const featureIntro = localizedText(entry.display?.featureIntro, locale).trim()
+        || localizedText(release?.manifest.display?.featureIntro, locale).trim()
+    const network = release?.manifest.permissions?.network ?? []
+    const secrets = release?.manifest.permissions?.secrets ?? []
+    const packageSize = formatPackageSize(release?.package.size)
+    const reviewLabel = props.pendingAction === 'preview' ? t('settings.plugins.marketplace.reviewing') : t('settings.plugins.install.previewPlan')
+    const installLabel = props.pendingAction === 'install' ? t('settings.plugins.marketplace.installing') : marketplaceInstallButtonLabel(t, intent)
+
+    return (
+        <Card className="border border-[var(--app-link)] bg-[var(--app-bg)]">
+            <CardContent className="space-y-3 p-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <div className="text-base font-semibold">{name}</div>
+                        <div className="break-all text-xs text-[var(--app-hint)]">{entry.id} · {entry.repo}</div>
+                        {description ? <div className="mt-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
+                    </div>
+                    <Button type="button" variant="outline" size="sm" onClick={props.onClose}>{t('settings.plugins.marketplace.closeDetails')}</Button>
+                </div>
+
+                <div className="grid gap-2 text-sm sm:grid-cols-2">
+                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                        <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.repo')}</div>
+                        <a href={`https://github.com/${entry.repo}`} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link)] hover:underline">{entry.repo}</a>
+                    </div>
+                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                        <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.version')}</div>
+                        <select
+                            value={release?.version ?? ''}
+                            onChange={(event) => props.onVersionChange(event.target.value)}
+                            className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-sm text-[var(--app-fg)]"
+                        >
+                            {entry.releases.map((candidate) => (
+                                <option key={candidate.version} value={candidate.version} disabled={Boolean(candidate.yanked)}>
+                                    {candidate.version}{candidate.yanked ? ` · ${t('settings.plugins.marketplace.yanked')}` : ''}
+                                </option>
+                            ))}
+                        </select>
+                    </div>
+                    {entry.homepage ? (
+                        <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                            <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.homepage')}</div>
+                            <a href={entry.homepage} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link)] hover:underline">{entry.homepage}</a>
+                        </div>
+                    ) : null}
+                    {entry.author?.name || entry.license ? (
+                        <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                            <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.publisher')}</div>
+                            <div>{entry.author?.name ?? t('settings.plugins.unknown')}{entry.license ? ` · ${entry.license}` : ''}</div>
+                        </div>
+                    ) : null}
+                </div>
+
+                {featureIntro ? (
+                    <div className="rounded-lg border border-[var(--app-border)] p-3">
+                        <div className="mb-2 text-sm font-medium">{t('settings.plugins.detail.featureIntro.title')}</div>
+                        <MarkdownRenderer content={featureIntro} className="text-sm" />
+                    </div>
+                ) : null}
+
+                <div className="space-y-2 rounded-lg border border-[var(--app-border)] p-3 text-sm">
+                    <div className="font-medium">{t('settings.plugins.marketplace.packageDetails')}</div>
+                    <div className="break-all text-xs text-[var(--app-hint)]">{release?.package.filename ?? t('settings.plugins.unknown')}{packageSize ? ` · ${packageSize}` : ''}</div>
+                    {release?.package.url ? <div className="break-all text-xs text-[var(--app-hint)]">{release.package.url}</div> : null}
+                    {release?.package.checksum ? <div className="break-all text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.checksum')}: {release.package.checksum}</div> : null}
+                </div>
+
+                <div className="grid gap-2 text-sm sm:grid-cols-2">
+                    <div className="rounded-lg border border-[var(--app-border)] p-3">
+                        <div className="mb-2 font-medium">{t('settings.plugins.detail.permissions')}</div>
+                        <div className="space-y-1 text-xs text-[var(--app-hint)]">
+                            <div>{t('settings.plugins.detail.networkLabel')}: {network.length ? network.join(', ') : t('settings.plugins.permissions.networkEmpty')}</div>
+                            <div>{t('settings.plugins.detail.secretsLabel')}: {secrets.length ? secrets.join(', ') : t('settings.plugins.permissions.secretsEmpty')}</div>
+                        </div>
+                    </div>
+                    <div className="rounded-lg border border-[var(--app-border)] p-3">
+                        <div className="mb-2 font-medium">{t('settings.plugins.detail.contributions')}</div>
+                        <div className="flex flex-wrap gap-1">
+                            {(entry.capabilities ?? []).length > 0
+                                ? entry.capabilities?.map((capability) => <Chip key={`${entry.id}-${capability.kind}`} label={capability.label ?? t(`settings.plugins.capabilityKind.${capability.kind}`)} />)
+                                : <span className="text-xs text-[var(--app-hint)]">{t('settings.plugins.detail.noContributions')}</span>}
+                        </div>
+                    </div>
+                </div>
+
+                <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
+                    {t('settings.plugins.marketplace.trustWarning')}
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                    <Button type="button" variant="outline" disabled={props.disabled || Boolean(props.pendingAction)} onClick={props.onPreview}>{reviewLabel}</Button>
+                    <Button type="button" disabled={props.disabled || Boolean(props.pendingAction) || !marketplaceActionEnabled(intent)} onClick={props.onInstall}>{installLabel}</Button>
+                </div>
+
+                <InstallPlanCard plan={props.plan} t={t} locale={locale} />
+            </CardContent>
+        </Card>
+    )
+}
+
 export default function PluginsPage() {
     const { api } = useAppContext()
     const goBack = useAppGoBack()
@@ -450,6 +671,7 @@ export default function PluginsPage() {
     const { t, locale } = useTranslation()
     const { plugins, isLoading, error, refetch } = usePlugins(api)
     const actions = usePluginActions(api)
+    const [activeTab, setActiveTab] = useState<PluginSettingsTab>(DEFAULT_PLUGIN_SETTINGS_TAB)
     const [filter, setFilter] = useState<PluginFilter>('all')
     const [result, setResult] = useState<ResultState>(null)
     const [enableAfterInstall, setEnableAfterInstall] = useState(false)
@@ -460,9 +682,26 @@ export default function PluginsPage() {
     const [enableMarketplaceAfterInstall, setEnableMarketplaceAfterInstall] = useState(true)
     const [overwriteMarketplace, setOverwriteMarketplace] = useState(false)
     const [marketplacePlan, setMarketplacePlan] = useState<PluginMarketplaceInstallPlanResponse | null>(null)
-    const marketplace = usePluginMarketplace(api, { q: marketplaceSearch.trim() || undefined })
+    const [checkingMarketplaceUpdates, setCheckingMarketplaceUpdates] = useState(false)
+    const [marketplacePending, setMarketplacePending] = useState<{ pluginId: string; action: MarketplacePendingAction } | null>(null)
+    const [selectedMarketplaceEntryId, setSelectedMarketplaceEntryId] = useState<string | null>(null)
+    const [marketplaceVersions, setMarketplaceVersions] = useState<Record<string, string>>({})
+    const [autoCheckedMarketplace, setAutoCheckedMarketplace] = useState(false)
+    const marketplace = usePluginMarketplace(api)
 
     const pluginGroups = useMemo(() => groupPluginListForDisplay(plugins), [plugins])
+    const marketplaceEntries = useMemo(() => (
+        marketplace.entries.filter((entry) => marketplaceEntryMatchesSearch(entry, marketplaceSearch))
+    ), [marketplace.entries, marketplaceSearch])
+    const marketplaceById = useMemo(() => new Map(marketplace.entries.map((entry) => [entry.id, entry])), [marketplace.entries])
+    const marketplaceUpdateCount = useMemo(() => marketplace.entries.filter((entry) => entry.installed?.updateAvailable).length, [marketplace.entries])
+    const marketplaceYankedCount = useMemo(() => marketplace.entries.filter((entry) => entry.installed?.yanked).length, [marketplace.entries])
+    const selectedMarketplaceEntry = useMemo(() => (
+        selectedMarketplaceEntryId
+            ? marketplace.entries.find((entry) => entry.id === selectedMarketplaceEntryId) ?? null
+            : null
+    ), [marketplace.entries, selectedMarketplaceEntryId])
+    const selectedMarketplaceVersion = selectedMarketplaceEntry ? marketplaceVersions[selectedMarketplaceEntry.id] : undefined
 
     useEffect(() => {
         setInstallPlan(null)
@@ -470,7 +709,25 @@ export default function PluginsPage() {
 
     useEffect(() => {
         setMarketplacePlan(null)
-    }, [marketplaceSearch, enableMarketplaceAfterInstall, overwriteMarketplace])
+    }, [marketplaceSearch, enableMarketplaceAfterInstall, overwriteMarketplace, selectedMarketplaceVersion])
+
+    useEffect(() => {
+        if (!api || autoCheckedMarketplace) return
+        setAutoCheckedMarketplace(true)
+        void api.refreshPluginMarketplace()
+            .then(() => marketplace.refetch())
+            .catch(() => undefined)
+    }, [api, autoCheckedMarketplace, marketplace.refetch])
+
+    useEffect(() => {
+        if (!api) return undefined
+        const interval = window.setInterval(() => {
+            void api.refreshPluginMarketplace()
+                .then(() => marketplace.refetch())
+                .catch(() => undefined)
+        }, 10 * 60 * 1000)
+        return () => window.clearInterval(interval)
+    }, [api, marketplace.refetch])
 
     const counts = useMemo(() => ({
         all: pluginGroups.length,
@@ -563,9 +820,13 @@ export default function PluginsPage() {
     }
 
     const createMarketplacePlan = async (entry: PluginMarketplaceEntryView): Promise<PluginMarketplaceInstallPlanResponse> => {
+        const shouldOverwrite = overwriteMarketplace || entry.installed?.updateAvailable === true
+        const version = marketplaceVersions[entry.id]
+        setSelectedMarketplaceEntryId(entry.id)
         const planPayload = await actions.createMarketplaceInstallPlan(entry.id, {
+            ...(version ? { version } : {}),
             enable: enableMarketplaceAfterInstall,
-            overwrite: overwriteMarketplace,
+            overwrite: shouldOverwrite,
             reload: true,
             runnerSelection: { mode: 'compatible' }
         })
@@ -590,41 +851,92 @@ export default function PluginsPage() {
     }
 
     const previewMarketplaceInstall = async (entry: PluginMarketplaceEntryView) => {
-        await runWithResult(async () => {
-            const planPayload = await createMarketplacePlan(entry)
-            return {
-                title: planPayload.plan.blockingErrors.length > 0 ? t('settings.plugins.install.planBlocked') : t('settings.plugins.install.planReady'),
-                tone: planPayload.plan.blockingErrors.length > 0 ? 'warning' : 'success',
-                lines: planPayload.plan.blockingErrors.length > 0
-                    ? planPayload.plan.blockingErrors
-                    : [
-                        t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
-                        t('settings.plugins.install.planTargets', { count: planPayload.plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })
-                    ]
-            }
-        })
+        setMarketplacePending({ pluginId: entry.id, action: 'preview' })
+        try {
+            await runWithResult(async () => {
+                const planPayload = await createMarketplacePlan(entry)
+                return {
+                    title: planPayload.plan.blockingErrors.length > 0 ? t('settings.plugins.install.planBlocked') : t('settings.plugins.install.planReady'),
+                    tone: planPayload.plan.blockingErrors.length > 0 ? 'warning' : 'success',
+                    lines: planPayload.plan.blockingErrors.length > 0
+                        ? planPayload.plan.blockingErrors
+                        : [
+                            t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
+                            t('settings.plugins.install.planTargets', { count: planPayload.plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })
+                        ]
+                }
+            })
+        } finally {
+            setMarketplacePending(null)
+        }
     }
 
     const installMarketplacePlugin = async (entry: PluginMarketplaceEntryView) => {
-        await runWithResult(async () => {
-            const planPayload = marketplacePlan?.marketplace.pluginId === entry.id
-                ? marketplacePlan
-                : await createMarketplacePlan(entry)
-            if (planPayload.plan.blockingErrors.length > 0) {
-                return { title: t('settings.plugins.install.planBlocked'), tone: 'warning', lines: planPayload.plan.blockingErrors }
-            }
-            const installResult = await actions.executeInstallPlan(planPayload.plan.planId)
-            const formatted = formatInstallResult(t, installResult)
-            return {
-                ...formatted,
-                lines: [
-                    t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
-                    ...formatted.lines
-                ]
-            }
-        })
-        setMarketplacePlan(null)
+        setMarketplacePending({ pluginId: entry.id, action: 'install' })
+        try {
+            await runWithResult(async () => {
+                const planPayload = marketplacePlan?.marketplace.pluginId === entry.id && marketplacePlan.marketplace.version === (marketplaceVersions[entry.id] ?? marketplacePlan.marketplace.version)
+                    ? marketplacePlan
+                    : await createMarketplacePlan(entry)
+                if (planPayload.plan.blockingErrors.length > 0) {
+                    return { title: t('settings.plugins.install.planBlocked'), tone: 'warning', lines: planPayload.plan.blockingErrors }
+                }
+                const installResult = await actions.executeInstallPlan(planPayload.plan.planId)
+                const formatted = formatInstallResult(t, installResult)
+                return {
+                    ...formatted,
+                    lines: [
+                        t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
+                        ...formatted.lines
+                    ]
+                }
+            })
+            setMarketplacePlan(null)
+        } finally {
+            setMarketplacePending(null)
+        }
     }
+
+    const checkMarketplaceUpdates = async () => {
+        setCheckingMarketplaceUpdates(true)
+        try {
+            await runWithResult(async () => {
+                if (!api) throw new Error('API unavailable')
+                const response = await api.refreshPluginMarketplace()
+                await marketplace.refetch()
+                const updateCount = response.entries.filter((entry) => entry.installed?.updateAvailable).length
+                const yankedCount = response.entries.filter((entry) => entry.installed?.yanked).length
+                return {
+                    title: t('settings.plugins.marketplace.updateCheckTitle'),
+                    tone: updateCount > 0 || yankedCount > 0 ? 'warning' : 'success',
+                    lines: [
+                        updateCount > 0
+                            ? t('settings.plugins.marketplace.updatesFound', { count: updateCount })
+                            : t('settings.plugins.marketplace.noUpdates'),
+                        ...(yankedCount > 0 ? [t('settings.plugins.marketplace.yankedFound', { count: yankedCount })] : []),
+                        t('settings.plugins.marketplace.lastChecked', { date: new Date(response.fetchedAt).toLocaleString() })
+                    ]
+                }
+            })
+        } finally {
+            setCheckingMarketplaceUpdates(false)
+        }
+    }
+
+    const reviewMarketplaceUpdate = (entry: PluginMarketplaceEntryView) => {
+        setActiveTab('marketplace')
+        setSelectedMarketplaceEntryId(entry.id)
+        void previewMarketplaceInstall(entry)
+    }
+
+    const installMarketplaceUpdate = (entry: PluginMarketplaceEntryView) => {
+        setSelectedMarketplaceEntryId(entry.id)
+        void installMarketplacePlugin(entry)
+    }
+
+    const selectedMarketplacePlan = selectedMarketplaceEntry && marketplacePlan?.marketplace.pluginId === selectedMarketplaceEntry.id
+        ? marketplacePlan.plan
+        : null
 
     const reloadAll = async () => {
         await runWithResult(async () => formatReloadResult(t, await actions.reloadPlugins()))
@@ -644,123 +956,179 @@ export default function PluginsPage() {
             </div>
             <div className="app-scroll-y min-h-0 flex-1">
                 <div className="mx-auto w-full max-w-content space-y-3 p-3">
-                    <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
-                        <CardContent className="space-y-3 p-3">
-                            <div className="flex flex-wrap items-center justify-between gap-2">
-                                <div>
-                                    <div className="font-medium">{t('settings.plugins.marketplace.title')}</div>
-                                    <div className="text-xs text-[var(--app-hint)]">
-                                        {marketplace.sourceUrl ? t('settings.plugins.marketplace.source', { source: marketplace.sourceUrl }) : t('settings.plugins.marketplace.description')}
+                    <div className="flex rounded-xl border border-[var(--app-border)] bg-[var(--app-bg)] p-1">
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('installed')}
+                            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ${activeTab === 'installed' ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                        >
+                            {t('settings.plugins.tabs.installed')} · {counts.all}
+                        </button>
+                        <button
+                            type="button"
+                            onClick={() => setActiveTab('marketplace')}
+                            className={`flex-1 rounded-lg px-3 py-2 text-sm font-medium ${activeTab === 'marketplace' ? 'bg-[var(--app-secondary-bg)] text-[var(--app-fg)]' : 'text-[var(--app-hint)]'}`}
+                        >
+                            {t('settings.plugins.tabs.marketplace')} · {marketplace.entries.length}{marketplaceUpdateCount > 0 ? ` · ${t('settings.plugins.marketplace.updatesShort', { count: marketplaceUpdateCount })}` : ''}
+                        </button>
+                    </div>
+
+                    <ResultCard result={result} onDismiss={() => setResult(null)} />
+
+                    {activeTab === 'marketplace' ? (
+                        <div className="space-y-3">
+                            <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
+                                <CardContent className="space-y-3 p-3">
+                                    <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
+                                        <div className="min-w-0 flex-1">
+                                            <div className="font-medium">{t('settings.plugins.marketplace.title')}</div>
+                                            <div className="break-all text-xs text-[var(--app-hint)]">
+                                                {marketplace.sourceUrl ? t('settings.plugins.marketplace.source', { source: marketplace.sourceUrl }) : t('settings.plugins.marketplace.description')}
+                                            </div>
+                                        </div>
+                                        <Button type="button" variant="outline" size="sm" disabled={marketplace.isFetching || checkingMarketplaceUpdates} onClick={() => void checkMarketplaceUpdates()}>
+                                            {checkingMarketplaceUpdates ? t('settings.plugins.marketplace.checkingUpdates') : t('settings.plugins.marketplace.checkUpdates')}
+                                        </Button>
                                     </div>
-                                </div>
-                                <Button type="button" variant="outline" size="sm" disabled={marketplace.isFetching} onClick={() => void marketplace.refetch()}>
-                                    {marketplace.isFetching ? t('settings.plugins.marketplace.refreshing') : t('settings.plugins.refresh')}
-                                </Button>
-                            </div>
-                            <div className="flex flex-wrap gap-2">
-                                <input
-                                    type="search"
-                                    value={marketplaceSearch}
-                                    onChange={(event) => setMarketplaceSearch(event.target.value)}
-                                    placeholder={t('settings.plugins.marketplace.searchPlaceholder')}
-                                    className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm text-[var(--app-fg)] outline-none focus:border-[var(--app-link)]"
+                                    {marketplace.fetchedAt ? (
+                                        <div className="text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.lastChecked', { date: new Date(marketplace.fetchedAt).toLocaleString() })}</div>
+                                    ) : null}
+                                    <div className="flex flex-wrap gap-2">
+                                        <input
+                                            type="search"
+                                            value={marketplaceSearch}
+                                            onChange={(event) => setMarketplaceSearch(event.target.value)}
+                                            placeholder={t('settings.plugins.marketplace.searchPlaceholder')}
+                                            className="min-h-9 min-w-0 flex-1 rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 text-sm text-[var(--app-fg)] outline-none focus:border-[var(--app-link)]"
+                                        />
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableMarketplaceAfterInstall} onChange={(event) => setEnableMarketplaceAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
+                                        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={overwriteMarketplace} onChange={(event) => setOverwriteMarketplace(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
+                                    </div>
+                                    <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
+                                        {t('settings.plugins.marketplace.trustWarning')}
+                                    </div>
+                                    {marketplaceUpdateCount > 0 || marketplaceYankedCount > 0 ? (
+                                        <div className="flex flex-wrap gap-2">
+                                            {marketplaceUpdateCount > 0 ? <Chip label={t('settings.plugins.marketplace.updatesFound', { count: marketplaceUpdateCount })} variant="warning" /> : null}
+                                            {marketplaceYankedCount > 0 ? <Chip label={t('settings.plugins.marketplace.yankedFound', { count: marketplaceYankedCount })} variant="destructive" /> : null}
+                                        </div>
+                                    ) : null}
+                                    {marketplace.error ? <div className="rounded-lg border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-2 text-sm text-[var(--app-badge-error-text)]">{marketplace.error}</div> : null}
+                                    {marketplace.isLoading ? <LoadingState label={t('settings.plugins.marketplace.loading')} className="p-2" /> : null}
+                                    {!marketplace.isLoading && !marketplace.error && marketplaceEntries.length === 0 ? (
+                                        <div className="rounded-lg border border-dashed border-[var(--app-border)] p-3 text-center text-sm text-[var(--app-hint)]">{t('settings.plugins.marketplace.empty')}</div>
+                                    ) : null}
+                                </CardContent>
+                            </Card>
+
+                            {selectedMarketplaceEntry ? (
+                                <MarketplaceDetailCard
+                                    entry={selectedMarketplaceEntry}
+                                    version={selectedMarketplaceVersion}
+                                    plan={selectedMarketplacePlan}
+                                    pendingAction={marketplacePending?.pluginId === selectedMarketplaceEntry.id ? marketplacePending.action : null}
+                                    disabled={Boolean(marketplacePending && marketplacePending.pluginId !== selectedMarketplaceEntry.id)}
+                                    overwrite={overwriteMarketplace}
+                                    t={t}
+                                    locale={locale}
+                                    onVersionChange={(version) => setMarketplaceVersions((current) => ({ ...current, [selectedMarketplaceEntry.id]: version }))}
+                                    onPreview={() => void previewMarketplaceInstall(selectedMarketplaceEntry)}
+                                    onInstall={() => void installMarketplacePlugin(selectedMarketplaceEntry)}
+                                    onClose={() => setSelectedMarketplaceEntryId(null)}
                                 />
-                            </div>
-                            <div className="flex flex-wrap items-center gap-3">
-                                <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableMarketplaceAfterInstall} onChange={(event) => setEnableMarketplaceAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
-                                <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={overwriteMarketplace} onChange={(event) => setOverwriteMarketplace(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
-                            </div>
-                            {marketplace.error ? <div className="rounded-lg border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-2 text-sm text-[var(--app-badge-error-text)]">{marketplace.error}</div> : null}
-                            {marketplace.isLoading ? <LoadingState label={t('settings.plugins.marketplace.loading')} className="p-2" /> : null}
-                            {!marketplace.isLoading && !marketplace.error && marketplace.entries.length === 0 ? (
-                                <div className="rounded-lg border border-dashed border-[var(--app-border)] p-3 text-center text-sm text-[var(--app-hint)]">{t('settings.plugins.marketplace.empty')}</div>
                             ) : null}
-                            {marketplacePlan ? (
-                                <div className="space-y-2">
-                                    <div className="break-all rounded-lg bg-[var(--app-subtle-bg)] p-2 text-xs text-[var(--app-hint)]">
-                                        {t('settings.plugins.marketplace.asset', { asset: marketplacePlan.marketplace.assetUrl })}
-                                    </div>
-                                    <InstallPlanCard plan={marketplacePlan.plan} t={t} locale={locale} />
-                                </div>
-                            ) : null}
-                            <div className="grid gap-2">
-                                {marketplace.entries.map((entry) => (
+
+                            <div className="grid min-w-0 gap-2">
+                                {marketplaceEntries.map((entry) => (
                                     <MarketplacePluginCard
                                         key={entry.id}
                                         entry={entry}
                                         t={t}
                                         locale={locale}
-                                        disabled={actions.isPending}
-                                        selected={marketplacePlan?.marketplace.pluginId === entry.id}
+                                        disabled={Boolean(marketplacePending && marketplacePending.pluginId !== entry.id)}
+                                        overwrite={overwriteMarketplace}
+                                        pendingAction={marketplacePending?.pluginId === entry.id ? marketplacePending.action : null}
+                                        selected={selectedMarketplaceEntry?.id === entry.id || marketplacePlan?.marketplace.pluginId === entry.id}
+                                        onDetails={() => setSelectedMarketplaceEntryId(entry.id)}
                                         onPreview={() => void previewMarketplaceInstall(entry)}
                                         onInstall={() => void installMarketplacePlugin(entry)}
                                     />
                                 ))}
                             </div>
-                        </CardContent>
-                    </Card>
+                        </div>
+                    ) : (
+                        <div className="space-y-3">
+                            <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
+                                <CardContent className="space-y-2 p-3">
+                                    <div className="font-medium">{t('settings.plugins.install.title')}</div>
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <label
+                                            htmlFor="plugin-package-file"
+                                            className={`inline-flex h-8 items-center rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 text-sm font-medium text-[var(--app-fg)] transition ${actions.isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer hover:bg-[var(--app-subtle-bg)]'}`}
+                                        >
+                                            {t('settings.plugins.install.choosePackage')}
+                                        </label>
+                                        <input
+                                            id="plugin-package-file"
+                                            type="file"
+                                            accept=".tgz,.tar.gz,.zip"
+                                            disabled={actions.isPending}
+                                            onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)}
+                                            className="sr-only"
+                                        />
+                                        <Button type="button" variant="outline" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void previewInstallPlan()}>{t('settings.plugins.install.previewPlan')}</Button>
+                                        <Button type="button" size="sm" disabled={actions.isPending || !packageFile || (installPlan?.blockingErrors.length ?? 0) > 0} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
+                                    </div>
+                                    <div className="flex flex-wrap items-center gap-3">
+                                        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableAfterInstall} onChange={(event) => setEnableAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
+                                        <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={overwriteLocal} onChange={(event) => setOverwriteLocal(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
+                                    </div>
+                                    {packageFile ? (
+                                        <div className="w-full min-w-0 truncate text-xs text-[var(--app-hint)]" title={packageFile.name}>
+                                            {t('settings.plugins.install.selectedPackage', { filename: packageFile.name })}
+                                        </div>
+                                    ) : null}
+                                    <InstallPlanCard plan={installPlan} t={t} locale={locale} />
+                                </CardContent>
+                            </Card>
 
-                    <Card className="border border-[var(--app-border)] bg-[var(--app-bg)]">
-                        <CardContent className="space-y-2 p-3">
-                            <div className="flex flex-wrap items-center gap-2">
-                                <label
-                                    htmlFor="plugin-package-file"
-                                    className={`inline-flex h-8 items-center rounded-md border border-[var(--app-border)] bg-[var(--app-secondary-bg)] px-3 text-sm font-medium text-[var(--app-fg)] transition ${actions.isPending ? 'pointer-events-none opacity-60' : 'cursor-pointer hover:bg-[var(--app-subtle-bg)]'}`}
-                                >
-                                    {t('settings.plugins.install.choosePackage')}
-                                </label>
-                                <input
-                                    id="plugin-package-file"
-                                    type="file"
-                                    accept=".tgz,.tar.gz,.zip"
-                                    disabled={actions.isPending}
-                                    onChange={(event) => setPackageFile(event.target.files?.[0] ?? null)}
-                                    className="sr-only"
-                                />
-                                <Button type="button" variant="outline" size="sm" disabled={actions.isPending || !packageFile} onClick={() => void previewInstallPlan()}>{t('settings.plugins.install.previewPlan')}</Button>
-                                <Button type="button" size="sm" disabled={actions.isPending || !packageFile || (installPlan?.blockingErrors.length ?? 0) > 0} onClick={() => void installPackage()}>{t('settings.plugins.install.installPackage')}</Button>
+                            <div className="flex flex-wrap gap-2" aria-label={t('settings.plugins.filterLabel')}>
+                                {(['all', 'active', 'enabled', 'issues'] as const).map((entry) => (
+                                    <Button key={entry} type="button" size="sm" variant={filter === entry ? 'secondary' : 'outline'} onClick={() => setFilter(entry)}>
+                                        {t(`settings.plugins.filter.${entry}`)} · {counts[entry]}
+                                    </Button>
+                                ))}
                             </div>
-                            <div className="flex flex-wrap items-center gap-3">
-                                <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={enableAfterInstall} onChange={(event) => setEnableAfterInstall(event.target.checked)} />{t('settings.plugins.install.enableAfterInstall')}</label>
-                                <label className="inline-flex items-center gap-1.5 text-xs text-[var(--app-hint)]"><input type="checkbox" checked={overwriteLocal} onChange={(event) => setOverwriteLocal(event.target.checked)} />{t('settings.plugins.install.overwriteExisting')}</label>
-                            </div>
-                            {packageFile ? (
-                                <div className="w-full min-w-0 truncate text-xs text-[var(--app-hint)]" title={packageFile.name}>
-                                    {t('settings.plugins.install.selectedPackage', { filename: packageFile.name })}
-                                </div>
-                            ) : null}
-                            <InstallPlanCard plan={installPlan} t={t} locale={locale} />
-                        </CardContent>
-                    </Card>
 
-                    <ResultCard result={result} onDismiss={() => setResult(null)} />
-
-                    <div className="flex flex-wrap gap-2" aria-label={t('settings.plugins.filterLabel')}>
-                        {(['all', 'active', 'enabled', 'issues'] as const).map((entry) => (
-                            <Button key={entry} type="button" size="sm" variant={filter === entry ? 'secondary' : 'outline'} onClick={() => setFilter(entry)}>
-                                {t(`settings.plugins.filter.${entry}`)} · {counts[entry]}
-                            </Button>
-                        ))}
-                    </div>
-
-                    {error ? <div className="rounded-xl border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-sm text-[var(--app-badge-error-text)]">{error}</div> : null}
-                    {isLoading ? <LoadingState label={t('settings.plugins.loading')} className="p-2" /> : null}
-                    {!isLoading && filtered.length === 0 ? <EmptyState filtered={filter !== 'all'} t={t} /> : null}
-                    <div className="space-y-2">
-                        {filtered.map((group) => (
-                            <PluginCard
-                                key={group.id}
-                                group={group}
-                                t={t}
-                                locale={locale}
-                                onClick={() => navigate({
-                                    to: '/settings/plugins/$pluginId',
-                                    params: { pluginId: group.id },
-                                    search: group.primary.target?.scope ? { target: group.primary.target.scope } : {}
+                            {error ? <div className="rounded-xl border border-[var(--app-badge-error-border)] bg-[var(--app-badge-error-bg)] p-3 text-sm text-[var(--app-badge-error-text)]">{error}</div> : null}
+                            {isLoading ? <LoadingState label={t('settings.plugins.loading')} className="p-2" /> : null}
+                            {!isLoading && filtered.length === 0 ? <EmptyState filtered={filter !== 'all'} t={t} /> : null}
+                            <div className="space-y-2">
+                                {filtered.map((group) => {
+                                    const marketplaceEntry = marketplaceById.get(group.id)
+                                    return (
+                                        <PluginCard
+                                            key={group.id}
+                                            group={group}
+                                            marketplaceEntry={marketplaceEntry}
+                                            updatePending={marketplacePending?.pluginId === group.id}
+                                            t={t}
+                                            locale={locale}
+                                            onReviewUpdate={marketplaceEntry ? () => reviewMarketplaceUpdate(marketplaceEntry) : undefined}
+                                            onUpdate={marketplaceEntry ? () => installMarketplaceUpdate(marketplaceEntry) : undefined}
+                                            onClick={() => navigate({
+                                                to: '/settings/plugins/$pluginId',
+                                                params: { pluginId: group.id },
+                                                search: group.primary.target?.scope ? { target: group.primary.target.scope } : {}
+                                            })}
+                                        />
+                                    )
                                 })}
-                            />
-                        ))}
-                    </div>
+                            </div>
+                        </div>
+                    )}
                 </div>
             </div>
         </div>

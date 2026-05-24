@@ -19,6 +19,7 @@ import {
     getRemotePlugins,
     installRemoteLocalPlugin,
     reloadRemotePlugins,
+    refreshRemotePluginMarketplace,
     updateRemotePluginConfig
 } from '@/api/pluginAdmin'
 import type { CommandDefinition } from './types'
@@ -208,7 +209,32 @@ function printTable(plugins: PluginListItem[]): void {
 function latestMarketplaceRelease(entry: PluginMarketplaceEntryView): PluginMarketplaceEntryView['releases'][number] | undefined {
     return [...entry.releases]
         .filter((release) => !release.yanked)
-        .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true, sensitivity: 'base' }))[0]
+        .sort((left, right) => compareMarketplaceVersions(right.version, left.version))[0]
+}
+
+type NumericVersion = [number, number, number]
+
+function parseMarketplaceVersion(version: string): NumericVersion {
+    const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/)
+    if (!match) return [0, 0, 0]
+    return [Number(match[1]), Number(match[2]), Number(match[3])]
+}
+
+function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
+    const left = parseMarketplaceVersion(leftRaw)
+    const right = parseMarketplaceVersion(rightRaw)
+    for (let index = 0; index < 3; index += 1) {
+        if (left[index] > right[index]) return 1
+        if (left[index] < right[index]) return -1
+    }
+    return leftRaw.localeCompare(rightRaw)
+}
+
+function marketplaceInstallStatus(entry: PluginMarketplaceEntryView): string {
+    if (!entry.installed) return '-'
+    if (entry.installed.yanked) return 'yanked'
+    if (entry.installed.updateAvailable) return 'update'
+    return 'installed'
 }
 
 function printMarketplaceTable(entries: PluginMarketplaceEntryView[]): void {
@@ -217,6 +243,8 @@ function printMarketplaceTable(entries: PluginMarketplaceEntryView[]): void {
         return {
             id: entry.id,
             version: latest?.version ?? '-',
+            installed: entry.installed?.version ?? '-',
+            status: marketplaceInstallStatus(entry),
             repo: entry.repo,
             categories: (entry.categories ?? []).join(',') || '-',
             name: entry.name
@@ -225,12 +253,14 @@ function printMarketplaceTable(entries: PluginMarketplaceEntryView[]): void {
     const widths = {
         id: Math.max(2, ...rows.map((row) => row.id.length)),
         version: Math.max(7, ...rows.map((row) => row.version.length)),
+        installed: Math.max(9, ...rows.map((row) => row.installed.length)),
+        status: Math.max(6, ...rows.map((row) => row.status.length)),
         repo: Math.max(4, ...rows.map((row) => row.repo.length)),
         categories: Math.max(10, ...rows.map((row) => row.categories.length))
     }
-    console.log(`${'ID'.padEnd(widths.id)}  ${'VERSION'.padEnd(widths.version)}  ${'REPO'.padEnd(widths.repo)}  ${'CATEGORIES'.padEnd(widths.categories)}  NAME`)
+    console.log(`${'ID'.padEnd(widths.id)}  ${'LATEST'.padEnd(widths.version)}  ${'INSTALLED'.padEnd(widths.installed)}  ${'STATUS'.padEnd(widths.status)}  ${'REPO'.padEnd(widths.repo)}  ${'CATEGORIES'.padEnd(widths.categories)}  NAME`)
     for (const row of rows) {
-        console.log(`${row.id.padEnd(widths.id)}  ${row.version.padEnd(widths.version)}  ${row.repo.padEnd(widths.repo)}  ${row.categories.padEnd(widths.categories)}  ${row.name}`)
+        console.log(`${row.id.padEnd(widths.id)}  ${row.version.padEnd(widths.version)}  ${row.installed.padEnd(widths.installed)}  ${row.status.padEnd(widths.status)}  ${row.repo.padEnd(widths.repo)}  ${row.categories.padEnd(widths.categories)}  ${row.name}`)
     }
 }
 
@@ -703,6 +733,25 @@ async function runMarketplace(args: string[]): Promise<void> {
         return
     }
 
+    if (action === 'refresh' || action === 'check-updates') {
+        await ensurePluginAdminToken()
+        const payload = await refreshRemotePluginMarketplace(configuration.cliApiToken, 120000)
+        if (json) {
+            console.log(JSON.stringify(payload, null, 2))
+            return
+        }
+        const updateCount = payload.entries.filter((entry) => entry.installed?.updateAvailable).length
+        const yankedCount = payload.entries.filter((entry) => entry.installed?.yanked).length
+        console.log(chalk.gray(`Marketplace: ${payload.sourceUrl}`))
+        console.log(chalk.gray(`Checked: ${new Date(payload.fetchedAt).toLocaleString()}`))
+        console.log(updateCount > 0 ? chalk.yellow(`${updateCount} plugin update(s) available.`) : chalk.green('All installed marketplace plugins are up to date.'))
+        if (yankedCount > 0) {
+            console.log(chalk.red(`${yankedCount} installed plugin release(s) were yanked.`))
+        }
+        printMarketplaceTable(payload.entries)
+        return
+    }
+
     if (action === 'info' || action === 'inspect') {
         const id = positionalArgs(rest)[0]
         if (!id) throw new Error('Usage: hapi plugins marketplace info <id> [--json]')
@@ -722,15 +771,16 @@ async function runMarketplace(args: string[]): Promise<void> {
         return
     }
 
-    if (action === 'install') {
+    if (action === 'install' || action === 'update') {
         const id = positionalArgs(rest, ['--version', '--runners'])[0]
-        if (!id) throw new Error('Usage: hapi plugins marketplace install <id> [--version x.y.z] [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]')
+        if (!id) throw new Error('Usage: hapi plugins marketplace install|update <id> [--version x.y.z] [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]')
         await ensurePluginAdminToken()
+        const overwrite = action === 'update' || hasFlag(rest, '--overwrite')
         const planPayload: PluginMarketplaceInstallPlanResponse = await createRemoteMarketplaceInstallPlan(configuration.cliApiToken, id, {
             version: valueAfter(rest, '--version'),
             enable: hasFlag(rest, '--enable'),
             reload: hasFlag(rest, '--reload'),
-            overwrite: hasFlag(rest, '--overwrite'),
+            overwrite,
             runnerSelection: parseRunnerSelectionArg(rest)
         }, 120000)
         if (hasFlag(rest, '--dry-run')) {
@@ -757,7 +807,7 @@ async function runMarketplace(args: string[]): Promise<void> {
         }
         console.log(chalk.gray(`Marketplace asset: ${planPayload.marketplace.assetUrl}`))
         printInstallPlan(planPayload.plan)
-        console.log(chalk.green(`Marketplace plugin install ${result.ok ? 'completed' : 'completed with issues'}.`))
+        console.log(chalk.green(`Marketplace plugin ${action === 'update' ? 'update' : 'install'} ${result.ok ? 'completed' : 'completed with issues'}.`))
         for (const targetResult of result.targetResults ?? []) {
             console.log(`${targetResult.target.scope}: ${targetResult.ok ? 'ok' : 'failed'}${targetResult.error ? ` - ${targetResult.error}` : ''}`)
         }
@@ -889,8 +939,10 @@ ${chalk.bold('Usage:')}
   hapi plugins install-local <path> --target hub|runner:<machineId>|all-runners [--enable] [--reload] [--overwrite] [--json]
   hapi plugins install-package <package.tgz|package.zip> [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]
   hapi plugins marketplace list [query] [--category <category>] [--runtime hub|runner] [--json]
+  hapi plugins marketplace refresh [--json]
   hapi plugins marketplace info <id> [--json]
   hapi plugins marketplace install <id> [--version x.y.z] [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--overwrite] [--json]
+  hapi plugins marketplace update <id> [--version x.y.z] [--runners compatible|all|id[,id]] [--dry-run] [--enable] [--reload] [--json]
   hapi plugins delete <id> [--reload] [--json] [--yes]
   hapi plugins reload [id] [--json]
   hapi plugins doctor [id] [--json]

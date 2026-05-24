@@ -18,18 +18,6 @@
             "type": "string",
             "minLength": 1
         },
-        "args": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
-        "envKeys": {
-            "type": "array",
-            "items": {
-                "type": "string"
-            }
-        },
         "sessionType": {
             "type": "string",
             "enum": [
@@ -77,9 +65,7 @@
         "machineId",
         "agent",
         "directory",
-        "cwd",
-        "args",
-        "envKeys"
+        "cwd"
     ],
     "additionalProperties": false
 }

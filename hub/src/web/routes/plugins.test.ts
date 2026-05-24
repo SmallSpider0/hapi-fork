@@ -748,6 +748,80 @@ describe('plugin admin routes', () => {
         }
     })
 
+    it('marks installed marketplace plugins as updateable only when the catalog version is newer', async () => {
+        const testDir = mkdtempSync(join(tmpdir(), 'hapi-plugin-marketplace-route-'))
+        const catalogPath = join(testDir, 'catalog.v1.json')
+        const releaseManifest = (version: string) => ({
+            id: 'com.example.package',
+            name: 'Package Plugin',
+            version,
+            pluginApiVersion: '0.1',
+            runtimes: { hub: { entry: 'hub.js' } }
+        })
+        writeFileSync(catalogPath, JSON.stringify({
+            schemaVersion: 'hapi-plugin-marketplace/v1',
+            updatedAt: '2026-05-22T00:00:00.000Z',
+            plugins: [{
+                id: 'com.example.package',
+                name: 'Package Plugin',
+                repo: 'example/package-plugin',
+                releases: ['0.1.0', '0.2.0'].map((version) => ({
+                    version,
+                    tag: `v${version}`,
+                    manifest: releaseManifest(version),
+                    package: {
+                        filename: 'plugin.tgz',
+                        url: `https://github.com/example/package-plugin/releases/download/v${version}/plugin.tgz`,
+                        format: 'tgz',
+                        checksum: `sha256:${'a'.repeat(64)}`
+                    }
+                }))
+            }]
+        }, null, 2))
+        const marketplaceService = new PluginMarketplaceService({
+            sourceUrl: catalogPath,
+            cacheTtlMs: 0
+        })
+        const app = createApp({
+            listPlugins: () => [{
+                ...plugin,
+                id: 'com.example.package',
+                version: '0.1.0'
+            }]
+        } as never, null, marketplaceService)
+
+        try {
+            const response = await app.request('/api/plugins/marketplace', {
+                headers: { authorization: `Bearer ${await token()}` }
+            })
+            expect(response.status).toBe(200)
+            const list = await response.json() as { entries: Array<{ installed?: { version?: string; updateAvailable?: boolean } }> }
+            expect(list.entries[0]?.installed).toMatchObject({
+                version: '0.1.0',
+                updateAvailable: true
+            })
+
+            const newerInstalledApp = createApp({
+                listPlugins: () => [{
+                    ...plugin,
+                    id: 'com.example.package',
+                    version: '0.3.0'
+                }]
+            } as never, null, marketplaceService)
+            const newerInstalledResponse = await newerInstalledApp.request('/api/plugins/marketplace', {
+                headers: { authorization: `Bearer ${await token()}` }
+            })
+            expect(newerInstalledResponse.status).toBe(200)
+            const newerInstalledList = await newerInstalledResponse.json() as { entries: Array<{ installed?: { version?: string; updateAvailable?: boolean } }> }
+            expect(newerInstalledList.entries[0]?.installed).toMatchObject({
+                version: '0.3.0',
+                updateAvailable: false
+            })
+        } finally {
+            rmSync(testDir, { recursive: true, force: true })
+        }
+    })
+
     it('keeps Hub and Runner delete actions isolated by target', async () => {
         const online = makeMachine('runner-1', true)
         const calls: string[] = []

@@ -1,17 +1,14 @@
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
 import { endpointCatalog } from './plugin-api-docs/endpointCatalog'
 import {
     extractSdkDeclarations,
-    renderAdminRestApiPage,
-    renderAgentExtensionsPage,
-    renderHubRuntimePage,
+    renderAdminApiPage,
     renderIndex,
-    renderIndividualSchemaPages,
     renderManifestPage,
-    renderRuntimeSdkPage,
-    renderRunnerRuntimePage,
+    renderMarketplacePage,
+    renderRuntimesPage,
     renderSchemasIndex,
     renderWebDescriptorsPage,
     schemaPublicPath,
@@ -20,7 +17,7 @@ import {
 } from './plugin-api-docs/renderMarkdown'
 import { renderOpenApi } from './plugin-api-docs/renderOpenApi'
 import { schemaCatalog } from './plugin-api-docs/schemaCatalog'
-import { renderTutorialIndex, renderTutorialPage } from './plugin-api-docs/renderTutorials'
+import { renderQuickstartPage } from './plugin-api-docs/renderTutorials'
 import { loadTutorialFixtures } from './plugin-api-docs/tutorialCatalog'
 
 const checkMode = process.argv.includes('--check')
@@ -28,6 +25,22 @@ const root = process.cwd()
 const referenceRoot = join(root, 'docs/reference/plugin-api')
 const publicRoot = join(root, 'docs/public/plugin-api')
 const sdkFilePath = join(root, 'shared/src/plugins/sdk.ts')
+
+const obsoleteTopLevelPages = [
+    'admin-rest-api.md',
+    'agent-extensions.md',
+    'hub-runtime.md',
+    'runner-runtime.md',
+    'runtime-sdk.md',
+    'tutorial.md',
+    'tutorial-hub-notification.md',
+    'tutorial-runner-env.md',
+    'tutorial-web-descriptor.md'
+]
+
+const obsoleteReferenceDirs = [
+    join(referenceRoot, 'schemas')
+]
 
 type GeneratedFile = {
     path: string
@@ -37,7 +50,10 @@ type GeneratedFile = {
 async function main(): Promise<void> {
     const files = generateFiles()
     if (checkMode) {
-        const stale = await findStaleFiles(files)
+        const stale = [
+            ...await findStaleFiles(files),
+            ...await findObsoleteReferenceFiles()
+        ]
         if (stale.length > 0) {
             console.error('Plugin API docs are stale. Run: bun run docs:plugin-api')
             for (const file of stale) {
@@ -49,6 +65,7 @@ async function main(): Promise<void> {
         return
     }
 
+    await removeObsoleteReferenceFiles()
     for (const file of files) {
         await mkdir(dirname(file.path), { recursive: true })
         await writeFile(file.path, file.content, 'utf8')
@@ -73,17 +90,13 @@ function generateFiles(): GeneratedFile[] {
 
     const markdownFiles = new Map<string, string>([
         ['index.md', renderIndex(inputs)],
-        ['tutorial.md', renderTutorialIndex(tutorials)],
-        ...tutorials.map((tutorial) => [tutorial.page, renderTutorialPage(tutorial)] as const),
+        ['quickstart.md', renderQuickstartPage(tutorials)],
         ['manifest.md', renderManifestPage(inputs)],
-        ['runtime-sdk.md', renderRuntimeSdkPage(declarations)],
-        ['hub-runtime.md', renderHubRuntimePage(inputs, declarations)],
-        ['runner-runtime.md', renderRunnerRuntimePage(inputs, declarations)],
+        ['runtimes.md', renderRuntimesPage(inputs, declarations)],
         ['web-descriptors.md', renderWebDescriptorsPage(inputs)],
-        ['agent-extensions.md', renderAgentExtensionsPage(inputs, declarations)],
-        ['admin-rest-api.md', renderAdminRestApiPage(endpointCatalog)],
-        ['schemas.md', renderSchemasIndex(inputs)],
-        ...renderIndividualSchemaPages(inputs)
+        ['admin-api.md', renderAdminApiPage(endpointCatalog)],
+        ['marketplace.md', renderMarketplacePage(inputs)],
+        ['schemas.md', renderSchemasIndex(inputs)]
     ])
 
     const files: GeneratedFile[] = []
@@ -112,6 +125,47 @@ async function findStaleFiles(files: GeneratedFile[]): Promise<string[]> {
         }
     }
     return stale
+}
+
+async function findObsoleteReferenceFiles(): Promise<string[]> {
+    const obsolete: string[] = []
+    for (const page of obsoleteTopLevelPages) {
+        const path = join(referenceRoot, page)
+        if (await fileExists(path)) {
+            obsolete.push(path)
+        }
+    }
+    for (const dir of obsoleteReferenceDirs) {
+        obsolete.push(...await listFiles(dir))
+    }
+    return obsolete.sort((left, right) => left.localeCompare(right))
+}
+
+async function removeObsoleteReferenceFiles(): Promise<void> {
+    for (const page of obsoleteTopLevelPages) {
+        await rm(join(referenceRoot, page), { force: true })
+    }
+    for (const dir of obsoleteReferenceDirs) {
+        await rm(dir, { recursive: true, force: true })
+    }
+}
+
+async function listFiles(path: string): Promise<string[]> {
+    const entries = await readdir(path, { withFileTypes: true }).catch(() => [])
+    const files: string[] = []
+    for (const entry of entries) {
+        const entryPath = join(path, entry.name)
+        if (entry.isDirectory()) {
+            files.push(...await listFiles(entryPath))
+        } else if (entry.isFile()) {
+            files.push(entryPath)
+        }
+    }
+    return files
+}
+
+async function fileExists(path: string): Promise<boolean> {
+    return (await readFile(path).then(() => true).catch(() => false))
 }
 
 function ensureTrailingNewline(value: string): string {

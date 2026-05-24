@@ -1,6 +1,6 @@
 {
     "schemaVersion": "hapi-plugin-marketplace/v1",
-    "updatedAt": "2026-05-24T05:20:00.000Z",
+    "updatedAt": "2026-05-24T07:28:18.035Z",
     "plugins": [
         {
             "id": "com.hapi.core.schedule-send",
@@ -49,11 +49,12 @@
             ],
             "releases": [
                 {
-                    "version": "0.1.0",
-                    "tag": "hapi-core-plugins-v0.1.0",
-                    "releasedAt": "2026-05-24T05:20:00.000Z",
+                    "version": "0.1.1",
+                    "tag": "hapi-core-plugins-v0.1.1",
+                    "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.core.schedule-send",
+                        "version": "0.1.1",
                         "name": "Schedule Send",
                         "description": "First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.",
                         "display": {
@@ -178,15 +179,32 @@
                                 ]
                             }
                         },
-                        "version": "0.1.0",
+                        "compatibility": {
+                            "pluginApi": ">=0.1 <0.2",
+                            "hub": {
+                                "extensionPoints": [
+                                    "hub.messageAction",
+                                    "web.composerAction"
+                                ]
+                            }
+                        },
                         "pluginApiVersion": "0.1"
                     },
                     "package": {
-                        "filename": "com.hapi.core.schedule-send-0.1.0.hapi-plugin.tgz",
-                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-core-plugins-v0.1.0/com.hapi.core.schedule-send-0.1.0.hapi-plugin.tgz",
+                        "filename": "com.hapi.core.schedule-send-0.1.1.hapi-plugin.tgz",
+                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-core-plugins-v0.1.1/com.hapi.core.schedule-send-0.1.1.hapi-plugin.tgz",
                         "format": "tgz",
-                        "checksum": "sha256:d041a478f8d22b34e2d0b348437fcf702f3d5b77b710005ebb8f19b2011a424d",
-                        "size": 2428
+                        "checksum": "sha256:d24d860ad21c141c5ca321a49566250275183b0bce7edb8495aef187d7bc0f14",
+                        "size": 2498
+                    },
+                    "compatibility": {
+                        "pluginApi": ">=0.1 <0.2",
+                        "hub": {
+                            "extensionPoints": [
+                                "hub.messageAction",
+                                "web.composerAction"
+                            ]
+                        }
                     }
                 }
             ]
@@ -237,11 +255,12 @@
             ],
             "releases": [
                 {
-                    "version": "0.1.0",
-                    "tag": "hapi-core-plugins-v0.1.0",
-                    "releasedAt": "2026-05-24T05:20:00.000Z",
+                    "version": "0.1.1",
+                    "tag": "hapi-core-plugins-v0.1.1",
+                    "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.core.serverchan-notifier",
+                        "version": "0.1.1",
                         "name": "ServerChan Notifier",
                         "description": "First-party Hub plugin that sends selected HAPI notifications through ServerChan.",
                         "display": {
@@ -483,15 +502,14 @@
                                 ]
                             }
                         },
-                        "version": "0.1.0",
                         "pluginApiVersion": "0.1"
                     },
                     "package": {
-                        "filename": "com.hapi.core.serverchan-notifier-0.1.0.hapi-plugin.tgz",
-                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-core-plugins-v0.1.0/com.hapi.core.serverchan-notifier-0.1.0.hapi-plugin.tgz",
+                        "filename": "com.hapi.core.serverchan-notifier-0.1.1.hapi-plugin.tgz",
+                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-core-plugins-v0.1.1/com.hapi.core.serverchan-notifier-0.1.1.hapi-plugin.tgz",
                         "format": "tgz",
-                        "checksum": "sha256:99cd1c6a8895df7479b1a66b54bec94430c56383289f3fb585dd989c23f916ab",
-                        "size": 5030
+                        "checksum": "sha256:2d2699127da39a96db77a87a9469f4fa4c1a3d138695d0243f102d1c95e0a889",
+                        "size": 5026
                     },
                     "compatibility": {
                         "pluginApi": ">=0.1 <0.2",
@@ -553,11 +571,12 @@
             ],
             "releases": [
                 {
-                    "version": "0.1.0",
-                    "tag": "hapi-core-plugins-v0.1.0",
-                    "releasedAt": "2026-05-24T05:20:00.000Z",
+                    "version": "0.1.1",
+                    "tag": "hapi-core-plugins-v0.1.1",
+                    "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.core.runner-launch-presets",
+                        "version": "0.1.1",
                         "name": "Runner Launch Presets",
                         "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
                         "display": {
@@ -663,6 +682,11 @@
                         },
                         "compatibility": {
                             "pluginApi": ">=0.1 <0.2",
+                            "hub": {
+                                "extensionPoints": [
+                                    "web.settingsPanel"
+                                ]
+                            },
                             "runner": {
                                 "extensionPoints": [
                                     "runner.spawnOptionsProvider"
@@ -674,18 +698,22 @@
                             "offlineRunnerPolicy": "skip",
                             "minReadyRunnerCount": 1
                         },
-                        "version": "0.1.0",
                         "pluginApiVersion": "0.1"
                     },
                     "package": {
-                        "filename": "com.hapi.core.runner-launch-presets-0.1.0.hapi-plugin.tgz",
-                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-core-plugins-v0.1.0/com.hapi.core.runner-launch-presets-0.1.0.hapi-plugin.tgz",
+                        "filename": "com.hapi.core.runner-launch-presets-0.1.1.hapi-plugin.tgz",
+                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-core-plugins-v0.1.1/com.hapi.core.runner-launch-presets-0.1.1.hapi-plugin.tgz",
                         "format": "tgz",
-                        "checksum": "sha256:62f0351bfa83cfe3da387b310cfd32d348ad018681835b9c5797d149785170f1",
-                        "size": 4008
+                        "checksum": "sha256:d5a84738158fe70aec382834643614ffee2301c5f49556e8a8c7d2b6d48ea754",
+                        "size": 4090
                     },
                     "compatibility": {
                         "pluginApi": ">=0.1 <0.2",
+                        "hub": {
+                            "extensionPoints": [
+                                "web.settingsPanel"
+                            ]
+                        },
                         "runner": {
                             "extensionPoints": [
                                 "runner.spawnOptionsProvider"

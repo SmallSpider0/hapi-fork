@@ -28,17 +28,12 @@ export default defineConfig({
         text: 'Plugin API',
         items: [
           { text: 'Overview', link: '/reference/plugin-api/' },
-          { text: 'Tutorials', link: '/reference/plugin-api/tutorial' },
-          { text: 'Hub Notification Tutorial', link: '/reference/plugin-api/tutorial-hub-notification' },
-          { text: 'Runner Environment Tutorial', link: '/reference/plugin-api/tutorial-runner-env' },
-          { text: 'Web Descriptor Tutorial', link: '/reference/plugin-api/tutorial-web-descriptor' },
+          { text: 'Quickstart', link: '/reference/plugin-api/quickstart' },
           { text: 'Manifest', link: '/reference/plugin-api/manifest' },
-          { text: 'Runtime SDK', link: '/reference/plugin-api/runtime-sdk' },
-          { text: 'Hub Runtime', link: '/reference/plugin-api/hub-runtime' },
-          { text: 'Runner Runtime', link: '/reference/plugin-api/runner-runtime' },
+          { text: 'Runtimes', link: '/reference/plugin-api/runtimes' },
           { text: 'Web Descriptors', link: '/reference/plugin-api/web-descriptors' },
-          { text: 'Agent Extensions', link: '/reference/plugin-api/agent-extensions' },
-          { text: 'Admin REST API', link: '/reference/plugin-api/admin-rest-api' },
+          { text: 'Admin API', link: '/reference/plugin-api/admin-api' },
+          { text: 'Marketplace', link: '/reference/plugin-api/marketplace' },
           { text: 'Schemas', link: '/reference/plugin-api/schemas' }
         ]
       },

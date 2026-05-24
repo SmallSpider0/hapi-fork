@@ -274,6 +274,7 @@ describe('hapi plugins command', () => {
             getRemotePlugins: vi.fn(),
             getRemotePluginMarketplace: vi.fn(),
             getRemotePluginMarketplaceEntry: vi.fn(),
+            refreshRemotePluginMarketplace: vi.fn(),
             createRemoteMarketplaceInstallPlan: vi.fn(),
             updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins: vi.fn(),
@@ -332,6 +333,7 @@ describe('hapi plugins command', () => {
             getRemotePlugins: vi.fn(),
             getRemotePluginMarketplace: vi.fn(),
             getRemotePluginMarketplaceEntry: vi.fn(),
+            refreshRemotePluginMarketplace: vi.fn(),
             createRemoteMarketplaceInstallPlan: vi.fn(),
             updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins: vi.fn(),
@@ -399,6 +401,7 @@ describe('hapi plugins command', () => {
             getRemotePlugins: vi.fn(),
             getRemotePluginMarketplace: vi.fn(),
             getRemotePluginMarketplaceEntry: vi.fn(),
+            refreshRemotePluginMarketplace: vi.fn(),
             createRemoteMarketplaceInstallPlan,
             updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins: vi.fn(),
@@ -419,6 +422,87 @@ describe('hapi plugins command', () => {
         expect(executeRemotePluginInstallPlan).toHaveBeenCalledWith('test-token', 'market-plan-1', 120000)
         const payload = JSON.parse(logs.join('\n')) as { result: { pluginId: string } }
         expect(payload.result.pluginId).toBe('com.market.plugin')
+    })
+
+    it('shows marketplace installed/update status and supports update alias', async () => {
+        process.env.CLI_API_TOKEN = 'test-token'
+        const getRemotePluginMarketplace = vi.fn(async () => ({
+            sourceUrl: 'catalog.json',
+            fetchedAt: 1,
+            entries: [{
+                id: 'com.market.plugin',
+                name: 'Market plugin',
+                repo: 'example/market-plugin',
+                releases: [{
+                    version: '1.1.0',
+                    tag: 'v1.1.0',
+                    manifest: {
+                        id: 'com.market.plugin',
+                        name: 'Market plugin',
+                        version: '1.1.0',
+                        pluginApiVersion: '0.1',
+                        runtimes: { hub: { entry: 'hub.js' } }
+                    },
+                    package: {
+                        filename: 'plugin.tgz',
+                        url: 'https://github.com/example/market-plugin/releases/download/v1.1.0/plugin.tgz',
+                        format: 'tgz',
+                        checksum: `sha256:${'a'.repeat(64)}`
+                    }
+                }],
+                installed: { version: '1.0.0', updateAvailable: true, enabled: true }
+            }]
+        }))
+        const createRemoteMarketplaceInstallPlan = vi.fn(async () => ({
+            marketplace: {
+                sourceUrl: 'catalog.json',
+                pluginId: 'com.market.plugin',
+                repo: 'example/market-plugin',
+                version: '1.1.0',
+                assetUrl: 'https://github.com/example/market-plugin/releases/download/v1.1.0/plugin.tgz',
+                checksum: 'sha256:abc'
+            },
+            plan: {
+                planId: 'market-plan-1',
+                createdAt: 1,
+                plugin: { id: 'com.market.plugin', name: 'Market plugin', version: '1.1.0' },
+                source: { type: 'uploaded-package', filename: 'plugin.tgz', checksum: 'sha256:abc', format: 'tgz' },
+                positions: ['hub'],
+                targets: [{
+                    target: { scope: 'hub', runtime: 'hub', active: true },
+                    runtime: 'hub',
+                    required: true,
+                    compatible: true,
+                    status: 'compatible',
+                    action: 'overwrite'
+                }],
+                warnings: [],
+                blockingErrors: []
+            }
+        }))
+        vi.doMock('@/api/pluginAdmin', () => ({
+            getRemotePlugin: vi.fn(),
+            getRemotePlugins: vi.fn(),
+            getRemotePluginMarketplace,
+            getRemotePluginMarketplaceEntry: vi.fn(),
+            refreshRemotePluginMarketplace: vi.fn(),
+            createRemoteMarketplaceInstallPlan,
+            updateRemotePluginConfig: vi.fn(),
+            reloadRemotePlugins: vi.fn(),
+            installRemoteLocalPlugin: vi.fn(),
+            createRemotePluginInstallPlan: vi.fn(),
+            executeRemotePluginInstallPlan: vi.fn()
+        }))
+        const { handlePluginsCommand } = await importPlugins(hapiHome)
+
+        await handlePluginsCommand(['marketplace', 'list'])
+        expect(logs.join('\n')).toContain('INSTALLED')
+        expect(logs.join('\n')).toContain('update')
+
+        await handlePluginsCommand(['marketplace', 'update', 'com.market.plugin', '--dry-run'])
+        expect(createRemoteMarketplaceInstallPlan).toHaveBeenCalledWith('test-token', 'com.market.plugin', expect.objectContaining({
+            overwrite: true
+        }), 120000)
     })
 
     it('gets and sets remote scoped config with --target', async () => {
@@ -444,6 +528,7 @@ describe('hapi plugins command', () => {
             getRemotePlugins: vi.fn(),
             getRemotePluginMarketplace: vi.fn(),
             getRemotePluginMarketplaceEntry: vi.fn(),
+            refreshRemotePluginMarketplace: vi.fn(),
             createRemoteMarketplaceInstallPlan: vi.fn(),
             updateRemotePluginConfig,
             reloadRemotePlugins: vi.fn(),
@@ -468,6 +553,7 @@ describe('hapi plugins command', () => {
             getRemotePlugins: vi.fn(),
             getRemotePluginMarketplace: vi.fn(),
             getRemotePluginMarketplaceEntry: vi.fn(),
+            refreshRemotePluginMarketplace: vi.fn(),
             createRemoteMarketplaceInstallPlan: vi.fn(),
             updateRemotePluginConfig: vi.fn(),
             reloadRemotePlugins,

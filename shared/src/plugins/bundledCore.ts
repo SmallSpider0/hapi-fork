@@ -6,6 +6,7 @@ export const HAPI_BUNDLED_CORE_PLUGINS_DIR = 'bundled-core-plugins'
 export const HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID = 'com.hapi.core.schedule-send'
 export const HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID = 'com.hapi.core.serverchan-notifier'
 export const HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID = 'com.hapi.core.runner-launch-presets'
+const HAPI_CORE_PLUGIN_VERSION = '0.1.1'
 
 export type BundledCorePlugin = BundledPlugin
 
@@ -471,6 +472,7 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
     {
         manifest: manifestBase({
             id: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+            version: HAPI_CORE_PLUGIN_VERSION,
             name: 'Schedule Send',
             description: 'First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.',
             display: displayMetadata(
@@ -529,6 +531,12 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
                     }]
                 },
                 web: scheduleSendWebContributions
+            },
+            compatibility: {
+                pluginApi: '>=0.1 <0.2',
+                hub: {
+                    extensionPoints: ['hub.messageAction', 'web.composerAction']
+                }
             }
         }),
         files: [{ path: 'dist/hub.js', content: scheduleSendHubRuntime }]
@@ -536,6 +544,7 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
     {
         manifest: manifestBase({
             id: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+            version: HAPI_CORE_PLUGIN_VERSION,
             name: 'ServerChan Notifier',
             description: 'First-party Hub plugin that sends selected HAPI notifications through ServerChan.',
             display: displayMetadata(
@@ -688,6 +697,7 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
     {
         manifest: manifestBase({
             id: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+            version: HAPI_CORE_PLUGIN_VERSION,
             name: 'Runner Launch Presets',
             description: 'First-party Runner plugin for applying default launch settings by agent and workspace.',
             display: displayMetadata(
@@ -773,6 +783,9 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
             },
             compatibility: {
                 pluginApi: '>=0.1 <0.2',
+                hub: {
+                    extensionPoints: ['web.settingsPanel']
+                },
                 runner: {
                     extensionPoints: ['runner.spawnOptionsProvider']
                 }

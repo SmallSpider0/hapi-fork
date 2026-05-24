@@ -2,23 +2,25 @@
 
 # Plugin API schemas
 
-Generated from Zod schemas under `shared/src/plugins/*`.
+Machine-readable JSON Schemas generated from Zod schemas under `shared/src/plugins/*`.
+
+The large schema bodies are intentionally published as JSON files only; human-facing pages link to them instead of duplicating thousands of generated Markdown lines.
 
 ## Manifest
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schema.json) | Cold-path hapi.plugin.json contract. Read before plugin code is imported. |
 
 ## State files
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [PluginStateFile](/docs/plugin-api/schemas/plugin-state-file.schema.json) | $HAPI_HOME/plugins.json enable/config state. Secret values must not be stored here. |
 
 ## Admin API
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [PluginTargetScope](/docs/plugin-api/schemas/plugin-target-scope.schema.json) | Target selector for Hub, one Runner, or all Runners. |
 | [PluginConfigScope](/docs/plugin-api/schemas/plugin-config-scope.schema.json) | Runtime/machine/agent-scoped config key. |
@@ -27,6 +29,7 @@ Generated from Zod schemas under `shared/src/plugins/*`.
 | [PluginDiagnosticsResponse](/docs/plugin-api/schemas/plugin-diagnostics-response.schema.json) | Flattened plugin diagnostics response. |
 | [PluginCapabilitiesResponse](/docs/plugin-api/schemas/plugin-capabilities-response.schema.json) | Aggregated capability readiness across Web, Hub, and Runner parts. |
 | [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-view.schema.json) | One user-facing plugin capability with per-position part status and Web-safe descriptors. |
+| [PluginNotificationFilterOptionsResponse](/docs/plugin-api/schemas/plugin-notification-filter-options-response.schema.json) | Recent namespace, agent, and workspace option values for descriptor option sources. |
 | [PluginReloadResult](/docs/plugin-api/schemas/plugin-reload-result.schema.json) | Reload/enable/disable/config result, including partial target results. |
 | [PluginInstallLocalRequest](/docs/plugin-api/schemas/plugin-install-local-request.schema.json) | Install a plugin from a path local to the selected target machine. |
 | [PluginInstallPackageRequest](/docs/plugin-api/schemas/plugin-install-package-request.schema.json) | Install a tgz/zip plugin package by upload payload. |
@@ -43,23 +46,26 @@ Generated from Zod schemas under `shared/src/plugins/*`.
 
 ## Hub runtime
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [PluginNotificationEvent](/docs/plugin-api/schemas/plugin-notification-event.schema.json) | Narrow event DTO sent to Hub notification channels. |
 
 ## Runner runtime
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [RunnerSpawnContext](/docs/plugin-api/schemas/runner-spawn-context.schema.json) | Runner spawn context visible to environment providers, command resolvers, and spawn hooks. |
+| [RunnerSpawnOptionsContext](/docs/plugin-api/schemas/runner-spawn-options-context.schema.json) | Runner spawn-options context visible to spawn options providers before command construction. |
+| [RunnerSpawnOptionsProviderProposal](/docs/plugin-api/schemas/runner-spawn-options-provider-proposal.schema.json) | Spawn-options provider proposal. Core applies defaults before command construction. |
 | [RunnerEnvironmentProposal](/docs/plugin-api/schemas/runner-environment-proposal.schema.json) | Environment provider proposal. Core merges allowed fields only. |
 | [RunnerCommandResolverProposal](/docs/plugin-api/schemas/runner-command-resolver-proposal.schema.json) | Command resolver proposal. Final command construction remains core-owned. |
 | [RunnerSpawnHookProposal](/docs/plugin-api/schemas/runner-spawn-hook-proposal.schema.json) | Spawn hook proposal, including optional block reason. |
+| [RunnerResolvedSpawnOptions](/docs/plugin-api/schemas/runner-resolved-spawn-options.schema.json) | Resolved spawn options after Runner spawn-options providers are applied and audited. |
 | [RunnerResolvedSpawnPlan](/docs/plugin-api/schemas/runner-resolved-spawn-plan.schema.json) | Resolved spawn plan after Runner plugin extensions are applied and audited. |
 
 ## Agent extensions
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [AgentDescriptor](/docs/plugin-api/schemas/agent-descriptor.schema.json) | Static agent descriptor used by plugin-backed agent adapters and Web selectors. |
 | [AgentCapabilityProviderResult](/docs/plugin-api/schemas/agent-capability-provider-result.schema.json) | Dynamic agent capability provider output. |
@@ -68,7 +74,17 @@ Generated from Zod schemas under `shared/src/plugins/*`.
 
 ## Web descriptors
 
-| Schema | Description |
+| JSON Schema | Description |
 |---|---|
 | [PluginWebContributions](/docs/plugin-api/schemas/plugin-web-contributions.schema.json) | Declarative Web descriptor contributions. Web never executes plugin JavaScript. |
 | [PluginWebContributionView](/docs/plugin-api/schemas/plugin-web-contribution-view.schema.json) | Plugin Web contributions with plugin and target metadata. |
+
+## Marketplace
+
+| JSON Schema | Description |
+|---|---|
+| [PluginMarketplaceCatalog](/docs/plugin-api/schemas/plugin-marketplace-catalog.schema.json) | Static marketplace catalog metadata. |
+| [PluginMarketplaceListResponse](/docs/plugin-api/schemas/plugin-marketplace-list-response.schema.json) | Marketplace catalog list response with installed state. |
+| [PluginMarketplaceDetailResponse](/docs/plugin-api/schemas/plugin-marketplace-detail-response.schema.json) | Marketplace detail response for one catalog entry. |
+| [PluginMarketplaceInstallRequest](/docs/plugin-api/schemas/plugin-marketplace-install-request.schema.json) | Marketplace install request selecting version, Runner placement, enable, reload, and overwrite options. |
+| [PluginMarketplaceInstallPlanResponse](/docs/plugin-api/schemas/plugin-marketplace-install-plan-response.schema.json) | Marketplace install-plan response with source metadata and the normal plugin install plan. |

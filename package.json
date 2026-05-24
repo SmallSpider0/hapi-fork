@@ -1,7 +1,14 @@
 {
     "name": "hapi",
     "private": true,
-    "workspaces": ["cli", "shared", "hub", "web", "website", "docs"],
+    "workspaces": [
+        "cli",
+        "shared",
+        "hub",
+        "web",
+        "website",
+        "docs"
+    ],
     "scripts": {
         "build:site": "bun run --cwd website build && bun run --cwd docs docs:build && cp -r docs/.vitepress/dist website/dist/public/docs",
         "dev": "concurrently \"bun run dev:hub\" \"bun run dev:web\" --kill-others-on-exit",
@@ -18,7 +25,7 @@
         "typecheck:cli": "cd cli && bun run typecheck",
         "typecheck:hub": "cd hub && bun run typecheck",
         "typecheck:web": "cd web && bun run typecheck",
-        "test": "bun run test:cli && bun run test:hub && bun run test:web",
+        "test": "bun run docs:plugin-api:check && bun run test:cli && bun run test:hub && bun run test:web",
         "test:cli": "cd cli && bun run test",
         "test:hub": "cd hub && bun run test",
         "test:web": "cd web && bun run test",
@@ -28,7 +35,7 @@
         "marketplace:check-packaging": "bun scripts/check-marketplace-packaging.ts",
         "marketplace:check": "bun run marketplace:validate && bun run marketplace:check-packaging",
         "docs:plugin-api": "bun scripts/generate-plugin-api-docs.ts",
-        "docs:plugin-api:check": "bun scripts/generate-plugin-api-docs.ts --check"
+        "docs:plugin-api:check": "bun scripts/check-plugin-api-docs.ts && bun scripts/generate-plugin-api-docs.ts --check"
     },
     "devDependencies": {
         "concurrently": "^9.2.1",

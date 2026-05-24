@@ -50,7 +50,7 @@ import {
 import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
 import { PluginInstallError, PluginStateLockError, inspectPluginPackagePayload, validatePluginPackagePayload } from '@hapi/protocol/plugins/foundation'
 import { buildPluginInstallPlan, type PluginInstallTargetCandidate } from '../../plugins/installPlanner'
-import { PluginMarketplaceService } from '../../plugins/marketplaceService'
+import { PluginMarketplaceService, compareMarketplaceVersions } from '../../plugins/marketplaceService'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import { getAgentName } from '../../notifications/sessionInfo'
 import type { Machine, Session, SyncEngine } from '../../sync/syncEngine'
@@ -673,29 +673,28 @@ function marketplaceEntryMatches(entry: PluginMarketplaceEntry, filters: {
 function latestMarketplaceVersion(entry: PluginMarketplaceEntry): string | undefined {
     return [...entry.releases]
         .filter((release) => !release.yanked)
-        .sort((left, right) => right.version.localeCompare(left.version, undefined, { numeric: true, sensitivity: 'base' }))[0]?.version
+        .sort((left, right) => compareMarketplaceVersions(right.version, left.version))[0]?.version
 }
 
 function marketplaceEntriesWithInstallState(entries: PluginMarketplaceEntry[], plugins: PluginListItem[]): PluginMarketplaceEntryView[] {
-    const installedById = new Map<string, PluginListItem>()
+    const installedById = new Map<string, PluginListItem[]>()
     for (const plugin of plugins) {
-        if (!installedById.has(plugin.id) || plugin.active || plugin.enabled) {
-            installedById.set(plugin.id, plugin)
-        }
+        const existing = installedById.get(plugin.id) ?? []
+        existing.push(plugin)
+        installedById.set(plugin.id, existing)
     }
     return entries.map((entry) => {
-        const installed = installedById.get(entry.id)
-        if (!installed) return entry
-        const installedVersion = installed.version
-        const release = installedVersion ? entry.releases.find((candidate) => candidate.version === installedVersion) : undefined
+        const installedPlugins = installedById.get(entry.id) ?? []
+        if (installedPlugins.length === 0) return entry
+        const installedVersions = Array.from(new Set(installedPlugins.map((plugin) => plugin.version).filter((version): version is string => Boolean(version))))
         const latestVersion = latestMarketplaceVersion(entry)
         return {
             ...entry,
             installed: {
-                ...(installedVersion ? { version: installedVersion } : {}),
-                enabled: installed.enabled,
-                yanked: release?.yanked !== undefined,
-                updateAvailable: Boolean(installedVersion && latestVersion && installedVersion !== latestVersion)
+                ...(installedVersions.length > 0 ? { version: installedVersions.join(' + ') } : {}),
+                enabled: installedPlugins.some((plugin) => plugin.enabled),
+                yanked: installedVersions.some((version) => entry.releases.find((candidate) => candidate.version === version)?.yanked !== undefined),
+                updateAvailable: installedVersions.some((version) => Boolean(latestVersion && compareMarketplaceVersions(latestVersion, version) > 0))
             }
         }
     })

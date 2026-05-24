@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import type { PluginListItem } from '@hapi/protocol/plugins/admin'
-import { groupPluginListForDisplay } from './plugins'
+import { DEFAULT_PLUGIN_SETTINGS_TAB, groupPluginListForDisplay } from './plugins'
 
 function plugin(overrides: Partial<PluginListItem> & Pick<PluginListItem, 'id'>): PluginListItem {
     return {
@@ -24,6 +24,10 @@ function plugin(overrides: Partial<PluginListItem> & Pick<PluginListItem, 'id'>)
 }
 
 describe('groupPluginListForDisplay', () => {
+    it('defaults the settings page to installed plugins', () => {
+        expect(DEFAULT_PLUGIN_SETTINGS_TAB).toBe('installed')
+    })
+
     it('collapses the Hub descriptor mirror and Runner runtime row into one plugin group', () => {
         const groups = groupPluginListForDisplay([
             plugin({
