@@ -122,7 +122,7 @@ describe('buildCliArgs', () => {
             options: {
                 machineId: 'spoofed-runner',
                 directory: '/repo'
-            },
+            } as unknown as Parameters<typeof buildRunnerPluginSpawnContext>[0]['options'],
             agent: 'claude',
             cwd: '/repo',
             displayArgs: ['claude'],

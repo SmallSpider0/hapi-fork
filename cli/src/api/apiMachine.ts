@@ -10,7 +10,12 @@ import { logger } from '@/ui/logger'
 import { configuration } from '@/configuration'
 import type { ClientToServerEvents, ServerToClientEvents, Update, UpdateMachineBody } from '@hapi/protocol'
 import type { MachineDirectoryEntry, MachineListDirectoryResponse, PathExistsResponse } from '@hapi/protocol/apiTypes'
-import { AgentHistoryImportRequestSchema, AgentHistoryImportResponseSchema } from '@hapi/protocol/apiTypes'
+import {
+    AgentHistoryImportRequestSchema,
+    AgentHistoryImportResponseSchema,
+    RunnerSpawnOptionsPreviewRequestSchema,
+    RunnerSpawnOptionsPreviewResponseSchema
+} from '@hapi/protocol/apiTypes'
 import { RPC_METHODS } from '@hapi/protocol/rpcMethods'
 import {
     PluginDeleteResultSchema,
@@ -273,7 +278,7 @@ export class ApiMachineClient {
 
     setRPCHandlers({ spawnSession, stopSession, requestShutdown }: MachineRpcHandlers): void {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.SpawnHappySession, async (params: any) => {
-            const { directory, sessionId, resumeSessionId, machineId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, token, sessionType, worktreeName, pluginFields } = params || {}
+            const { directory, sessionId, resumeSessionId, approvedNewDirectoryCreation, agent, model, effort, modelReasoningEffort, yolo, permissionMode, manualFields, token, sessionType, worktreeName, pluginFields } = params || {}
 
             if (!directory) {
                 throw new Error('Directory is required')
@@ -288,7 +293,6 @@ export class ApiMachineClient {
                 directory,
                 sessionId,
                 resumeSessionId,
-                machineId,
                 approvedNewDirectoryCreation,
                 agent,
                 model,
@@ -296,6 +300,7 @@ export class ApiMachineClient {
                 modelReasoningEffort,
                 yolo,
                 permissionMode,
+                manualFields: Array.isArray(manualFields) ? manualFields.map((entry) => String(entry)).filter(Boolean) : undefined,
                 token,
                 sessionType,
                 worktreeName,
@@ -426,6 +431,55 @@ export class ApiMachineClient {
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginActionInvoke, async (params: unknown) => {
             const request = RunnerPluginActionInvokeRequestSchema.parse(params)
             return RunnerPluginActionInvokeResponseSchema.parse(await manager.invokeAction(request))
+        })
+
+        this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerSpawnOptionsPreview, async (params: unknown) => {
+            const request = RunnerSpawnOptionsPreviewRequestSchema.parse(params)
+            const cwd = request.cwd ?? request.directory
+            const resolvedCwd = await this.resolveForWorkspaceCheck(cwd)
+            if (!this.isWithinWorkspaceRoots(resolvedCwd)) {
+                return RunnerSpawnOptionsPreviewResponseSchema.parse({
+                    options: {},
+                    applied: [],
+                    diagnostics: [{
+                        severity: 'warning',
+                        code: 'runner-spawn-options-preview-outside-workspace',
+                        message: 'Path is outside this machine workspace roots.'
+                    }]
+                })
+            }
+
+            const agent = request.agent ?? 'claude'
+            const options = {
+                directory: request.directory,
+                agent,
+                ...(request.resumeSessionId ? { resumeSessionId: request.resumeSessionId } : {}),
+                ...(request.model ? { model: request.model } : {}),
+                ...(request.effort ? { effort: request.effort } : {}),
+                ...(request.modelReasoningEffort ? { modelReasoningEffort: request.modelReasoningEffort } : {}),
+                ...(request.permissionMode ? { permissionMode: request.permissionMode } : {}),
+                ...(request.yolo !== undefined ? { yolo: request.yolo } : {}),
+                ...(request.manualFields?.length ? { manualFields: request.manualFields } : {}),
+                ...(request.sessionType ? { sessionType: request.sessionType } : {}),
+                ...(request.worktreeName ? { worktreeName: request.worktreeName } : {}),
+                ...(request.pluginFields ? { pluginFields: request.pluginFields } : {})
+            } satisfies SpawnSessionOptions
+            const result = await manager.resolveSpawnOptions({
+                options,
+                agent,
+                cwd
+            })
+            return RunnerSpawnOptionsPreviewResponseSchema.parse({
+                options: {
+                    ...(result.options.model && result.options.model !== options.model ? { model: result.options.model } : {}),
+                    ...(result.options.effort && result.options.effort !== options.effort ? { effort: result.options.effort } : {}),
+                    ...(result.options.modelReasoningEffort && result.options.modelReasoningEffort !== options.modelReasoningEffort ? { modelReasoningEffort: result.options.modelReasoningEffort } : {}),
+                    ...(result.options.permissionMode && result.options.permissionMode !== options.permissionMode ? { permissionMode: result.options.permissionMode } : {}),
+                    ...(result.options.yolo !== undefined && result.options.yolo !== options.yolo ? { yolo: result.options.yolo } : {})
+                },
+                applied: result.applied,
+                diagnostics: result.diagnostics
+            })
         })
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerAgentHistoryImport, async (params: unknown) => {

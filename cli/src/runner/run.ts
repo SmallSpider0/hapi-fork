@@ -1072,6 +1072,7 @@ export function buildRunnerPluginSpawnContext(args: {
     ...(args.options.modelReasoningEffort ? { modelReasoningEffort: args.options.modelReasoningEffort } : {}),
     ...(args.options.permissionMode ? { permissionMode: args.options.permissionMode } : {}),
     ...(args.options.yolo !== undefined ? { yolo: args.options.yolo } : {}),
+    ...(args.options.manualFields?.length ? { manualFields: args.options.manualFields } : {}),
     ...(args.options.pluginFields ? { pluginFields: args.options.pluginFields } : {})
   });
 }

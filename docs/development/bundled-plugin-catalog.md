@@ -18,16 +18,14 @@ Default bundled plugins are split into two classes:
 |---|---|---:|---|
 | `com.hapi.core.schedule-send` | Web + Hub | enabled | Adds the chat composer delay picker and owns the Hub message-action plan for reliable scheduled delivery. |
 | `com.hapi.core.serverchan-notifier` | Web + Hub | disabled | Adds a ServerChan notification channel with plugin-owned event switches and selectable recent agent/workspace filters. Ready-for-input notifications are on by default. Requires `SERVERCHAN_SENDKEY` in Hub env. |
-| `com.hapi.core.runner-env-profiles` | Web + Runner | disabled | Adds Runner-scoped environment/profile injection for non-secret proxy, registry, and PATH values. Supports flat config plus multi-profile JSON. |
 | `com.hapi.core.runner-launch-presets` | Web + Runner | disabled | Adds Runner launch defaults by agent/workspace: model, permission/yolo mode, Claude effort, and Codex reasoning effort. |
 
 Only Schedule Send is default-enabled because it replaces an existing first-party chat-box feature. Other core plugins are installed/discoverable, but require explicit enablement on the relevant target(s).
 
 ## Marketplace readiness notes
 
-- ServerChan Notifier should be verified with a real `SERVERCHAN_SENDKEY` before marketplace release. Local automated tests mock `fetch`; real delivery requires the operator to trigger a notification from a running Hub. If legacy `SERVERCHAN_NOTIFICATION=true` is also enabled, the Hub skips the old env-driven ServerChan channel when this plugin is enabled to avoid duplicate sends.
-- Runner Environment Profiles rejects protected / secret-shaped env keys and uses path-boundary prefix matching (`/repo` does not match `/repo2`). It is intended for non-secret proxy, registry, and PATH changes only.
-- Runner Launch Presets applies defaults before command args are built, while New Session user choices override preset fields. HAPI Web renders it with a visual preset list, dynamic Agent/model/permission filtering, draft match testing, and a clearer New Session applied-preset notice; raw JSON remains in developer details.
+- ServerChan Notifier should be verified with a real `SERVERCHAN_SENDKEY` before marketplace release. Local automated tests mock `fetch`; real delivery requires the operator to trigger a notification from a running Hub. `SERVERCHAN_NOTIFICATION` is legacy and no longer registers a core ServerChan channel; delivery is plugin-owned.
+- Runner Launch Presets applies defaults through the generic Runner `spawnOptionsProvider` extension point before command args are built, while New Session user choices override preset fields. HAPI Web renders it via the generic `runnerSpawnDefaultsEditor` descriptor and New Session consumes the generic spawn-options preview API; raw JSON remains in developer details.
 
 ## Example plugin policy
 

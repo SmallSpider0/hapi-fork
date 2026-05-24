@@ -1,7 +1,9 @@
 import React, { useEffect, useMemo, useState, type ReactNode } from 'react'
+import type { Machine } from '@/types/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { useTranslation } from '@/lib/use-translation'
+import { RunnerSpawnDefaultsEditor } from './RunnerSpawnDefaultsEditor'
 import {
     CorePluginActionIdSchema,
     WebDescriptorComponentSchema,
@@ -393,6 +395,9 @@ function DescriptorComponent(props: {
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
     onConfigChange?: DescriptorConfigChangeHandler
+    machines?: Machine[]
+    targetMachineId?: string | null
+    dirty?: boolean
 }) {
     const { t, locale } = useTranslation()
     const parsed = WebDescriptorComponentSchema.safeParse(props.component)
@@ -450,6 +455,20 @@ function DescriptorComponent(props: {
             </Button>
         )
     }
+    if (component.kind === 'runnerSpawnDefaultsEditor') {
+        return (
+            <RunnerSpawnDefaultsEditor
+                config={props.config}
+                machines={props.machines ?? []}
+                targetMachineId={props.targetMachineId}
+                optionSources={props.optionSources}
+                disabled={props.disabled}
+                dirty={props.dirty}
+                configKey={component.configKey}
+                onConfigChange={(nextConfig) => props.onConfigChange?.(nextConfig)}
+            />
+        )
+    }
     return <SchemaFormComponent component={component} config={props.config} disabled={props.disabled} optionSources={props.optionSources} onSaveConfig={props.onSaveConfig} onConfigChange={props.onConfigChange} />
 }
 
@@ -490,10 +509,13 @@ export function PluginDescriptorPanels(props: {
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
     onConfigChange?: DescriptorConfigChangeHandler
+    machines?: Machine[]
+    targetMachineId?: string | null
+    dirty?: boolean
 }) {
     const panels = readSettingsPanels(props.contributions)
     if (panels.length === 0) return null
-    return <PluginSettingsPanels panels={panels} config={props.config} disabled={props.disabled} optionSources={props.optionSources} onAction={props.onAction} onSaveConfig={props.onSaveConfig} onConfigChange={props.onConfigChange} />
+    return <PluginSettingsPanels panels={panels} config={props.config} disabled={props.disabled} optionSources={props.optionSources} onAction={props.onAction} onSaveConfig={props.onSaveConfig} onConfigChange={props.onConfigChange} machines={props.machines} targetMachineId={props.targetMachineId} dirty={props.dirty} />
 }
 
 export function PluginSettingsPanels(props: {
@@ -504,6 +526,9 @@ export function PluginSettingsPanels(props: {
     onAction?: DescriptorActionHandler
     onSaveConfig?: DescriptorConfigSaveHandler
     onConfigChange?: DescriptorConfigChangeHandler
+    machines?: Machine[]
+    targetMachineId?: string | null
+    dirty?: boolean
 }) {
     const { t, locale } = useTranslation()
     const parsed = useMemo(() => props.panels.map((panel) => parsePanelShell(panel)), [props.panels])
@@ -538,6 +563,9 @@ export function PluginSettingsPanels(props: {
                                             onAction={props.onAction}
                                             onSaveConfig={props.onSaveConfig}
                                             onConfigChange={props.onConfigChange}
+                                            machines={props.machines}
+                                            targetMachineId={props.targetMachineId}
+                                            dirty={props.dirty}
                                         />
                                     )
                                 })}

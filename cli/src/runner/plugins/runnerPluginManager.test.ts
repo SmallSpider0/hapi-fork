@@ -6,7 +6,6 @@ import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { PluginManifestLiteSchema, pluginManifestRequiresRunnerInstall } from '@hapi/protocol/plugins'
 import {
-    HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
     HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
     HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
     HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
@@ -36,26 +35,6 @@ function writeState(hapiHome: string, enabled = true): void {
     writeFileSync(join(hapiHome, 'plugins.json'), JSON.stringify({
         enabled: { 'com.example.runner': { enabled } }
     }, null, 2))
-}
-
-async function resolveCodexPlan(manager: RunnerPluginManager, cwd: string, options: { directory?: string; permissionMode?: string; yolo?: boolean; env?: NodeJS.ProcessEnv } = {}) {
-    return await manager.resolveSpawnPlan({
-        options: {
-            directory: options.directory ?? cwd,
-            agent: 'codex',
-            ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
-            ...(options.yolo !== undefined ? { yolo: options.yolo } : {})
-        },
-        agent: 'codex',
-        basePlan: {
-            command: '/opt/hapi/current',
-            args: ['codex'],
-            displayArgs: ['codex'],
-            mode: 'compiled'
-        },
-        cwd,
-        env: options.env ?? { PATH: '/usr/bin' }
-    })
 }
 
 describe('RunnerPluginManager runtime', () => {
@@ -216,98 +195,23 @@ describe('RunnerPluginManager runtime', () => {
         const plugins = manager.listPlugins()
         expect(plugins.map((plugin) => plugin.id)).toEqual(expect.arrayContaining([
             'com.example.runner',
-            HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
             HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID
         ]))
         expect(plugins.map((plugin) => plugin.id)).not.toEqual(expect.arrayContaining([
             HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
             HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
         ]))
-        expect(manager.getPlugin(HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID)).toMatchObject({
+        expect(manager.getPlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
             source: 'bundled',
             enabled: false,
             active: false,
             contributions: {
                 runner: {
-                    environmentProviders: [expect.objectContaining({ id: 'runner-env-profiles' })]
+                    spawnOptionsProviders: [expect.objectContaining({ id: 'runner-launch-presets' })]
                 }
             }
         })
 
-        await manager.enablePlugin(HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID, {
-            agentIds: 'codex',
-            directoryPrefixes: '/repo',
-            httpProxy: 'http://proxy.local:8080',
-            noProxy: 'localhost,127.0.0.1',
-            pathPrepend: '/opt/hapi/bin,/custom/bin'
-        })
-
-        const envPlan = await manager.resolveSpawnPlan({
-            options: { directory: '/repo', agent: 'codex' },
-            agent: 'codex',
-            basePlan: {
-                command: '/opt/hapi/current',
-                args: ['codex'],
-                displayArgs: ['codex'],
-                mode: 'compiled'
-            },
-            cwd: '/repo/project',
-            env: { PATH: '/usr/bin' }
-        })
-
-        expect(envPlan.env.HTTP_PROXY).toBe('http://proxy.local:8080')
-        expect(envPlan.env.NO_PROXY).toBe('localhost,127.0.0.1')
-        expect(envPlan.env.PATH).toBe('/opt/hapi/bin:/custom/bin:/usr/bin')
-        expect(envPlan.diagnostics).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
-                code: 'runner-env-profiles-applied'
-            })
-        ]))
-
-        await manager.dispose()
-    })
-
-    it('applies bundled Runner env JSON profiles with path-boundary matching and protected-key rejection', async () => {
-        const manager = new RunnerPluginManager({
-            hapiHome: testDir,
-            machineId: 'runner-1',
-            env: {},
-            includeBundledCore: true
-        })
-        await manager.start()
-        await manager.enablePlugin(HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID, {
-            profilesJson: JSON.stringify([{
-                name: 'repo-profile',
-                agentIds: ['codex'],
-                directoryPrefixes: ['/repo'],
-                env: {
-                    CUSTOM_ENV: 'from-profile',
-                    API_KEY: 'must-not-persist-as-env'
-                },
-                pathPrepend: ['/profile/bin'],
-                pathAppend: ['/tail/bin']
-            }])
-        })
-
-        const unmatched = await resolveCodexPlan(manager, '/repo2/project')
-        expect(unmatched.env.CUSTOM_ENV).toBeUndefined()
-        expect(unmatched.env.PATH).toBe('/usr/bin')
-
-        const matched = await resolveCodexPlan(manager, '/repo/project')
-        expect(matched.env.CUSTOM_ENV).toBe('from-profile')
-        expect(matched.env.API_KEY).toBeUndefined()
-        expect(matched.env.PATH).toBe('/profile/bin:/usr/bin:/tail/bin')
-        expect(matched.diagnostics).toEqual(expect.arrayContaining([
-            expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
-                code: 'runner-env-profiles-env-key-rejected'
-            }),
-            expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_ENV_PROFILES_PLUGIN_ID,
-                code: 'runner-env-profiles-applied'
-            })
-        ]))
         await manager.dispose()
     })
 
@@ -343,13 +247,21 @@ describe('RunnerPluginManager runtime', () => {
                 code: 'runner-launch-presets-applied'
             })
         ]))
+        expect(defaults.applied).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+                contributionId: 'runner-launch-presets',
+                label: expect.any(String),
+                fields: expect.arrayContaining(['model', 'modelReasoningEffort', 'permissionMode'])
+            })
+        ]))
 
         const manual = await manager.resolveSpawnOptions({
             options: {
                 directory: '/repo',
                 agent: 'codex',
                 model: 'manual-model',
-                pluginFields: { launchPresetManualFields: ['model'] }
+                manualFields: ['model']
             },
             agent: 'codex',
             cwd: '/repo/project'

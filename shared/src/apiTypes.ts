@@ -9,7 +9,11 @@ import {
 } from './schemas'
 import { AgentIdSchema } from './plugins/agentDescriptors'
 import { AgentHistoryImportResultSchema } from './plugins/agentCapabilities'
-import { PluginDiagnosticSchema } from './plugins/types'
+import {
+    RunnerExtensionDiagnosticSchema,
+    RunnerSpawnOptionDefaultsSchema,
+    RunnerSpawnOptionsAppliedEntrySchema
+} from './plugins/runnerExtensions'
 import type {
     DecryptedMessage,
     Machine,
@@ -185,6 +189,7 @@ export const SpawnSessionRequestSchema = z.object({
     modelReasoningEffort: z.string().optional(),
     permissionMode: PermissionModeSchema.optional(),
     yolo: z.boolean().optional(),
+    manualFields: z.array(z.string().min(1)).optional(),
     sessionType: z.enum(['simple', 'worktree']).optional(),
     worktreeName: z.string().optional(),
     pluginFields: z.record(z.string(), z.unknown()).optional()
@@ -192,15 +197,7 @@ export const SpawnSessionRequestSchema = z.object({
 
 export type SpawnSessionRequest = z.infer<typeof SpawnSessionRequestSchema>
 
-export const RunnerLaunchPresetOptionsSchema = z.object({
-    model: z.string().optional(),
-    effort: z.string().optional(),
-    modelReasoningEffort: z.string().optional(),
-    permissionMode: z.string().optional(),
-    yolo: z.boolean().optional()
-}).strict()
-
-export const RunnerLaunchPresetResolveRequestSchema = z.object({
+export const RunnerSpawnOptionsPreviewRequestSchema = z.object({
     directory: z.string().min(1),
     cwd: z.string().min(1).optional(),
     agent: AgentIdSchema.optional(),
@@ -209,23 +206,22 @@ export const RunnerLaunchPresetResolveRequestSchema = z.object({
     modelReasoningEffort: z.string().optional(),
     permissionMode: z.string().optional(),
     yolo: z.boolean().optional(),
+    manualFields: z.array(z.string().min(1)).optional(),
     sessionType: z.enum(['simple', 'worktree']).optional(),
+    worktreeName: z.string().optional(),
     resumeSessionId: z.string().optional(),
     pluginFields: z.record(z.string(), z.unknown()).optional()
 }).strict()
 
-export type RunnerLaunchPresetResolveRequest = z.infer<typeof RunnerLaunchPresetResolveRequestSchema>
+export type RunnerSpawnOptionsPreviewRequest = z.infer<typeof RunnerSpawnOptionsPreviewRequestSchema>
 
-export const RunnerLaunchPresetResolveResponseSchema = z.object({
-    options: RunnerLaunchPresetOptionsSchema.default({}),
-    matchedRules: z.array(z.object({
-        id: z.string().min(1),
-        label: z.string().min(1)
-    }).strict()).default([]),
-    diagnostics: z.array(PluginDiagnosticSchema).default([])
+export const RunnerSpawnOptionsPreviewResponseSchema = z.object({
+    options: RunnerSpawnOptionDefaultsSchema.default({}),
+    applied: z.array(RunnerSpawnOptionsAppliedEntrySchema).default([]),
+    diagnostics: z.array(RunnerExtensionDiagnosticSchema).default([])
 }).strict()
 
-export type RunnerLaunchPresetResolveResponse = z.infer<typeof RunnerLaunchPresetResolveResponseSchema>
+export type RunnerSpawnOptionsPreviewResponse = z.infer<typeof RunnerSpawnOptionsPreviewResponseSchema>
 
 export const AgentHistoryImportRequestSchema = z.object({
     agentId: AgentIdSchema,

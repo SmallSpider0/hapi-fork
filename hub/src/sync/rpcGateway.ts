@@ -13,10 +13,12 @@ import type {
     OpencodeModelSummary,
     PathExistsResponse,
     AgentHistoryImportResponse,
+    RunnerSpawnOptionsPreviewRequest,
+    RunnerSpawnOptionsPreviewResponse,
     SlashCommandsResponse,
     UploadFileResponse
 } from '@hapi/protocol/apiTypes'
-import { AgentHistoryImportResponseSchema } from '@hapi/protocol/apiTypes'
+import { AgentHistoryImportResponseSchema, RunnerSpawnOptionsPreviewResponseSchema } from '@hapi/protocol/apiTypes'
 import type { Server } from 'socket.io'
 import {
     PluginDeleteResultSchema,
@@ -134,13 +136,14 @@ export class RpcGateway {
         resumeSessionId?: string,
         effort?: string,
         permissionMode?: PermissionMode,
-        pluginFields?: Record<string, unknown>
+        pluginFields?: Record<string, unknown>,
+        manualFields?: string[]
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         try {
             const result = await this.machineRpc(
                 machineId,
                 RPC_METHODS.SpawnHappySession,
-                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode, pluginFields }
+                { type: 'spawn-in-directory', directory, agent, model, modelReasoningEffort, yolo, sessionType, worktreeName, resumeSessionId, effort, permissionMode, pluginFields, manualFields }
             )
             if (result && typeof result === 'object') {
                 const obj = result as Record<string, unknown>
@@ -336,6 +339,11 @@ export class RpcGateway {
     ): Promise<RunnerPluginActionInvokeResponse> {
         const result = await this.machineRpc(machineId, RPC_METHODS.RunnerPluginActionInvoke, payload)
         return RunnerPluginActionInvokeResponseSchema.parse(result)
+    }
+
+    async previewRunnerSpawnOptions(machineId: string, payload: RunnerSpawnOptionsPreviewRequest): Promise<RunnerSpawnOptionsPreviewResponse> {
+        const result = await this.machineRpc(machineId, RPC_METHODS.RunnerSpawnOptionsPreview, payload)
+        return RunnerSpawnOptionsPreviewResponseSchema.parse(result)
     }
 
     async importRunnerAgentHistory(

@@ -99,23 +99,23 @@ describe('PluginDescriptorPanels', () => {
         renderPanels({
             contributions: {
                 settingsPanels: [{
-                    id: 'runner-env',
-                    title: 'Runner Environment Profiles',
+                    id: 'json-settings',
+                    title: 'JSON Settings',
                     components: [{
                         kind: 'schemaForm',
                         id: 'advanced',
-                        title: 'Advanced profiles JSON',
-                        description: 'JSON array, e.g. [{"name":"cn","directoryPrefixes":["/repo"],"env":{"NPM_CONFIG_REGISTRY":"https://registry.npmmirror.com"}}].',
+                        title: 'Advanced rules JSON',
+                        description: 'JSON array, e.g. [{"name":"example","directoryPrefixes":["/repo"]}].',
                         fields: [
-                            { key: 'profilesJson', label: 'profilesJson', type: 'text' }
+                            { key: 'rulesJson', label: 'rulesJson', type: 'text' }
                         ]
                     }]
                 }]
             },
-            config: { profilesJson: '[{"name":"cn"}]' }
+            config: { rulesJson: '[{"name":"example"}]' }
         })
 
-        const editor = screen.getByLabelText('profilesJson')
+        const editor = screen.getByLabelText('rulesJson')
         expect(editor.tagName).toBe('TEXTAREA')
         expect(editor).toHaveClass('min-w-0')
         expect(screen.getByText(/JSON array/)).toHaveClass('[overflow-wrap:anywhere]')
@@ -204,5 +204,26 @@ describe('PluginDescriptorPanels', () => {
         expect(scoped.queryByRole('button', { name: 'Save config and reload' })).not.toBeInTheDocument()
         fireEvent.click(scoped.getByRole('checkbox', { name: 'Ready' }))
         expect(onConfigChange).toHaveBeenCalledWith({ notifyReady: true })
+    })
+
+    it('renders generic runner spawn defaults editor descriptors without plugin-id special casing', () => {
+        renderPanels({
+            contributions: {
+                settingsPanels: [{
+                    id: 'runner',
+                    title: 'Runner',
+                    components: [{
+                        kind: 'runnerSpawnDefaultsEditor',
+                        id: 'defaults',
+                        configKey: 'rulesJson'
+                    }]
+                }]
+            },
+            machines: [],
+            onConfigChange: vi.fn()
+        })
+
+        expect(screen.getByText('Runner spawn defaults')).toBeInTheDocument()
+        expect(screen.getByText('No saved presets yet; the first preset draft is expanded below. Set any default and save/reload from the top-right to apply.')).toBeInTheDocument()
     })
 })

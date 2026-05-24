@@ -27,12 +27,12 @@ describe('groupPluginListForDisplay', () => {
     it('collapses the Hub descriptor mirror and Runner runtime row into one plugin group', () => {
         const groups = groupPluginListForDisplay([
             plugin({
-                id: 'com.hapi.core.runner-env-profiles',
+                id: 'com.example.cross-runner',
                 target: { scope: 'hub', runtime: 'hub', active: true, stale: false },
                 runtimes: { runner: { entry: 'dist/runner.js', active: false } }
             }),
             plugin({
-                id: 'com.hapi.core.runner-env-profiles',
+                id: 'com.example.cross-runner',
                 target: { scope: 'runner:runner-1', runtime: 'runner', machineId: 'runner-1', active: true, stale: false },
                 runtimes: { runner: { entry: 'dist/runner.js', active: false } }
             })
@@ -40,7 +40,7 @@ describe('groupPluginListForDisplay', () => {
 
         expect(groups).toHaveLength(1)
         expect(groups[0]).toMatchObject({
-            id: 'com.hapi.core.runner-env-profiles',
+            id: 'com.example.cross-runner',
             enabled: false,
             active: false,
             status: 'disabled',

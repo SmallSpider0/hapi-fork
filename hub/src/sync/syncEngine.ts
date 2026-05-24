@@ -10,6 +10,7 @@
 import { isKnownFlavor, type LocalResumeTarget, type ResumableSession } from '@hapi/protocol'
 import type { AgentHistoryImportResponse, SlashCommandsResponse } from '@hapi/protocol/apiTypes'
 import type { MessageSendPlan } from '@hapi/protocol/plugins'
+import type { RunnerSpawnOptionsPreviewRequest, RunnerSpawnOptionsPreviewResponse } from '@hapi/protocol/apiTypes'
 import type { PluginDeleteResult, PluginDetailResponse, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallResult, PluginLocalDirectoryListResponse, PluginReloadResult, RunnerPluginActionInvokeResponse, RunnerPluginInventory, RunnerPluginUnsupportedInstallResult } from '@hapi/protocol/plugins/admin'
 import type { AgentFlavor, CodexCollaborationMode, DecryptedMessage, PermissionMode, Session, SyncEvent } from '@hapi/protocol/types'
 import { unwrapRoleWrappedRecordEnvelope } from '@hapi/protocol/messages'
@@ -471,7 +472,8 @@ export class SyncEngine {
         resumeSessionId?: string,
         effort?: string,
         permissionMode?: PermissionMode,
-        pluginFields?: Record<string, unknown>
+        pluginFields?: Record<string, unknown>,
+        manualFields?: string[]
     ): Promise<{ type: 'success'; sessionId: string } | { type: 'error'; message: string }> {
         return await this.rpcGateway.spawnSession(
             machineId,
@@ -485,7 +487,8 @@ export class SyncEngine {
             resumeSessionId,
             effort,
             permissionMode,
-            pluginFields
+            pluginFields,
+            manualFields
         )
     }
 
@@ -975,6 +978,10 @@ export class SyncEngine {
         payload?: unknown
     }): Promise<RunnerPluginActionInvokeResponse> {
         return await this.rpcGateway.invokeRunnerPluginAction(machineId, payload)
+    }
+
+    async previewRunnerSpawnOptions(machineId: string, payload: RunnerSpawnOptionsPreviewRequest): Promise<RunnerSpawnOptionsPreviewResponse> {
+        return await this.rpcGateway.previewRunnerSpawnOptions(machineId, payload)
     }
 
     async listOpencodeModelsForSession(sessionId: string): Promise<RpcListOpencodeModelsResponse> {

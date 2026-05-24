@@ -40,7 +40,12 @@ export type WebDescriptorPrimitiveValue = z.infer<typeof WebDescriptorPrimitiveV
 export const WebSchemaFormOptionsSourceSchema = z.enum([
     'notification.namespaces',
     'notification.agents',
-    'notification.workspaces'
+    'notification.workspaces',
+    'sessions.agents',
+    'sessions.workspaces',
+    'runner.agents',
+    'runner.workspaces',
+    'runner.models'
 ])
 export type WebSchemaFormOptionsSource = z.infer<typeof WebSchemaFormOptionsSourceSchema>
 
@@ -110,12 +115,20 @@ export const WebSchemaFormComponentSchema = WebComponentBaseSchema.extend({
     fields: z.array(WebSchemaFormFieldSchema).min(1).max(50)
 }).strict()
 
+export const WebRunnerSpawnDefaultsEditorComponentSchema = WebComponentBaseSchema.extend({
+    kind: z.literal('runnerSpawnDefaultsEditor'),
+    title: WebLocalizedTextSchema.optional(),
+    description: WebLocalizedTextSchema.optional(),
+    configKey: FieldKeySchema.default('rulesJson')
+}).strict()
+
 export const WebDescriptorComponentSchema = z.discriminatedUnion('kind', [
     WebTextComponentSchema,
     WebBadgeComponentSchema,
     WebTableComponentSchema,
     WebActionButtonComponentSchema,
-    WebSchemaFormComponentSchema
+    WebSchemaFormComponentSchema,
+    WebRunnerSpawnDefaultsEditorComponentSchema
 ])
 export type WebDescriptorComponent = z.infer<typeof WebDescriptorComponentSchema>
 

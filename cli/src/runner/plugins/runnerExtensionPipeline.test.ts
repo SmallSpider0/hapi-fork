@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { mergePathValue, resolveRunnerPluginSpawnPlan } from './runnerExtensionPipeline'
+import { mergePathValue, resolveRunnerPluginSpawnOptions, resolveRunnerPluginSpawnPlan } from './runnerExtensionPipeline'
 
 describe('runner plugin extension pipeline', () => {
     const baseInput = {
@@ -17,6 +17,25 @@ describe('runner plugin extension pipeline', () => {
         timeoutMs: 20,
         pathDelimiter: ':'
     }
+
+    it('strips control-only machineId from spawn options before strict schema validation', async () => {
+        const result = await resolveRunnerPluginSpawnOptions({
+            machineId: 'runner-1',
+            agent: 'codex',
+            cwd: '/repo',
+            options: {
+                directory: '/repo',
+                machineId: 'client-supplied-runner'
+            } as unknown as Parameters<typeof resolveRunnerPluginSpawnOptions>[0]['options'],
+            spawnOptionsProviders: []
+        })
+
+        expect(result.options).toEqual({
+            directory: '/repo',
+            agent: 'codex'
+        })
+        expect('machineId' in result.options).toBe(false)
+    })
 
     it('merges environment provider output without leaking secret values into diagnostics', async () => {
         const result = await resolveRunnerPluginSpawnPlan({
