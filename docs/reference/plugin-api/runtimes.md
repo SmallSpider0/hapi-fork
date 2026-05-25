@@ -410,7 +410,7 @@ JSON Schema: [PluginNotificationEvent](/docs/plugin-api/schemas/plugin-notificat
 
 | Field | Required | Type | Notes |
 |---|---|---|---|
-| `type` | yes | `ready` \| `permission-request` \| `task-notification` \| `session-completion` | — |
+| `type` | yes | `ready` \| `permission-request` \| `task-notification` \| `session-completion` \| `test` | — |
 | `session` | yes | object | — |
 | `task` | no | object | — |
 | `reason` | no | `completed` \| `terminated` \| `error` \| `handoff` | — |

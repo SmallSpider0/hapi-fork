@@ -5,7 +5,8 @@ export const PluginNotificationEventTypeSchema = z.enum([
     'ready',
     'permission-request',
     'task-notification',
-    'session-completion'
+    'session-completion',
+    'test'
 ])
 
 export const PluginNotificationSessionSchema = z.object({

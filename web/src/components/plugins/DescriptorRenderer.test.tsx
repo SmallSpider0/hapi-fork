@@ -24,7 +24,8 @@ describe('PluginDescriptorPanels', () => {
                     components: [
                         { kind: 'text', text: 'Ready' },
                         { kind: 'badge', label: 'Active', variant: 'success' },
-                        { kind: 'actionButton', id: 'reload', label: 'Reload', actionId: 'plugin.reload' }
+                        { kind: 'actionButton', id: 'reload', label: 'Reload', actionId: 'plugin.reload' },
+                        { kind: 'actionButton', id: 'test', label: 'Test push', actionId: 'plugin.notificationTest', variant: 'secondary' }
                     ]
                 }]
             },
@@ -35,6 +36,8 @@ describe('PluginDescriptorPanels', () => {
         expect(screen.getByText('Active')).toBeInTheDocument()
         fireEvent.click(screen.getByRole('button', { name: 'Reload' }))
         await waitFor(() => expect(onAction).toHaveBeenCalledWith('plugin.reload'))
+        fireEvent.click(screen.getByRole('button', { name: 'Test push' }))
+        await waitFor(() => expect(onAction).toHaveBeenCalledWith('plugin.notificationTest'))
     })
 
     it('rejects unknown component kinds locally without hiding valid sibling components', () => {

@@ -11,6 +11,9 @@ export function pluginAdminErrorStatus(error: unknown): 400 | 404 | 409 | 500 {
     if (message.includes('was not found')) {
         return 404
     }
+    if (message.includes('is not active') || message.includes('does not have an active notification channel')) {
+        return 409
+    }
     if (message.includes('plugins.json') || message.includes('must not store declared secret') || message.includes('secret-like field') || message.includes('redacted placeholder')) {
         return 409
     }

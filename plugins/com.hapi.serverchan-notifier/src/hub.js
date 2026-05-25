@@ -69,6 +69,7 @@ function taskIsFailure(event) {
 }
 
 function shouldSend(ctx, event) {
+    if (event.type === 'test') return true
     if (!matchesSessionFilters(ctx, event)) return false
     if (event.type === 'ready') return readBoolean(ctx, 'notifyReady', true)
     if (event.type === 'permission-request') return readBoolean(ctx, 'notifyPermissionRequest', true)
@@ -81,6 +82,7 @@ function shouldSend(ctx, event) {
 
 function eventTitle(ctx, event) {
     const prefix = textConfig(ctx, 'titlePrefix', 'HAPI')
+    if (event.type === 'test') return prefix + ' Test notification'
     if (event.type === 'ready') return prefix + ' Ready for input'
     if (event.type === 'permission-request') return prefix + ' Permission request'
     if (event.type === 'task-notification') return taskIsFailure(event) ? prefix + ' Task failed' : prefix + ' Task notification'
@@ -110,6 +112,9 @@ export function activate(ctx) {
             if (!shouldSend(ctx, event)) return
             const sendKey = ctx.secrets.get('SERVERCHAN_SENDKEY')
             if (!sendKey) {
+                if (event.type === 'test') {
+                    throw new Error('SERVERCHAN_SENDKEY is not set; ServerChan test notification was not sent.')
+                }
                 ctx.logger.warn('SERVERCHAN_SENDKEY is not set; ServerChan notification skipped.')
                 return
             }

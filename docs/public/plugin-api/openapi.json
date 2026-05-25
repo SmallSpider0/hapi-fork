@@ -880,6 +880,59 @@
                 }
             }
         },
+        "/api/plugins/{id}/notification-test": {
+            "post": {
+                "operationId": "plugins.notificationTest",
+                "summary": "Send a synthetic test notification through one active Hub notification plugin.",
+                "parameters": [
+                    {
+                        "name": "id",
+                        "in": "path",
+                        "required": true,
+                        "schema": {
+                            "type": "string",
+                            "minLength": 1
+                        }
+                    },
+                    {
+                        "name": "target",
+                        "in": "query",
+                        "required": false,
+                        "description": "Plugin target scope.",
+                        "schema": {
+                            "$ref": "#/components/schemas/PluginTargetScope"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "OK",
+                        "content": {
+                            "application/json": {
+                                "schema": {
+                                    "$ref": "#/components/schemas/PluginNotificationTestResponse"
+                                }
+                            }
+                        }
+                    },
+                    "400": {
+                        "description": "Invalid request"
+                    },
+                    "401": {
+                        "description": "Unauthorized"
+                    },
+                    "404": {
+                        "description": "Not found"
+                    },
+                    "409": {
+                        "description": "Conflict"
+                    },
+                    "500": {
+                        "description": "Server error"
+                    }
+                }
+            }
+        },
         "/api/plugins/{id}/enable": {
             "post": {
                 "operationId": "plugins.enable",
@@ -2668,7 +2721,8 @@
                                                                             "plugin.enable",
                                                                             "plugin.disable",
                                                                             "plugin.reload",
-                                                                            "plugin.delete"
+                                                                            "plugin.delete",
+                                                                            "plugin.notificationTest"
                                                                         ]
                                                                     },
                                                                     "variant": {
@@ -3263,7 +3317,8 @@
                                                         "plugin.enable",
                                                         "plugin.disable",
                                                         "plugin.reload",
-                                                        "plugin.delete"
+                                                        "plugin.delete",
+                                                        "plugin.notificationTest"
                                                     ]
                                                 },
                                                 "variant": {
@@ -5672,7 +5727,8 @@
                                                                                             "plugin.enable",
                                                                                             "plugin.disable",
                                                                                             "plugin.reload",
-                                                                                            "plugin.delete"
+                                                                                            "plugin.delete",
+                                                                                            "plugin.notificationTest"
                                                                                         ]
                                                                                     },
                                                                                     "variant": {
@@ -6267,7 +6323,8 @@
                                                                         "plugin.enable",
                                                                         "plugin.disable",
                                                                         "plugin.reload",
-                                                                        "plugin.delete"
+                                                                        "plugin.delete",
+                                                                        "plugin.notificationTest"
                                                                     ]
                                                                 },
                                                                 "variant": {
@@ -8845,7 +8902,8 @@
                                                                                             "plugin.enable",
                                                                                             "plugin.disable",
                                                                                             "plugin.reload",
-                                                                                            "plugin.delete"
+                                                                                            "plugin.delete",
+                                                                                            "plugin.notificationTest"
                                                                                         ]
                                                                                     },
                                                                                     "variant": {
@@ -9440,7 +9498,8 @@
                                                                         "plugin.enable",
                                                                         "plugin.disable",
                                                                         "plugin.reload",
-                                                                        "plugin.delete"
+                                                                        "plugin.delete",
+                                                                        "plugin.notificationTest"
                                                                     ]
                                                                 },
                                                                 "variant": {
@@ -12243,7 +12302,8 @@
                                                                                             "plugin.enable",
                                                                                             "plugin.disable",
                                                                                             "plugin.reload",
-                                                                                            "plugin.delete"
+                                                                                            "plugin.delete",
+                                                                                            "plugin.notificationTest"
                                                                                         ]
                                                                                     },
                                                                                     "variant": {
@@ -12838,7 +12898,8 @@
                                                                         "plugin.enable",
                                                                         "plugin.disable",
                                                                         "plugin.reload",
-                                                                        "plugin.delete"
+                                                                        "plugin.delete",
+                                                                        "plugin.notificationTest"
                                                                     ]
                                                                 },
                                                                 "variant": {
@@ -14343,7 +14404,8 @@
                                                                                     "plugin.enable",
                                                                                     "plugin.disable",
                                                                                     "plugin.reload",
-                                                                                    "plugin.delete"
+                                                                                    "plugin.delete",
+                                                                                    "plugin.notificationTest"
                                                                                 ]
                                                                             },
                                                                             "variant": {
@@ -14938,7 +15000,8 @@
                                                                 "plugin.enable",
                                                                 "plugin.disable",
                                                                 "plugin.reload",
-                                                                "plugin.delete"
+                                                                "plugin.delete",
+                                                                "plugin.notificationTest"
                                                             ]
                                                         },
                                                         "variant": {
@@ -17048,7 +17111,8 @@
                                                                                 "plugin.enable",
                                                                                 "plugin.disable",
                                                                                 "plugin.reload",
-                                                                                "plugin.delete"
+                                                                                "plugin.delete",
+                                                                                "plugin.notificationTest"
                                                                             ]
                                                                         },
                                                                         "variant": {
@@ -17643,7 +17707,8 @@
                                                             "plugin.enable",
                                                             "plugin.disable",
                                                             "plugin.reload",
-                                                            "plugin.delete"
+                                                            "plugin.delete",
+                                                            "plugin.notificationTest"
                                                         ]
                                                     },
                                                     "variant": {
@@ -19695,7 +19760,8 @@
                                                                     "plugin.enable",
                                                                     "plugin.disable",
                                                                     "plugin.reload",
-                                                                    "plugin.delete"
+                                                                    "plugin.delete",
+                                                                    "plugin.notificationTest"
                                                                 ]
                                                             },
                                                             "variant": {
@@ -20290,7 +20356,8 @@
                                                 "plugin.enable",
                                                 "plugin.disable",
                                                 "plugin.reload",
-                                                "plugin.delete"
+                                                "plugin.delete",
+                                                "plugin.notificationTest"
                                             ]
                                         },
                                         "variant": {
@@ -21059,6 +21126,35 @@
                     "namespaces",
                     "agents",
                     "workspaces"
+                ],
+                "additionalProperties": false
+            },
+            "PluginNotificationTestResponse": {
+                "type": "object",
+                "properties": {
+                    "ok": {
+                        "type": "boolean",
+                        "const": true
+                    },
+                    "pluginId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 128
+                    },
+                    "channels": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "maximum": 9007199254740991
+                    },
+                    "message": {
+                        "type": "string",
+                        "minLength": 1
+                    }
+                },
+                "required": [
+                    "ok",
+                    "pluginId",
+                    "channels"
                 ],
                 "additionalProperties": false
             },
@@ -24477,7 +24573,8 @@
                                                                                             "plugin.enable",
                                                                                             "plugin.disable",
                                                                                             "plugin.reload",
-                                                                                            "plugin.delete"
+                                                                                            "plugin.delete",
+                                                                                            "plugin.notificationTest"
                                                                                         ]
                                                                                     },
                                                                                     "variant": {
@@ -25072,7 +25169,8 @@
                                                                         "plugin.enable",
                                                                         "plugin.disable",
                                                                         "plugin.reload",
-                                                                        "plugin.delete"
+                                                                        "plugin.delete",
+                                                                        "plugin.notificationTest"
                                                                     ]
                                                                 },
                                                                 "variant": {
@@ -27494,7 +27592,8 @@
                                                                                             "plugin.enable",
                                                                                             "plugin.disable",
                                                                                             "plugin.reload",
-                                                                                            "plugin.delete"
+                                                                                            "plugin.delete",
+                                                                                            "plugin.notificationTest"
                                                                                         ]
                                                                                     },
                                                                                     "variant": {
@@ -28089,7 +28188,8 @@
                                                                         "plugin.enable",
                                                                         "plugin.disable",
                                                                         "plugin.reload",
-                                                                        "plugin.delete"
+                                                                        "plugin.delete",
+                                                                        "plugin.notificationTest"
                                                                     ]
                                                                 },
                                                                 "variant": {
@@ -37858,7 +37958,8 @@
                                                                                 "plugin.enable",
                                                                                 "plugin.disable",
                                                                                 "plugin.reload",
-                                                                                "plugin.delete"
+                                                                                "plugin.delete",
+                                                                                "plugin.notificationTest"
                                                                             ]
                                                                         },
                                                                         "variant": {
@@ -38453,7 +38554,8 @@
                                                             "plugin.enable",
                                                             "plugin.disable",
                                                             "plugin.reload",
-                                                            "plugin.delete"
+                                                            "plugin.delete",
+                                                            "plugin.notificationTest"
                                                         ]
                                                     },
                                                     "variant": {
@@ -41031,7 +41133,8 @@
                                                                                 "plugin.enable",
                                                                                 "plugin.disable",
                                                                                 "plugin.reload",
-                                                                                "plugin.delete"
+                                                                                "plugin.delete",
+                                                                                "plugin.notificationTest"
                                                                             ]
                                                                         },
                                                                         "variant": {
@@ -41626,7 +41729,8 @@
                                                             "plugin.enable",
                                                             "plugin.disable",
                                                             "plugin.reload",
-                                                            "plugin.delete"
+                                                            "plugin.delete",
+                                                            "plugin.notificationTest"
                                                         ]
                                                     },
                                                     "variant": {
@@ -42301,7 +42405,8 @@
                             "ready",
                             "permission-request",
                             "task-notification",
-                            "session-completion"
+                            "session-completion",
+                            "test"
                         ]
                     },
                     "session": {
@@ -44285,7 +44390,8 @@
                                                             "plugin.enable",
                                                             "plugin.disable",
                                                             "plugin.reload",
-                                                            "plugin.delete"
+                                                            "plugin.delete",
+                                                            "plugin.notificationTest"
                                                         ]
                                                     },
                                                     "variant": {
@@ -44880,7 +44986,8 @@
                                         "plugin.enable",
                                         "plugin.disable",
                                         "plugin.reload",
-                                        "plugin.delete"
+                                        "plugin.delete",
+                                        "plugin.notificationTest"
                                     ]
                                 },
                                 "variant": {
@@ -45672,7 +45779,8 @@
                                                                     "plugin.enable",
                                                                     "plugin.disable",
                                                                     "plugin.reload",
-                                                                    "plugin.delete"
+                                                                    "plugin.delete",
+                                                                    "plugin.notificationTest"
                                                                 ]
                                                             },
                                                             "variant": {
@@ -46267,7 +46375,8 @@
                                                 "plugin.enable",
                                                 "plugin.disable",
                                                 "plugin.reload",
-                                                "plugin.delete"
+                                                "plugin.delete",
+                                                "plugin.notificationTest"
                                             ]
                                         },
                                         "variant": {

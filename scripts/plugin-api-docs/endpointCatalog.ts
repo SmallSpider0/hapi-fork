@@ -165,6 +165,14 @@ export const endpointCatalog: EndpointDoc[] = [
         responseSchema: 'PluginReloadResult'
     },
     {
+        id: 'plugins.notificationTest',
+        method: 'POST',
+        path: '/api/plugins/{id}/notification-test',
+        description: 'Send a synthetic test notification through one active Hub notification plugin.',
+        targetQuery: true,
+        responseSchema: 'PluginNotificationTestResponse'
+    },
+    {
         id: 'plugins.enable',
         method: 'POST',
         path: '/api/plugins/{id}/enable',

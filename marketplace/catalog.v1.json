@@ -453,13 +453,13 @@
             ],
             "releases": [
                 {
-                    "version": "0.1.1",
-                    "tag": "hapi-source-0.1.1",
+                    "version": "0.1.2",
+                    "tag": "hapi-source-0.1.2",
                     "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.serverchan-notifier",
                         "name": "ServerChan Notifier",
-                        "version": "0.1.1",
+                        "version": "0.1.2",
                         "pluginApiVersion": "0.1",
                         "display": {
                             "name": {
@@ -562,6 +562,26 @@
                                                     "zh-CN": "在 Hub 环境变量中设置 SERVERCHAN_SENDKEY 后启用此插件。旧的 SERVERCHAN_NOTIFICATION 不再创建核心通知通道。"
                                                 },
                                                 "tone": "info"
+                                            },
+                                            {
+                                                "id": "test-push",
+                                                "kind": "actionButton",
+                                                "label": {
+                                                    "en": "Send test push",
+                                                    "zh-CN": "发送测试推送"
+                                                },
+                                                "actionId": "plugin.notificationTest",
+                                                "variant": "secondary",
+                                                "confirm": {
+                                                    "title": {
+                                                        "en": "Send ServerChan test push?",
+                                                        "zh-CN": "发送 Server 酱测试推送？"
+                                                    },
+                                                    "description": {
+                                                        "en": "HAPI will send a synthetic test notification using the currently saved Hub plugin config and SERVERCHAN_SENDKEY.",
+                                                        "zh-CN": "HAPI 会使用当前已保存的 Hub 插件配置和 SERVERCHAN_SENDKEY 发送一条测试通知。"
+                                                    }
+                                                }
                                             },
                                             {
                                                 "kind": "schemaForm",
@@ -705,7 +725,7 @@
                     "source": {
                         "type": "hapi-source",
                         "path": "plugins/com.hapi.serverchan-notifier",
-                        "treeChecksum": "sha256:b4184a9c41b021a18a640393ab8d47da6a15ee308d76549096da150cbde0b7b4",
+                        "treeChecksum": "sha256:0d0db17e5449f70a7250befd98c26ccc8206765dd6208e2ab46f6c7c46ef589a",
                         "embedded": true
                     },
                     "compatibility": {

@@ -16,6 +16,8 @@ import type {
     PluginInstallPackageRequest,
     PluginListItem,
     PluginLocalDirectoryListResponse,
+    PluginNotificationEvent,
+    PluginNotificationTestResponse,
     PluginReloadItem,
     PluginReloadResult,
     PluginRuntimeContributionState,
@@ -83,6 +85,18 @@ function pluginDisplayId(record: DiscoveredPluginRecord): string {
     }
     const hash = createHash('sha256').update(record.rootPath).digest('hex').slice(0, 8)
     return `${id}#${hash}`
+}
+
+function buildPluginSettingsUrl(publicUrl: string | undefined, pluginId: string): string | undefined {
+    const path = `/settings/plugins/${encodeURIComponent(pluginId)}`
+    if (!publicUrl) {
+        return path
+    }
+    try {
+        return new URL(path, publicUrl).toString()
+    } catch {
+        return `${publicUrl.replace(/\/+$/, '')}${path}`
+    }
 }
 
 export class HubPluginManager {
@@ -258,6 +272,45 @@ export class HubPluginManager {
             capabilityId: args.capabilityId,
             actionId: args.actionId
         })
+    }
+
+    async testNotification(pluginId: string, namespace: string): Promise<PluginNotificationTestResponse> {
+        const instance = this.activePlugins.get(pluginId)
+        if (!instance) {
+            const record = this.records.find((entry) => pluginDisplayId(entry) === pluginId || entry.manifest?.id === pluginId)
+            if (!record) {
+                throw new Error(`Plugin ${pluginId} was not found.`)
+            }
+            throw new Error(`Plugin ${pluginId} is not active.`)
+        }
+
+        const event: PluginNotificationEvent = {
+            type: 'test',
+            session: {
+                id: `plugin-test-${Date.now()}`,
+                namespace,
+                name: 'Plugin notification test',
+                path: 'HAPI settings',
+                agent: 'HAPI',
+                active: false,
+                url: buildPluginSettingsUrl(this.options.publicUrl, pluginId)
+            },
+            task: {
+                summary: 'This is a test notification from HAPI plugin settings.',
+                status: 'test'
+            }
+        }
+
+        const channels = await instance.registry.sendNotificationEvent(event)
+        if (channels === 0) {
+            throw new Error(`Plugin ${pluginId} does not have an active notification channel.`)
+        }
+        return {
+            ok: true,
+            pluginId,
+            channels,
+            message: `Sent test notification through ${channels} channel${channels === 1 ? '' : 's'}.`
+        }
     }
 
     getDiagnostics(): PluginDiagnosticView[] {

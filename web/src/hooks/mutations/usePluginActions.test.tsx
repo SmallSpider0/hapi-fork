@@ -74,6 +74,7 @@ describe('usePluginActions', () => {
                 }
             })),
             executePluginInstallPlan: vi.fn(async () => installResult('com.market.plugin')),
+            testPluginNotification: vi.fn(async () => ({ ok: true, pluginId: 'com.example.plugin', channels: 1, message: 'sent' })),
             deletePlugin: vi.fn(async () => deleteResult('com.example.plugin')),
         } as unknown as ApiClient
 
@@ -95,6 +96,9 @@ describe('usePluginActions', () => {
             await result.current.executeInstallPlan('market-plan-1')
         })
         await act(async () => {
+            await result.current.testPluginNotification('com.example.plugin')
+        })
+        await act(async () => {
             await result.current.deletePlugin('com.example.plugin')
         })
 
@@ -112,6 +116,7 @@ describe('usePluginActions', () => {
         expect(api.installPackagePlugin).toHaveBeenCalledWith({ filename: 'plugin.tgz', contentBase64: 'AA==', checksum: 'sha256:test' }, 'hub')
         expect(api.createMarketplaceInstallPlan).toHaveBeenCalledWith('com.market.plugin', { enable: true })
         expect(api.executePluginInstallPlan).toHaveBeenCalledWith('market-plan-1')
+        expect(api.testPluginNotification).toHaveBeenCalledWith('com.example.plugin', undefined)
         expect(api.deletePlugin).toHaveBeenCalledWith('com.example.plugin', undefined)
     })
 

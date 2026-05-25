@@ -333,6 +333,14 @@ export const PluginNotificationFilterOptionsResponseSchema = z.object({
 }).strict()
 export type PluginNotificationFilterOptionsResponse = z.infer<typeof PluginNotificationFilterOptionsResponseSchema>
 
+export const PluginNotificationTestResponseSchema = z.object({
+    ok: z.literal(true),
+    pluginId: z.string().min(1).max(128),
+    channels: z.number().int().nonnegative(),
+    message: z.string().min(1).optional()
+}).strict()
+export type PluginNotificationTestResponse = z.infer<typeof PluginNotificationTestResponseSchema>
+
 export const RunnerPluginActionInvokeRequestSchema = z.object({
     pluginId: z.string().min(1).max(128),
     capabilityId: z.string().min(1).max(128).optional(),

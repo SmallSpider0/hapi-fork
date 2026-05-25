@@ -25,6 +25,7 @@ OpenAPI JSON: [/docs/plugin-api/openapi.json](/docs/plugin-api/openapi.json)
 | `POST` | `/api/plugins/local-directory` | `target` | `PluginLocalDirectoryListRequest` | `PluginLocalDirectoryListResponse` | Browse a target-local directory for plugin install UI. |
 | `GET` | `/api/plugins/{id}` | `target` | — | `PluginDetailResponse` | Inspect one plugin on Hub or one Runner target. |
 | `POST` | `/api/plugins/{id}/reload` | `target` | — | `PluginReloadResult` | Reload one plugin on the selected target. |
+| `POST` | `/api/plugins/{id}/notification-test` | `target` | — | `PluginNotificationTestResponse` | Send a synthetic test notification through one active Hub notification plugin. |
 | `POST` | `/api/plugins/{id}/enable` | `target` | `PluginEnableRequest` | `PluginReloadResult` | Enable one plugin with optional non-secret config. |
 | `POST` | `/api/plugins/{id}/disable` | `target` | `PluginDisableRequest` | `PluginReloadResult` | Disable one plugin. |
 | `DELETE` | `/api/plugins/{id}` | `target` | — | `PluginDeleteResult` | Delete one plugin from a user-owned plugin install directory. |

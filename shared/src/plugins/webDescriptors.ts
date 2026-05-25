@@ -21,7 +21,8 @@ export const CorePluginActionIdSchema = z.enum([
     'plugin.enable',
     'plugin.disable',
     'plugin.reload',
-    'plugin.delete'
+    'plugin.delete',
+    'plugin.notificationTest'
 ])
 export type CorePluginActionId = z.infer<typeof CorePluginActionIdSchema>
 

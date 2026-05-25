@@ -29,6 +29,7 @@ import {
     PluginMarketplaceListResponseSchema,
     PluginNotificationEventSchema,
     PluginNotificationFilterOptionsResponseSchema,
+    PluginNotificationTestResponseSchema,
     PluginReloadResultSchema,
     PluginStateFileSchema,
     PluginTargetScopeSchema,
@@ -125,6 +126,13 @@ export const schemaCatalog: SchemaDoc[] = [
         group: 'admin',
         description: 'Recent namespace, agent, and workspace option values for descriptor option sources.',
         schema: PluginNotificationFilterOptionsResponseSchema
+    },
+    {
+        id: 'plugin-notification-test-response',
+        title: 'PluginNotificationTestResponse',
+        group: 'admin',
+        description: 'Result returned after sending a synthetic notification through one active Hub plugin.',
+        schema: PluginNotificationTestResponseSchema
     },
     {
         id: 'plugin-reload-result',

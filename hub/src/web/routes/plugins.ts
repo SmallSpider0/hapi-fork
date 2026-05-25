@@ -13,6 +13,7 @@ import {
     PluginLocalDirectoryListRequestSchema,
     PluginLocalDirectoryListResponseSchema,
     PluginNotificationFilterOptionsResponseSchema,
+    PluginNotificationTestResponseSchema,
     PluginReloadResultSchema,
     PluginTargetScopeSchema,
     type PluginTargetScope
@@ -304,6 +305,21 @@ export function createPluginsRoutes(
         if (manager instanceof Response) return manager
         const result = await manager.reload(c.req.param('id'))
         return c.json(PluginReloadResultSchema.parse({ ...result, target: hubTargetSummary() }))
+    })
+
+    app.post('/plugins/:id/notification-test', async (c) => {
+        const target = parseTarget(c)
+        if (target instanceof Response) return target
+        if (target && target !== 'hub') {
+            return c.json({ error: 'Notification test supports Hub plugin target only.' }, 400)
+        }
+        const manager = requirePluginManager(c, getPluginManager)
+        if (manager instanceof Response) return manager
+        try {
+            return c.json(PluginNotificationTestResponseSchema.parse(await manager.testNotification(c.req.param('id'), c.get('namespace'))))
+        } catch (error) {
+            return c.json({ error: errorMessage(error) }, errorStatus(error))
+        }
     })
 
     app.post('/plugins/:id/enable', async (c) => {

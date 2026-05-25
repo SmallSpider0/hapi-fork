@@ -155,6 +155,42 @@ describe('HubPluginManager', () => {
         expect(readJsonl(logFile).filter((event) => event.type === 'send').map((event) => event.label)).toEqual(['v1', 'v2'])
     })
 
+    it('sends notification tests only through the selected plugin', async () => {
+        const otherRoot = join(hapiHome, 'plugins', 'com.example.other')
+        mkdirSync(otherRoot, { recursive: true })
+        const pluginSource = `
+            import { appendFileSync } from 'node:fs';
+            const log = ${JSON.stringify(logFile)};
+            export function activate(ctx) {
+                ctx.notifications.registerChannel({
+                    async send(event) {
+                        appendFileSync(log, JSON.stringify({ pluginId: ctx.pluginId, eventType: event.type, namespace: event.session.namespace }) + '\\n');
+                    }
+                });
+            }
+        `
+        writePlugin(pluginRoot, pluginSource)
+        writeManifest(pluginRoot, manifest())
+        writePlugin(otherRoot, pluginSource)
+        writeManifest(otherRoot, manifest({ id: 'com.example.other', name: 'Other Plugin' }))
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: {
+                'com.example.plugin': { enabled: true },
+                'com.example.other': { enabled: true }
+            }
+        })
+
+        const manager = new HubPluginManager({ hapiHome, watch: false })
+        await manager.start()
+        const result = await manager.testNotification('com.example.plugin', 'default')
+        await manager.dispose()
+
+        expect(result.channels).toBe(1)
+        expect(readJsonl(logFile)).toEqual([
+            { pluginId: 'com.example.plugin', eventType: 'test', namespace: 'default' }
+        ])
+    })
+
     it('uses Hub scoped config without overwriting Runner scoped config', async () => {
         writePlugin(pluginRoot, `
             import { appendFileSync } from 'node:fs';
@@ -501,12 +537,16 @@ describe('HubPluginManager', () => {
             unmatched.metadata = { ...unmatchedMetadata, host: unmatchedMetadata.host, path: '/tmp/project2' }
             await manager.getNotificationChannel().sendReady(unmatched)
             await manager.getNotificationChannel().sendReady(createSession())
+            const testResult = await manager.testNotification(HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID, 'default')
             await manager.dispose()
 
-            expect(calls).toHaveLength(1)
+            expect(testResult.channels).toBe(1)
+            expect(calls).toHaveLength(2)
             expect(calls[0]?.url).toBe('https://sctapi.ftqq.com/SCT_SECRET_VALUE.send')
             expect(calls[0]?.body.get('title')).toBe('HAPI Test Ready for input')
             expect(calls[0]?.body.get('desp')).toContain('https://hapi.example.test/sessions/session-1')
+            expect(calls[1]?.body.get('title')).toBe('HAPI Test Test notification')
+            expect(calls[1]?.body.get('desp')).toContain('Plugin notification test')
             expect(JSON.stringify(manager.getPlugin(HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID))).not.toContain('SCT_SECRET_VALUE')
         } finally {
             globalThis.fetch = originalFetch

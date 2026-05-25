@@ -30,6 +30,7 @@ The large schema bodies are intentionally published as JSON files only; human-fa
 | [PluginCapabilitiesResponse](/docs/plugin-api/schemas/plugin-capabilities-response.schema.json) | Aggregated capability readiness across Web, Hub, and Runner parts. |
 | [PluginCapabilityView](/docs/plugin-api/schemas/plugin-capability-view.schema.json) | One user-facing plugin capability with per-position part status and Web-safe descriptors. |
 | [PluginNotificationFilterOptionsResponse](/docs/plugin-api/schemas/plugin-notification-filter-options-response.schema.json) | Recent namespace, agent, and workspace option values for descriptor option sources. |
+| [PluginNotificationTestResponse](/docs/plugin-api/schemas/plugin-notification-test-response.schema.json) | Result returned after sending a synthetic notification through one active Hub plugin. |
 | [PluginReloadResult](/docs/plugin-api/schemas/plugin-reload-result.schema.json) | Reload/enable/disable/config result, including partial target results. |
 | [PluginInstallLocalRequest](/docs/plugin-api/schemas/plugin-install-local-request.schema.json) | Install a plugin from a path local to the selected target machine. |
 | [PluginInstallPackageRequest](/docs/plugin-api/schemas/plugin-install-package-request.schema.json) | Install a tgz/zip plugin package by upload payload. |

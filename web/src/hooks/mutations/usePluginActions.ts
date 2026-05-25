@@ -1,13 +1,13 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import type { ApiClient } from '@/api/client'
-import type { PluginDeleteResult, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallPlanRequest, PluginInstallPlanResponse, PluginInstallResult, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import type { PluginDeleteResult, PluginInstallLocalRequest, PluginInstallPackageRequest, PluginInstallPlanRequest, PluginInstallPlanResponse, PluginInstallResult, PluginNotificationTestResponse, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
 import type { PluginMarketplaceInstallPlanResponse, PluginMarketplaceInstallRequest } from '@hapi/protocol/plugins/marketplace'
 import { queryKeys } from '@/lib/query-keys'
 
-type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginInstallPlanResponse | PluginMarketplaceInstallPlanResponse | PluginDeleteResult
+type PluginActionMutationResult = PluginReloadResult | PluginInstallResult | PluginInstallPlanResponse | PluginMarketplaceInstallPlanResponse | PluginDeleteResult | PluginNotificationTestResponse
 
 type PluginAction = {
-    type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'install-local' | 'install-package' | 'install-plan' | 'marketplace-install-plan' | 'execute-install-plan' | 'delete'
+    type: 'enable' | 'disable' | 'reload' | 'reload-all' | 'config' | 'notification-test' | 'install-local' | 'install-package' | 'install-plan' | 'marketplace-install-plan' | 'execute-install-plan' | 'delete'
     id?: string
     target?: PluginTargetScope
     config?: Record<string, unknown>
@@ -24,6 +24,7 @@ export function usePluginActions(api: ApiClient | null): {
     reloadPlugin: (id: string, target?: PluginTargetScope) => Promise<PluginReloadResult>
     reloadPlugins: (target?: PluginTargetScope) => Promise<PluginReloadResult>
     saveConfig: (id: string, config: Record<string, unknown>, target?: PluginTargetScope) => Promise<PluginReloadResult>
+    testPluginNotification: (id: string, target?: PluginTargetScope) => Promise<PluginNotificationTestResponse>
     installLocalPlugin: (body: PluginInstallLocalRequest, target?: PluginTargetScope) => Promise<PluginInstallResult>
     installPackagePlugin: (body: PluginInstallPackageRequest, target?: PluginTargetScope) => Promise<PluginInstallResult>
     createInstallPlan: (body: PluginInstallPlanRequest) => Promise<PluginInstallPlanResponse>
@@ -51,6 +52,7 @@ export function usePluginActions(api: ApiClient | null): {
             if (action.type === 'disable' && action.id) return await api.disablePlugin(action.id, action.target)
             if (action.type === 'reload' && action.id) return await api.reloadPlugin(action.id, action.target)
             if (action.type === 'config' && action.id && action.config) return await api.updatePluginConfig(action.id, action.config, action.target)
+            if (action.type === 'notification-test' && action.id) return await api.testPluginNotification(action.id, action.target)
             if (action.type === 'install-local' && action.installLocal) return await api.installLocalPlugin(action.installLocal, action.target)
             if (action.type === 'install-package' && action.installPackage) return await api.installPackagePlugin(action.installPackage, action.target)
             if (action.type === 'install-plan' && action.installPlan) return await api.createPluginInstallPlan(action.installPlan)
@@ -63,7 +65,7 @@ export function usePluginActions(api: ApiClient | null): {
         },
         onSuccess: (result, action) => {
             const installedId = 'pluginId' in result ? result.pluginId : undefined
-            if (action.type === 'install-plan' || action.type === 'marketplace-install-plan') return
+            if (action.type === 'install-plan' || action.type === 'marketplace-install-plan' || action.type === 'notification-test') return
             void invalidate(action.id ?? installedId, action.target)
         },
     })
@@ -74,6 +76,7 @@ export function usePluginActions(api: ApiClient | null): {
         reloadPlugin: async (id, target) => await mutation.mutateAsync({ type: 'reload', id, target }) as PluginReloadResult,
         reloadPlugins: async (target) => await mutation.mutateAsync({ type: 'reload-all', target }) as PluginReloadResult,
         saveConfig: async (id, config, target) => await mutation.mutateAsync({ type: 'config', id, config, target }) as PluginReloadResult,
+        testPluginNotification: async (id, target) => await mutation.mutateAsync({ type: 'notification-test', id, target }) as PluginNotificationTestResponse,
         installLocalPlugin: async (body, target) => await mutation.mutateAsync({ type: 'install-local', installLocal: body, target }) as PluginInstallResult,
         installPackagePlugin: async (body, target) => await mutation.mutateAsync({ type: 'install-package', installPackage: body, target }) as PluginInstallResult,
         createInstallPlan: async (body) => await mutation.mutateAsync({ type: 'install-plan', installPlan: body }) as PluginInstallPlanResponse,

@@ -8,7 +8,8 @@
                 "ready",
                 "permission-request",
                 "task-notification",
-                "session-completion"
+                "session-completion",
+                "test"
             ]
         },
         "session": {

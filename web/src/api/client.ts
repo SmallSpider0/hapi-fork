@@ -46,6 +46,7 @@ import type {
     PluginLocalDirectoryListResponse,
     PluginListResponse,
     PluginNotificationFilterOptionsResponse,
+    PluginNotificationTestResponse,
     PluginReloadResult,
     PluginTargetScope
 } from '@hapi/protocol/plugins/admin'
@@ -283,6 +284,10 @@ export class ApiClient {
 
     async reloadPlugin(pluginId: string, target?: PluginTargetScope): Promise<PluginReloadResult> {
         return await this.request<PluginReloadResult>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/reload`, target), { method: 'POST' })
+    }
+
+    async testPluginNotification(pluginId: string, target?: PluginTargetScope): Promise<PluginNotificationTestResponse> {
+        return await this.request<PluginNotificationTestResponse>(withPluginTarget(`/api/plugins/${encodeURIComponent(pluginId)}/notification-test`, target), { method: 'POST' })
     }
 
     async installLocalPlugin(body: PluginInstallLocalRequest, target?: PluginTargetScope): Promise<PluginInstallResult> {

@@ -4,6 +4,7 @@ import {
     sanitizeError,
     type RuntimeRegistryContribution
 } from '@hapi/protocol/plugins/runtime/registryBase'
+import type { PluginNotificationEvent } from '@hapi/protocol/plugins'
 import type { NotificationChannel } from '../notifications/notificationTypes'
 import { PluginNotificationChannelAdapter } from './notificationAdapter'
 import type { Disposable, HubMessageActionContribution, HubPluginContext, PluginNotificationChannel } from './types'
@@ -81,6 +82,22 @@ export class HubPluginRegistry extends PluginRuntimeRegistryBase<'messageAction'
 
     getMessageActions(): RegisteredHubMessageAction[] {
         return this.getContributionsByType<HubMessageActionContribution, { kind: HubMessageActionContribution['kind'] }>('messageAction')
+    }
+
+    async sendNotificationEvent(event: PluginNotificationEvent): Promise<number> {
+        let sent = 0
+        for (const entry of [...this.notificationChannels]) {
+            if (entry.disposed) {
+                continue
+            }
+            try {
+                await entry.channel.send(event)
+                sent += 1
+            } catch (error) {
+                throw entry.sanitizeError(error)
+            }
+        }
+        return sent
     }
 
     override async dispose(): Promise<void> {

@@ -1150,6 +1150,7 @@ describe('plugin admin routes', () => {
             enablePlugin: async (id: string) => { calls.push(`enable:${id}`); return reloadResult('activated') },
             disablePlugin: async (id: string) => { calls.push(`disable:${id}`); return reloadResult('deactivated') },
             reload: async (id?: string) => { calls.push(`reload:${id ?? '*'}`); return reloadResult('unchanged') },
+            testNotification: async (id: string, namespace: string) => { calls.push(`notification-test:${id}:${namespace}`); return { ok: true, pluginId: id, channels: 1, message: 'sent' } },
             installLocalPlugin: async (sourcePath: string) => { calls.push(`install-local:${sourcePath}`); return installResult('installed') },
             listLocalDirectory: async (path?: string) => { calls.push(`local-directory:${path ?? ''}`); return { success: true, path: path ?? '/tmp', entries: [] } },
             deletePlugin: async (id: string) => { calls.push(`delete:${id}`); return deleteResult() }
@@ -1170,6 +1171,8 @@ describe('plugin admin routes', () => {
         expect((await app.request('/api/plugins/com.example.plugin/disable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin/reload', { method: 'POST', headers })).status).toBe(200)
         expect((await app.request('/api/plugins/reload', { method: 'POST', headers })).status).toBe(200)
+        expect((await app.request('/api/plugins/com.example.plugin/notification-test', { method: 'POST', headers })).status).toBe(200)
+        expect((await app.request('/api/plugins/com.example.plugin/notification-test?target=runner:runner-1', { method: 'POST', headers })).status).toBe(400)
         expect((await app.request('/api/plugins/install-local?target=hub', { method: 'POST', headers, body: JSON.stringify({ sourcePath: '/tmp/plugin' }) })).status).toBe(200)
         expect((await app.request('/api/plugins/local-directory', { method: 'POST', headers, body: JSON.stringify({ path: '/tmp' }) })).status).toBe(200)
         expect((await app.request('/api/plugins/com.example.plugin', { method: 'DELETE', headers })).status).toBe(200)
@@ -1187,6 +1190,7 @@ describe('plugin admin routes', () => {
             'disable:com.example.plugin',
             'reload:com.example.plugin',
             'reload:*',
+            'notification-test:com.example.plugin:default',
             'install-local:/tmp/plugin',
             'local-directory:/tmp',
             'delete:com.example.plugin'

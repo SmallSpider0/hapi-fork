@@ -693,6 +693,27 @@ export default function PluginPage() {
 
     const runDescriptorAction: DescriptorActionHandler = async (actionId) => {
         if (!plugin) return
+        if (actionId === 'plugin.notificationTest') {
+            if (dirtyConfig) {
+                setResult({
+                    title: t('settings.plugins.action.notificationTest'),
+                    tone: 'warning',
+                    lines: [t('settings.plugins.action.notificationTestUnsaved')]
+                })
+                return
+            }
+            try {
+                const response = await actions.testPluginNotification(plugin.id, target)
+                setResult({
+                    title: t('settings.plugins.action.notificationTestSent'),
+                    tone: 'success',
+                    lines: [response.message ?? t('settings.plugins.action.notificationTestResult', { count: response.channels })]
+                })
+            } catch (err) {
+                setResult({ title: t('settings.plugins.error.title'), tone: 'error', lines: [err instanceof Error ? err.message : String(err)] })
+            }
+            return
+        }
         if (actionId === 'plugin.enable') {
             setEnableDialogOpen(true)
             return
