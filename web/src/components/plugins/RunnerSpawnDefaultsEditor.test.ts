@@ -1,6 +1,6 @@
 import { createElement } from 'react'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it, vi } from 'vitest'
+import { cleanup, render, screen, within } from '@testing-library/react'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import { I18nProvider } from '@/lib/i18n-context'
 import { builtinAgentDescriptors } from '@hapi/protocol/plugins'
 import {
@@ -13,6 +13,10 @@ import {
 } from './RunnerSpawnDefaultsEditor'
 
 describe('RunnerSpawnDefaultsEditor helpers', () => {
+    afterEach(() => {
+        cleanup()
+    })
+
     it('renders an expanded editable draft when config is empty', () => {
         render(createElement(
             I18nProvider,
@@ -29,6 +33,38 @@ describe('RunnerSpawnDefaultsEditor helpers', () => {
         expect(screen.getByText('Then default to')).toBeInTheDocument()
         expect(screen.getByText('Model')).toBeInTheDocument()
         expect(screen.getByText('Permission mode')).toBeInTheDocument()
+    })
+
+    it('uses the shared Claude effort presets in the visual editor', () => {
+        render(createElement(
+            I18nProvider,
+            null,
+            createElement(RunnerSpawnDefaultsEditor, {
+                config: {
+                    rulesJson: JSON.stringify([{
+                        id: 'claude-default',
+                        label: 'Claude default',
+                        agentIds: ['claude'],
+                        defaults: { effort: 'medium' }
+                    }])
+                },
+                machines: [],
+                onConfigChange: vi.fn()
+            })
+        ))
+
+        const claudeEffort = screen.getByLabelText('Claude effort') as HTMLSelectElement
+        const options = within(claudeEffort).getAllByRole('option').map((option) => ({
+            value: (option as HTMLOptionElement).value,
+            label: option.textContent
+        }))
+        expect(options).toEqual([
+            { value: '', label: 'No default' },
+            { value: 'medium', label: 'Medium' },
+            { value: 'high', label: 'High' },
+            { value: 'max', label: 'Max' }
+        ])
+        expect(options.some((option) => option.value === 'low')).toBe(false)
     })
 
     it('stores all-agent/all-workspace mode as empty scope instead of copying every option', () => {

@@ -29,6 +29,27 @@ describe('new session plugin fields', () => {
         expect(errors).toEqual([{ key: 'com.example.plugin.profile', message: 'Profile is required.' }])
     })
 
+    it('localizes descriptor labels and validation messages', () => {
+        const fields: typeof contributions[0]['contributions']['newSessionFields'] = [
+            {
+                id: 'profile',
+                key: 'profile',
+                label: { en: 'Profile', 'zh-CN': '配置' },
+                type: 'select',
+                required: true,
+                options: [{ value: 'fast', label: { en: 'Fast', 'zh-CN': '快速' } }]
+            }
+        ]
+        const collected = collectNewSessionPluginFields([{ ...contributions[0], contributions: { newSessionFields: fields } }], 'vendor:example-agent')
+
+        expect(validateNewSessionPluginFieldValues(collected, {}, 'zh-CN')).toEqual([
+            { key: 'com.example.plugin.profile', message: '请填写配置。' }
+        ])
+        expect(validateNewSessionPluginFieldValues(collected, { 'com.example.plugin.profile': 'slow' }, 'zh-CN')).toEqual([
+            { key: 'com.example.plugin.profile', message: '配置必须是列表中的选项。' }
+        ])
+    })
+
     it('builds a plugin-scoped payload after validation succeeds', () => {
         const fields = collectNewSessionPluginFields(contributions, 'vendor:example-agent')
         const key = newSessionPluginFieldStorageKey(fields[0])

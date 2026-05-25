@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import type { Machine } from '@/types/api'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
+import { CLAUDE_EFFORT_PRESETS, formatClaudeEffortLabel } from '@/lib/claude-effort'
 import { useTranslation } from '@/lib/use-translation'
 import {
     getPermissionModeLabel,
@@ -75,7 +76,10 @@ const KNOWN_CONFIG_KEYS = [
 ]
 
 const CODEX_REASONING_OPTIONS = ['low', 'medium', 'high', 'xhigh']
-const CLAUDE_EFFORT_OPTIONS = ['low', 'medium', 'high']
+const CLAUDE_EFFORT_OPTIONS = CLAUDE_EFFORT_PRESETS.map((value) => ({
+    value,
+    label: formatClaudeEffortLabel(value)
+}))
 
 function local(locale: 'en' | 'zh-CN', zh: string, en: string): string {
     return locale === 'zh-CN' ? zh : en
@@ -749,7 +753,7 @@ function PresetEditorCard(props: {
                             <SelectField
                                 label={local(props.locale, 'Claude effort', 'Claude effort')}
                                 value={props.preset.defaults.effort}
-                                options={CLAUDE_EFFORT_OPTIONS.map((value) => ({ value, label: value }))}
+                                options={CLAUDE_EFFORT_OPTIONS}
                                 placeholder={local(props.locale, '不设置', 'No default')}
                                 disabled={props.disabled}
                                 onChange={(effort) => updateDefaults({ effort })}

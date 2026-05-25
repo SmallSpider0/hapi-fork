@@ -40,6 +40,22 @@ function isBlank(value: unknown): boolean {
     return value === undefined || value === null || value === ''
 }
 
+function validationMessage(
+    locale: string | undefined,
+    key: 'required' | 'number' | 'select',
+    label: string
+): string {
+    if (locale === 'zh-CN') {
+        if (key === 'required') return `请填写${label}。`
+        if (key === 'number') return `${label}必须是有限数字。`
+        return `${label}必须是列表中的选项。`
+    }
+
+    if (key === 'required') return `${label} is required.`
+    if (key === 'number') return `${label} must be a finite number.`
+    return `${label} must be one of the listed options.`
+}
+
 export function validateNewSessionPluginFieldValues(
     fields: NewSessionPluginField[],
     values: Record<string, unknown>,
@@ -51,19 +67,19 @@ export function validateNewSessionPluginFieldValues(
         const value = values[key] ?? field.defaultValue
         const label = localizeWebText(field.label, locale)
         if (field.required && isBlank(value)) {
-            errors.push({ key, message: `${label} is required.` })
+            errors.push({ key, message: validationMessage(locale, 'required', label) })
             continue
         }
         if (!isBlank(value) && field.type === 'number') {
             const parsed = typeof value === 'number' ? value : Number(value)
             if (!Number.isFinite(parsed)) {
-                errors.push({ key, message: `${label} must be a finite number.` })
+                errors.push({ key, message: validationMessage(locale, 'number', label) })
             }
         }
         if (!isBlank(value) && field.type === 'select') {
             const allowed = new Set((field.options ?? []).map((option) => option.value))
             if (!allowed.has(String(value))) {
-                errors.push({ key, message: `${label} must be one of the listed options.` })
+                errors.push({ key, message: validationMessage(locale, 'select', label) })
             }
         }
     }

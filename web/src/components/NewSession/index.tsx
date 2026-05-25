@@ -10,7 +10,7 @@ import { useSessions } from '@/hooks/queries/useSessions'
 import { useActiveSuggestions, type Suggestion } from '@/hooks/useActiveSuggestions'
 import { useDirectorySuggestions } from '@/hooks/useDirectorySuggestions'
 import { useRecentPaths } from '@/hooks/useRecentPaths'
-import { useTranslation } from '@/lib/use-translation'
+import { useTranslation, type Locale } from '@/lib/use-translation'
 import { agentSupportsYolo, type AgentType, type ClaudeEffort, type CodexReasoningEffort, type SessionType } from './types'
 import { ActionButtons } from './ActionButtons'
 import { AgentSelector } from './AgentSelector'
@@ -46,6 +46,8 @@ type SpawnOptionsPreviewNotice = {
     manual: string[]
 }
 
+type TranslationFn = (key: string, params?: Record<string, string | number>) => string
+
 export function NewSession(props: {
     api: ApiClient
     machines: Machine[]
@@ -57,7 +59,7 @@ export function NewSession(props: {
     initialMachineId?: string
 }) {
     const { haptic } = usePlatform()
-    const { t } = useTranslation()
+    const { t, locale } = useTranslation()
     const { spawnSession, isPending, error: spawnError } = useSpawnSession(props.api)
     const { sessions } = useSessions(props.api)
     const isFormDisabled = Boolean(isPending || props.isLoading)
@@ -153,8 +155,8 @@ export function NewSession(props: {
         [agent, selectedMachine]
     )
     const newSessionPluginFieldErrors = useMemo(
-        () => validateNewSessionPluginFieldValues(newSessionPluginFields, pluginFieldValues),
-        [newSessionPluginFields, pluginFieldValues]
+        () => validateNewSessionPluginFieldValues(newSessionPluginFields, pluginFieldValues, locale),
+        [newSessionPluginFields, pluginFieldValues, locale]
     )
     const newSessionPluginFieldPayload = useMemo(
         () => buildNewSessionPluginFieldPayload(newSessionPluginFields, pluginFieldValues),
@@ -555,7 +557,7 @@ export function NewSession(props: {
                 </div>
             ) : null}
             {spawnOptionsPreviewNotice ? (
-                <SpawnOptionsPreviewNoticeCard notice={spawnOptionsPreviewNotice} />
+                <SpawnOptionsPreviewNoticeCard notice={spawnOptionsPreviewNotice} t={t} />
             ) : null}
             <DirectorySection
                 directory={directory}
@@ -596,12 +598,15 @@ export function NewSession(props: {
                 machineId={machineId}
                 agentId={agent}
                 snapshots={selectedAgentCapabilities}
+                t={t}
             />
             <NewSessionPluginFields
                 fields={newSessionPluginFields}
                 values={pluginFieldValues}
                 errors={newSessionPluginFieldErrors}
                 isDisabled={isFormDisabled}
+                locale={locale}
+                t={t}
                 onChange={(key, value) => setPluginFieldValues((current) => ({ ...current, [key]: value }))}
             />
             {agent === 'opencode' ? (
@@ -682,36 +687,36 @@ export function NewSession(props: {
     )
 }
 
-function spawnOptionFieldLabel(field: string): string {
-    if (field === 'model') return 'model'
-    if (field === 'effort') return 'Claude effort'
-    if (field === 'modelReasoningEffort') return 'reasoning'
-    if (field === 'permissionMode' || field === 'yolo') return 'permission'
+function spawnOptionFieldLabel(field: string, t: TranslationFn): string {
+    if (field === 'model') return t('newSession.pluginDefaults.field.model')
+    if (field === 'effort') return t('newSession.pluginDefaults.field.effort')
+    if (field === 'modelReasoningEffort') return t('newSession.pluginDefaults.field.reasoning')
+    if (field === 'permissionMode' || field === 'yolo') return t('newSession.pluginDefaults.field.permission')
     return field
 }
 
-function SpawnOptionsPreviewNoticeCard(props: { notice: SpawnOptionsPreviewNotice }) {
+function SpawnOptionsPreviewNoticeCard(props: { notice: SpawnOptionsPreviewNotice; t: TranslationFn }) {
     const applied = props.notice.applied
-    const manual = Array.from(new Set(props.notice.manual.map(spawnOptionFieldLabel)))
+    const manual = Array.from(new Set(props.notice.manual.map((field) => spawnOptionFieldLabel(field, props.t))))
     return (
         <div className="px-3 py-2">
             <div className="rounded-lg border border-[var(--app-border)] bg-[var(--app-subtle-bg)] p-2 text-xs">
                 <div className="flex flex-wrap items-center gap-1.5">
-                    <span className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 font-medium text-[var(--app-link)]">插件默认值</span>
+                    <span className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 font-medium text-[var(--app-link)]">{props.t('newSession.pluginDefaults.title')}</span>
                     <span className="min-w-0 break-words text-[var(--app-fg)]">{props.notice.sources.join(', ')}</span>
                 </div>
                 {applied.length > 0 ? (
                     <div className="mt-2 flex flex-wrap gap-1.5">
                         {applied.map((entry) => (
                             <span key={`${entry.key}-${entry.value}`} className="rounded-full bg-[var(--app-bg)] px-2 py-0.5 text-[var(--app-fg)]">
-                                {spawnOptionFieldLabel(entry.key)}={entry.value}
+                                {spawnOptionFieldLabel(entry.key, props.t)}={entry.value}
                             </span>
                         ))}
                     </div>
                 ) : (
-                    <div className="mt-1 text-[var(--app-hint)]">已匹配；当前没有新增默认值。</div>
+                    <div className="mt-1 text-[var(--app-hint)]">{props.t('newSession.pluginDefaults.noNewDefaults')}</div>
                 )}
-                {manual.length > 0 ? <div className="mt-1 text-[var(--app-hint)]">手动覆盖：{manual.join(', ')}</div> : null}
+                {manual.length > 0 ? <div className="mt-1 text-[var(--app-hint)]">{props.t('newSession.pluginDefaults.manualOverride', { fields: manual.join(', ') })}</div> : null}
             </div>
         </div>
     )
@@ -722,6 +727,8 @@ function NewSessionPluginFields(props: {
     values: Record<string, unknown>
     errors: Array<{ key: string; message: string }>
     isDisabled: boolean
+    locale: Locale
+    t: TranslationFn
     onChange: (key: string, value: unknown) => void
 }) {
     if (props.fields.length === 0) {
@@ -731,14 +738,14 @@ function NewSessionPluginFields(props: {
     return (
         <div className="space-y-3 px-3 py-3">
             <div>
-                <div className="text-xs font-medium text-[var(--app-hint)]">Plugin fields</div>
-                <div className="mt-1 text-xs text-[var(--app-hint)]">Descriptor-provided fields are validated before the session is created.</div>
+                <div className="text-xs font-medium text-[var(--app-hint)]">{props.t('newSession.pluginFields.title')}</div>
+                <div className="mt-1 text-xs text-[var(--app-hint)]">{props.t('newSession.pluginFields.description')}</div>
             </div>
             {props.fields.map((field) => {
                 const key = newSessionPluginFieldStorageKey(field)
                 const value = props.values[key] ?? field.defaultValue ?? (field.type === 'boolean' ? false : '')
-                const label = localizeWebText(field.label)
-                const description = field.description ? localizeWebText(field.description) : ''
+                const label = localizeWebText(field.label, props.locale)
+                const description = field.description ? localizeWebText(field.description, props.locale) : ''
                 const error = errorByKey.get(key)
                 return (
                     <label key={`${field.pluginId}-${field.id}`} className="block space-y-1 text-sm">
@@ -760,8 +767,8 @@ function NewSessionPluginFields(props: {
                                 onChange={(event) => props.onChange(key, event.target.value)}
                                 className="w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-3 py-2 text-sm text-[var(--app-fg)]"
                             >
-                                <option value="">Select…</option>
-                                {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{option.label ? localizeWebText(option.label) : option.value}</option>)}
+                                <option value="">{props.t('newSession.pluginFields.selectPlaceholder')}</option>
+                                {(field.options ?? []).map((option) => <option key={option.value} value={option.value}>{option.label ? localizeWebText(option.label, props.locale) : option.value}</option>)}
                             </select>
                         ) : (
                             <input
@@ -785,6 +792,7 @@ function AgentCapabilitiesSummary(props: {
     machineId: string | null
     agentId: string
     snapshots: AgentCapabilityProviderSnapshot[]
+    t: TranslationFn
 }) {
     const [importResult, setImportResult] = useState<{
         nativeSessionId: string
@@ -816,12 +824,12 @@ function AgentCapabilitiesSummary(props: {
             )
             setImportResult({
                 nativeSessionId,
-                message: `Imported ${result.messages.length} messages for preview.`
+                message: props.t('newSession.agentCapabilities.imported', { count: result.messages.length })
             })
         } catch (error) {
             setImportResult({
                 nativeSessionId,
-                message: error instanceof Error ? error.message : 'Failed to import native history',
+                message: error instanceof Error ? error.message : props.t('newSession.agentCapabilities.importFailed'),
                 error: true
             })
         } finally {
@@ -853,19 +861,19 @@ function AgentCapabilitiesSummary(props: {
 
     return (
         <div className="flex flex-col gap-2 px-3 py-3 text-xs text-[var(--app-hint)]">
-            <div className="font-medium text-[var(--app-text)]">Agent capabilities</div>
+            <div className="font-medium text-[var(--app-text)]">{props.t('newSession.agentCapabilities.title')}</div>
             <div className="flex flex-wrap gap-1.5">
                 {uniqueLabels(models.map((entry) => entry.displayName ?? entry.id)).map((label) => (
-                    <span key={`model-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Model: {label}</span>
+                    <span key={`model-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">{props.t('newSession.agentCapabilities.modelPrefix')}: {label}</span>
                 ))}
                 {uniqueLabels(permissionModes.map((entry) => entry.label ?? entry.mode)).map((label) => (
-                    <span key={`permission-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Permission: {label}</span>
+                    <span key={`permission-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">{props.t('newSession.agentCapabilities.permissionPrefix')}: {label}</span>
                 ))}
                 {uniqueLabels(profiles.map((entry) => entry.displayName)).map((label) => (
-                    <span key={`profile-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Profile: {label}</span>
+                    <span key={`profile-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">{props.t('newSession.agentCapabilities.profilePrefix')}: {label}</span>
                 ))}
                 {uniqueLabels(skills.map((entry) => entry.name)).map((label) => (
-                    <span key={`skill-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">Skill: {label}</span>
+                    <span key={`skill-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">{props.t('newSession.agentCapabilities.skillPrefix')}: {label}</span>
                 ))}
                 {uniqueLabels(slashCommands.map((entry) => entry.name)).map((label) => (
                     <span key={`slash-${label}`} className="rounded-full bg-[var(--app-secondary-bg)] px-2 py-1">/{label}</span>
@@ -873,7 +881,7 @@ function AgentCapabilitiesSummary(props: {
             </div>
             {sessions.length > 0 ? (
                 <div className="space-y-1">
-                    <div className="font-medium text-[var(--app-text)]">Native history</div>
+                    <div className="font-medium text-[var(--app-text)]">{props.t('newSession.agentCapabilities.nativeHistory')}</div>
                     {props.snapshots.flatMap((snapshot) =>
                         (snapshot.capabilities.sessions ?? []).slice(0, 3).map((session) => (
                             <div key={`${snapshot.contributionId}-${session.id}`} className="flex items-center justify-between gap-2 rounded-lg bg-[var(--app-secondary-bg)] px-2 py-1">
@@ -887,7 +895,7 @@ function AgentCapabilitiesSummary(props: {
                                         disabled={!props.machineId || pendingImportId === session.id}
                                         onClick={() => { void handleImportHistory(snapshot, session.id) }}
                                     >
-                                        {pendingImportId === session.id ? 'Importing…' : 'Import'}
+                                        {pendingImportId === session.id ? props.t('newSession.agentCapabilities.importing') : props.t('newSession.agentCapabilities.import')}
                                     </button>
                                 ) : null}
                             </div>
@@ -902,7 +910,7 @@ function AgentCapabilitiesSummary(props: {
             ) : null}
             {usageLabels.length > 0 ? (
                 <div className="space-y-1">
-                    <div className="font-medium text-[var(--app-text)]">Usage</div>
+                    <div className="font-medium text-[var(--app-text)]">{props.t('newSession.agentCapabilities.usage')}</div>
                     {usageLabels.map((label, index) => (
                         <div key={`${label}-${index}`} className="truncate rounded-lg bg-[var(--app-secondary-bg)] px-2 py-1">{label}</div>
                     ))}
