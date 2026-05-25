@@ -12,7 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { LoadingState } from '@/components/LoadingState'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
-import type { PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
+import type { PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginReloadResult, PluginTargetScope } from '@hapi/protocol/plugins/admin'
 import type { PluginMarketplaceEntryView, PluginMarketplaceInstallPlanResponse } from '@hapi/protocol/plugins/marketplace'
 import { comparePluginVersions } from '@hapi/protocol/plugins/runtime/versioning'
 
@@ -182,6 +182,36 @@ function comparePluginsForDisplay(left: PluginListItem, right: PluginListItem): 
 
 function comparePluginGroupsForDisplay(left: PluginDisplayGroup, right: PluginDisplayGroup): number {
     return left.id.localeCompare(right.id)
+}
+
+function pluginScope(plugin: PluginListItem): PluginTargetScope | undefined {
+    return plugin.target?.scope as PluginTargetScope | undefined
+}
+
+export function preferredPluginDetailTarget(
+    plugins: PluginListItem[],
+    pluginId: string,
+    requestedTarget?: PluginTargetScope
+): PluginTargetScope | undefined {
+    const entries = plugins.filter((plugin) => plugin.id === pluginId)
+    if (entries.length === 0) return requestedTarget
+
+    const requestedEntry = requestedTarget
+        ? entries.find((plugin) => plugin.target?.scope === requestedTarget)
+        : undefined
+    const preferredRunner = entries
+        .filter((plugin) => plugin.target?.runtime === 'runner')
+        .sort((left, right) => primaryPluginRank(right) - primaryPluginRank(left)
+            || (left.target?.scope ?? '').localeCompare(right.target?.scope ?? ''))[0]
+
+    if (requestedEntry && isHubDescriptorMirror(requestedEntry) && preferredRunner) {
+        return pluginScope(preferredRunner) ?? requestedTarget
+    }
+    if (requestedTarget) return requestedTarget
+
+    const preferred = [...entries].sort((left, right) => primaryPluginRank(right) - primaryPluginRank(left)
+        || (left.target?.scope ?? '').localeCompare(right.target?.scope ?? ''))[0]
+    return preferred ? pluginScope(preferred) : undefined
 }
 
 export function groupPluginListForDisplay(plugins: PluginListItem[]): PluginDisplayGroup[] {

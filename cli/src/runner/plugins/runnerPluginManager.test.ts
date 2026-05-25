@@ -147,6 +147,49 @@ describe('RunnerPluginManager runtime', () => {
         expect(state.enabled['com.example.runner']?.scopedConfig['runner:runner-1:com.example.runner']?.config).toEqual({ label: 'Runner updated' })
     })
 
+    it('falls back to Hub mirror config for Runner plugins that only expose Web settings through Hub', async () => {
+        writeFileSync(runnerEntry, `
+            import { appendFileSync } from 'node:fs';
+            const log = ${JSON.stringify(logFile)};
+            export function activate(ctx) {
+                appendFileSync(log, JSON.stringify({ label: ctx.config.get('label') }) + '\\n');
+            }
+        `)
+        writeManifest(pluginRoot, {
+            contributions: {
+                runner: {
+                    environmentProviders: [{ id: 'env-provider', displayName: 'Env Provider' }]
+                },
+                web: {
+                    settingsPanels: [{
+                        id: 'runner-settings',
+                        title: 'Runner settings',
+                        components: [{ id: 'defaults', kind: 'runnerSpawnDefaultsEditor' }]
+                    }]
+                }
+            }
+        })
+        writeFileSync(join(testDir, 'plugins.json'), JSON.stringify({
+            enabled: {
+                'com.example.runner': {
+                    enabled: true,
+                    scopedConfig: {
+                        'hub:com.example.runner': { config: { label: 'Hub mirror' }, updatedAt: 1 }
+                    }
+                }
+            }
+        }, null, 2))
+        const manager = new RunnerPluginManager({ hapiHome: testDir, machineId: 'runner-1', env: {} })
+        await manager.start()
+
+        expect(readFileSync(logFile, 'utf8')).toContain('"label":"Hub mirror"')
+        expect(manager.getPlugin('com.example.runner')?.configMetadata).toMatchObject({
+            scope: 'runner:runner-1:com.example.runner',
+            source: 'scoped',
+            config: { label: 'Hub mirror' }
+        })
+    })
+
     it('reports Runner secret status and missing-secret diagnostics without leaking values', async () => {
         writeFileSync(runnerEntry, 'export function activate() {}')
         writeManifest(pluginRoot, { permissions: { secrets: ['RUNNER_TOKEN'] } })

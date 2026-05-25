@@ -9,7 +9,8 @@ import {
     MarketplacePluginCard,
     createMarketplaceInstallPlanKey,
     groupPluginListForDisplay,
-    marketplaceHasLocalNewerVersion
+    marketplaceHasLocalNewerVersion,
+    preferredPluginDetailTarget
 } from './plugins'
 
 function plugin(overrides: Partial<PluginListItem> & Pick<PluginListItem, 'id'>): PluginListItem {
@@ -106,6 +107,27 @@ describe('groupPluginListForDisplay', () => {
             }
         })
         expect(groups[0]?.plugins.map((entry) => entry.target?.scope).sort()).toEqual(['hub', 'runner:runner-1'])
+    })
+
+    it('prefers the Runner detail target when a Hub row only mirrors Runner settings descriptors', () => {
+        const plugins = [
+            plugin({
+                id: 'com.example.cross-runner',
+                target: { scope: 'hub', runtime: 'hub', active: true, stale: false },
+                runtimes: { runner: { entry: 'dist/runner.js', active: false } }
+            }),
+            plugin({
+                id: 'com.example.cross-runner',
+                target: { scope: 'runner:runner-1', runtime: 'runner', machineId: 'runner-1', active: true, stale: false },
+                runtimes: { runner: { entry: 'dist/runner.js', active: true } },
+                status: 'active',
+                enabled: true,
+                active: true
+            })
+        ]
+
+        expect(preferredPluginDetailTarget(plugins, 'com.example.cross-runner')).toBe('runner:runner-1')
+        expect(preferredPluginDetailTarget(plugins, 'com.example.cross-runner', 'hub')).toBe('runner:runner-1')
     })
 
     it('surfaces the worst target status while preserving active/enabled aggregate flags', () => {

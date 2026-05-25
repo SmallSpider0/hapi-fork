@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearch } from '@tanstack/react-router'
 import { useAppContext } from '@/lib/app-context'
 import { useAppGoBack } from '@/hooks/useAppGoBack'
 import { usePlugin } from '@/hooks/queries/usePlugin'
+import { usePlugins } from '@/hooks/queries/usePlugins'
 import { usePluginCapabilities } from '@/hooks/queries/usePluginCapabilities'
 import { useMachines } from '@/hooks/queries/useMachines'
 import { usePluginActions } from '@/hooks/mutations/usePluginActions'
@@ -23,6 +24,7 @@ import {
     pluginFeatureIntroMarkdown
 } from '@/lib/plugin-metadata'
 import { PluginTargetScopeSchema, type PluginCapabilityView, type PluginDetail, type PluginReloadResult, type PluginTargetScope } from '@hapi/protocol/plugins/admin'
+import { preferredPluginDetailTarget } from './plugins'
 
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
 type ResultState = {
@@ -505,11 +507,16 @@ function DeveloperDetails(props: {
 export default function PluginPage() {
     const { pluginId } = useParams({ from: '/settings/plugins/$pluginId' })
     const search = useSearch({ from: '/settings/plugins/$pluginId' })
-    const target = PluginTargetScopeSchema.safeParse(search.target).success ? search.target as PluginTargetScope : undefined
+    const requestedTarget = PluginTargetScopeSchema.safeParse(search.target).success ? search.target as PluginTargetScope : undefined
     const { api } = useAppContext()
     const goBack = useAppGoBack()
     const navigate = useNavigate()
     const { t, locale } = useTranslation()
+    const pluginListState = usePlugins(api)
+    const target = useMemo(
+        () => preferredPluginDetailTarget(pluginListState.plugins, pluginId, requestedTarget),
+        [pluginListState.plugins, pluginId, requestedTarget]
+    )
     const { plugin, isLoading, error } = usePlugin(api, pluginId, target)
     const capabilityState = usePluginCapabilities(api, { target })
     const actions = usePluginActions(api)
@@ -529,6 +536,16 @@ export default function PluginPage() {
         setInitialConfigText(next)
         setConfigError(null)
     }, [plugin])
+
+    useEffect(() => {
+        if (!target || target === requestedTarget) return
+        navigate({
+            to: '/settings/plugins/$pluginId',
+            params: { pluginId },
+            search: { target },
+            replace: true
+        })
+    }, [navigate, pluginId, requestedTarget, target])
 
     useEffect(() => {
         let cancelled = false

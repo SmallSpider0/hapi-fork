@@ -30,6 +30,7 @@ import {
     HAPI_PLUGIN_API_VERSION,
     HAPI_SUPPORTED_PLUGIN_API_VERSIONS,
     builtinAgentDescriptors,
+    hubPluginConfigScope,
     pluginManifestRequiresRunnerInstall,
     runnerPluginConfigScope,
     sanitizePluginConfigForView
@@ -42,6 +43,7 @@ import {
     discoverPlugins,
     getPluginStateFile,
     readPluginState,
+    resolvePluginScopedConfig,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import { RUNNER_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
@@ -72,7 +74,7 @@ import {
     type RunnerSpawnOptionsProviderContribution,
     type RunnerSpawnHookContribution
 } from './runnerExtensionPipeline'
-import type { AgentCapabilityProviderResult, AgentCapabilityProviderSnapshot, AgentHistoryImportResult, AgentDescriptor, RunnerResolvedSpawnOptions, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
+import type { AgentCapabilityProviderResult, AgentCapabilityProviderSnapshot, AgentHistoryImportResult, AgentDescriptor, PluginStateFile, RunnerResolvedSpawnOptions, RunnerResolvedSpawnPlan, RunnerSpawnContext } from '@hapi/protocol/plugins'
 
 export interface RunnerPluginManagerOptions {
     hapiHome: string
@@ -148,6 +150,12 @@ function mergeContributionDetails<TManifest extends { id: string }, TActive exte
     const declaredIds = new Set((manifestEntries ?? []).map((entry) => entry.id))
     merged.push(...(activeEntries ?? []).filter((entry) => !declaredIds.has(entry.id)))
     return merged
+}
+
+function hasDeclaredWebContributions(record: DiscoveredPluginRecord): boolean {
+    const web = record.manifest?.contributions?.web
+    if (!web) return false
+    return Object.values(web as Record<string, unknown>).some((entry) => Array.isArray(entry) ? entry.length > 0 : Boolean(entry))
 }
 
 export class RunnerPluginManager {
@@ -626,10 +634,10 @@ export class RunnerPluginManager {
         }
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
-        const records = this.stateController.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
+        const records = this.applyHubMirrorConfigFallbacks(this.stateController.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
             failClosed: stateResult.failClosed,
             defaultEnabledPluginIds: this.defaultEnabledPluginIds()
-        }), stateResult.state)
+        }), stateResult.state), stateResult.state)
 
         if (stateResult.parseError) {
             managerDiagnostics.push({
@@ -661,6 +669,27 @@ export class RunnerPluginManager {
         this.managerDiagnostics = managerDiagnostics
         this.lastInventoryUpdatedAt = Date.now()
         return { records, items }
+    }
+
+    private applyHubMirrorConfigFallbacks(records: DiscoveredPluginRecord[], state: PluginStateFile): DiscoveredPluginRecord[] {
+        return records.map((record) => {
+            if (!record.manifest || record.status === 'blocked' || record.configSource !== 'empty') {
+                return record
+            }
+            if (!record.manifest.runtimes?.runner || record.manifest.runtimes?.hub || !hasDeclaredWebContributions(record)) {
+                return record
+            }
+            const resolved = resolvePluginScopedConfig(state.enabled[record.manifest.id], hubPluginConfigScope(record.manifest.id))
+            if (!resolved.config) {
+                return record
+            }
+            return {
+                ...record,
+                config: resolved.config,
+                ...(resolved.updatedAt ? { configUpdatedAt: resolved.updatedAt } : {}),
+                configSource: resolved.source
+            }
+        })
     }
 
     private async activateRecord(record: DiscoveredPluginRecord, signature: string) {
