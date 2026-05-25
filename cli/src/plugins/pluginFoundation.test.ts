@@ -422,6 +422,24 @@ describe('plugin foundation cold path', () => {
         expect(result.parseError).toBeTruthy()
     })
 
+    it('normalizes legacy seeded core plugin state without fail-closing', async () => {
+        const stateFile = getPluginStateFile(testDir)
+        writeFileSync(stateFile, JSON.stringify({
+            enabled: {},
+            seededCorePluginIds: { 'com.hapi.core.schedule-send': true },
+            seededDefaultPluginIds: { 'com.hapi.schedule-send': true }
+        }))
+
+        const result = await readPluginState(stateFile)
+
+        expect(result.failClosed).toBe(false)
+        expect(result.parseError).toBeUndefined()
+        expect(result.state.seededDefaultPluginIds).toEqual({
+            'com.hapi.core.schedule-send': true,
+            'com.hapi.schedule-send': true
+        })
+    })
+
     it('writes plugins.json atomically with enabled config state only', async () => {
         const stateFile = getPluginStateFile(testDir)
 

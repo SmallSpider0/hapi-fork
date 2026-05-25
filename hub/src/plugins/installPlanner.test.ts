@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'bun:test'
 import { HAPI_PLUGIN_API_VERSION, type PluginManifestLite } from '@hapi/protocol/plugins'
 import {
-    HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
-    HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
-    bundledCorePlugins
+    HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+    HAPI_SCHEDULE_SEND_PLUGIN_ID,
+    bundledFirstPartyPlugins
 } from '@hapi/protocol/plugins/bundledCore'
 import { HUB_IMPLEMENTED_EXTENSION_POINTS, RUNNER_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
 import { buildPluginInstallPlan, inferPluginInstallPositions } from './installPlanner'
@@ -22,9 +22,9 @@ function manifest(overrides: Partial<PluginManifestLite> = {}): PluginManifestLi
 const CURRENT_HUB_EXTENSION_POINTS = [...HUB_IMPLEMENTED_EXTENSION_POINTS]
 const CURRENT_RUNNER_EXTENSION_POINTS = [...RUNNER_IMPLEMENTED_EXTENSION_POINTS]
 
-function corePluginManifest(id: string): PluginManifestLite {
-    const plugin = bundledCorePlugins.find((entry) => entry.manifest.id === id)
-    if (!plugin) throw new Error(`Missing bundled core plugin ${id}`)
+function firstPartyPluginManifest(id: string): PluginManifestLite {
+    const plugin = bundledFirstPartyPlugins.find((entry) => entry.manifest.id === id)
+    if (!plugin) throw new Error(`Missing bundled first-party plugin ${id}`)
     return plugin.manifest
 }
 
@@ -98,13 +98,13 @@ function planFor(
 }
 
 describe('plugin install planner', () => {
-    it('plans all bundled core plugin manifests against current Hub and Runner extension points', () => {
+    it('plans all bundled first-party plugin manifests against current Hub and Runner extension points', () => {
         const candidates = [
             hubCandidate([], { supportedExtensionPoints: CURRENT_HUB_EXTENSION_POINTS }),
             runnerCandidate('runner-current', { supportedExtensionPoints: CURRENT_RUNNER_EXTENSION_POINTS })
         ]
 
-        for (const plugin of bundledCorePlugins) {
+        for (const plugin of bundledFirstPartyPlugins) {
             const plan = planFor(plugin.manifest, candidates)
             expect({ pluginId: plugin.manifest.id, blockingErrors: plan.blockingErrors }).toEqual({ pluginId: plugin.manifest.id, blockingErrors: [] })
             expect({ pluginId: plugin.manifest.id, allTargetsCompatible: plan.targets.every((target) => target.status === 'compatible') }).toEqual({ pluginId: plugin.manifest.id, allTargetsCompatible: true })
@@ -113,7 +113,7 @@ describe('plugin install planner', () => {
 
     it('marks Schedule Send incompatible without required Hub/Web extension points', () => {
         const plan = planFor(
-            corePluginManifest(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID),
+            firstPartyPluginManifest(HAPI_SCHEDULE_SEND_PLUGIN_ID),
             [hubCandidate([], { supportedExtensionPoints: ['web.settingsPanel'] })]
         )
 
@@ -124,7 +124,7 @@ describe('plugin install planner', () => {
     })
 
     it('marks Runner Launch Presets incompatible without its Hub settings panel or Runner spawn defaults extension point', () => {
-        const plugin = corePluginManifest(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)
+        const plugin = firstPartyPluginManifest(HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)
         const missingHubPanel = planFor(plugin, [
             hubCandidate([], { supportedExtensionPoints: ['hub.messageAction'] }),
             runnerCandidate('runner-current', { supportedExtensionPoints: CURRENT_RUNNER_EXTENSION_POINTS })

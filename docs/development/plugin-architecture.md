@@ -55,7 +55,7 @@ bun typecheck
 bun run test
 bun run docs:plugin-api:check
 bun run marketplace:check
-rg "HAPI_CORE_(SERVERCHAN_NOTIFIER|RUNNER_LAUNCH_PRESETS)_PLUGIN_ID|com\\.hapi\\.core\\.(serverchan-notifier|runner-launch-presets)" hub/src web/src cli/src --glob '!**/*.test.ts'
+rg "HAPI_(SERVERCHAN_NOTIFIER|RUNNER_LAUNCH_PRESETS)_PLUGIN_ID|com\\.hapi\\.(serverchan-notifier|runner-launch-presets)" hub/src web/src cli/src --glob '!**/*.test.ts'
 rg "launch-presets/resolve|resolveRunnerLaunchPresets|RunnerLaunchPresetsEditor" hub/src web/src cli/src --glob '!**/*.test.ts'
 rg "'hub\\.action'|\\\"hub\\.action\\\"" hub/src cli/src shared/src --glob '!**/*.test.ts'
 ```

@@ -80,4 +80,4 @@ Hub 与 Runner inventory 暴露 `hostInfo`：`runtime`、`hapiVersion`、`plugin
 
 ## Bundled first-party plugins
 
-Default bundled plugins follow the same manifest-derived placement as uploaded packages. See [Bundled plugin catalog policy](./bundled-plugin-catalog.md) for the core plugin list and the `HAPI_ENABLE_BUNDLED_EXAMPLES=1` opt-in rule for developer examples.
+Default bundled plugins follow the same manifest-derived placement as uploaded packages. See [Bundled plugin catalog policy](./bundled-plugin-catalog.md) for the default-installed first-party plugin list and the `HAPI_ENABLE_BUNDLED_EXAMPLES=1` opt-in rule for developer examples.

@@ -196,7 +196,7 @@ describe('useSendMessage', () => {
         const api = createMockApi(sendMock)
         const scheduledAt = Date.now() + 5 * 60_000
         const pluginAction = {
-            pluginId: 'com.hapi.core.schedule-send',
+            pluginId: 'com.hapi.schedule-send',
             capabilityId: 'schedule-send',
             position: 'hub' as const,
             actionId: 'schedule-send',

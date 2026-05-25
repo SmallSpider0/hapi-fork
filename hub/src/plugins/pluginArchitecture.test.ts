@@ -39,7 +39,7 @@ function sourceFiles(root: string): string[] {
 
 describe('plugin architecture boundaries', () => {
     it('does not hard-code first-party plugin identities in core runtime or Web code', () => {
-        const forbidden = /HAPI_CORE_(SERVERCHAN_NOTIFIER|RUNNER_LAUNCH_PRESETS)_PLUGIN_ID|com\.hapi\.core\.(serverchan-notifier|runner-launch-presets)/
+        const forbidden = /HAPI_(SERVERCHAN_NOTIFIER|RUNNER_LAUNCH_PRESETS)_PLUGIN_ID|com\.hapi\.(serverchan-notifier|runner-launch-presets)/
         const offenders = scannedRoots
             .flatMap(sourceFiles)
             .filter((file) => forbidden.test(readFileSync(file, 'utf8')))

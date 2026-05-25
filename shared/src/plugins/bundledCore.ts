@@ -3,13 +3,13 @@ import type { PluginWebContributions } from './webDescriptors'
 import { getBundledPluginsRoot, materializeBundledPlugins, prepareBundledPlugins, type BundledPlugin } from './bundledMaterialize'
 import { getPluginStateFile, getUserPluginsDir, PluginStateLockError, readPluginState, writePluginState } from './foundation'
 
-export const HAPI_BUNDLED_CORE_PLUGINS_DIR = 'bundled-core-plugins'
-export const HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID = 'com.hapi.core.schedule-send'
-export const HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID = 'com.hapi.core.serverchan-notifier'
-export const HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID = 'com.hapi.core.runner-launch-presets'
-const HAPI_CORE_PLUGIN_VERSION = '0.1.1'
+export const HAPI_BUNDLED_FIRST_PARTY_PLUGINS_DIR = 'bundled-first-party-plugins'
+export const HAPI_SCHEDULE_SEND_PLUGIN_ID = 'com.hapi.schedule-send'
+export const HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID = 'com.hapi.serverchan-notifier'
+export const HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID = 'com.hapi.runner-launch-presets'
+const HAPI_FIRST_PARTY_PLUGIN_VERSION = '0.1.1'
 
-export type BundledCorePlugin = BundledPlugin
+export type BundledFirstPartyPlugin = BundledPlugin
 
 function manifestBase(manifest: Omit<PluginManifestLite, 'pluginApiVersion' | 'version'> & { version?: string }): PluginManifestLite {
     return {
@@ -469,11 +469,11 @@ export function activate(ctx) {
 }
 `.trim()
 
-export const bundledCorePlugins: BundledCorePlugin[] = [
+export const bundledFirstPartyPlugins: BundledFirstPartyPlugin[] = [
     {
         manifest: manifestBase({
-            id: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
-            version: HAPI_CORE_PLUGIN_VERSION,
+            id: HAPI_SCHEDULE_SEND_PLUGIN_ID,
+            version: HAPI_FIRST_PARTY_PLUGIN_VERSION,
             name: 'Schedule Send',
             description: 'First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.',
             display: displayMetadata(
@@ -544,8 +544,8 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
     },
     {
         manifest: manifestBase({
-            id: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
-            version: HAPI_CORE_PLUGIN_VERSION,
+            id: HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+            version: HAPI_FIRST_PARTY_PLUGIN_VERSION,
             name: 'ServerChan Notifier',
             description: 'First-party Hub plugin that sends selected HAPI notifications through ServerChan.',
             display: displayMetadata(
@@ -697,8 +697,8 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
     },
     {
         manifest: manifestBase({
-            id: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
-            version: HAPI_CORE_PLUGIN_VERSION,
+            id: HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+            version: HAPI_FIRST_PARTY_PLUGIN_VERSION,
             name: 'Runner Launch Presets',
             description: 'First-party Runner plugin for applying default launch settings by agent and workspace.',
             display: displayMetadata(
@@ -801,37 +801,41 @@ export const bundledCorePlugins: BundledCorePlugin[] = [
     }
 ]
 
-export const defaultEnabledBundledPluginIds = [HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID]
-export const defaultEnabledBundledRunnerPluginIds = bundledCorePlugins
+export const defaultInstalledBundledPluginIds = [HAPI_SCHEDULE_SEND_PLUGIN_ID]
+export const defaultEnabledBundledPluginIds = [HAPI_SCHEDULE_SEND_PLUGIN_ID]
+export const defaultEnabledBundledRunnerPluginIds = bundledFirstPartyPlugins
     .filter((plugin) => defaultEnabledBundledPluginIds.includes(plugin.manifest.id) && Boolean(plugin.manifest.runtimes?.runner))
     .map((plugin) => plugin.manifest.id)
 
-export function getBundledCorePluginsRoot(hapiHome: string): string {
-    return getBundledPluginsRoot(hapiHome, HAPI_BUNDLED_CORE_PLUGINS_DIR)
+export function getBundledFirstPartyPluginsRoot(hapiHome: string): string {
+    return getBundledPluginsRoot(hapiHome, HAPI_BUNDLED_FIRST_PARTY_PLUGINS_DIR)
 }
 
-export async function prepareBundledCorePlugins(hapiHome: string): Promise<string> {
+export async function prepareBundledFirstPartyPlugins(hapiHome: string): Promise<string> {
     return await prepareBundledPlugins({
         hapiHome,
-        directoryName: HAPI_BUNDLED_CORE_PLUGINS_DIR,
-        plugins: bundledCorePlugins,
-        label: 'bundled core'
+        directoryName: HAPI_BUNDLED_FIRST_PARTY_PLUGINS_DIR,
+        plugins: bundledFirstPartyPlugins,
+        label: 'bundled first-party'
     })
 }
 
-export async function seedCorePluginsAsUserPlugins(hapiHome: string): Promise<void> {
+export async function seedDefaultFirstPartyPluginsAsUserPlugins(hapiHome: string): Promise<void> {
     const statePath = getPluginStateFile(hapiHome)
     const stateResult = await readPluginState(statePath)
     if (stateResult.parseError) return
 
-    const seededCorePluginIds = stateResult.state.seededCorePluginIds ?? {}
-    const pluginsToSeed = bundledCorePlugins.filter((plugin) => seededCorePluginIds[plugin.manifest.id] !== true)
+    const seededDefaultPluginIds = stateResult.state.seededDefaultPluginIds ?? {}
+    const defaultInstalled = new Set(defaultInstalledBundledPluginIds)
+    const pluginsToSeed = bundledFirstPartyPlugins
+        .filter((plugin) => defaultInstalled.has(plugin.manifest.id))
+        .filter((plugin) => seededDefaultPluginIds[plugin.manifest.id] !== true)
     if (pluginsToSeed.length === 0) return
 
     await materializeBundledPlugins({
         root: getUserPluginsDir(hapiHome),
         plugins: pluginsToSeed,
-        label: 'core plugin seed',
+        label: 'default first-party plugin seed',
         pruneExtraneous: false,
         skipExisting: true
     })
@@ -841,10 +845,10 @@ export async function seedCorePluginsAsUserPlugins(hapiHome: string): Promise<vo
 
     const nextState = latestStateResult.state
     const defaultEnabled = new Set(defaultEnabledBundledPluginIds)
-    nextState.seededCorePluginIds = { ...(nextState.seededCorePluginIds ?? {}) }
+    nextState.seededDefaultPluginIds = { ...(nextState.seededDefaultPluginIds ?? {}) }
     for (const plugin of pluginsToSeed) {
         const pluginId = plugin.manifest.id
-        nextState.seededCorePluginIds[pluginId] = true
+        nextState.seededDefaultPluginIds[pluginId] = true
         const previous = nextState.enabled[pluginId]
         nextState.enabled[pluginId] = {
             ...(previous ?? {}),

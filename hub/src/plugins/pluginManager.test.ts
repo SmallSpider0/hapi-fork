@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import type { Session } from '../sync/syncEngine'
 import { HubPluginManager } from './pluginManager'
 import { writePluginState } from '@hapi/protocol/plugins/foundation'
 import {
-    HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
-    HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
-    HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
-    bundledCorePlugins
+    HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+    HAPI_SCHEDULE_SEND_PLUGIN_ID,
+    HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+    bundledFirstPartyPlugins
 } from '@hapi/protocol/plugins/bundledCore'
 import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 
@@ -62,6 +62,20 @@ function writeManifest(root: string, value: Record<string, unknown>): void {
 function writePlugin(root: string, source: string): void {
     mkdirSync(join(root, 'dist'), { recursive: true })
     writeFileSync(join(root, 'dist', 'hub.js'), source)
+}
+
+
+function installBundledFirstPartyPlugin(hapiHome: string, pluginId: string): void {
+    const plugin = bundledFirstPartyPlugins.find((entry) => entry.manifest.id === pluginId)
+    if (!plugin) throw new Error(`Missing bundled plugin ${pluginId}`)
+    const root = join(hapiHome, 'plugins', plugin.manifest.id)
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, 'hapi.plugin.json'), JSON.stringify(plugin.manifest, null, 2))
+    for (const file of plugin.files) {
+        const target = join(root, file.path)
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, file.content)
+    }
 }
 
 describe('HubPluginManager', () => {
@@ -355,34 +369,24 @@ describe('HubPluginManager', () => {
         ]))
     })
 
-    it('seeds default-enabled core web plugins as user-home plugins for the Hub manager', async () => {
+    it('seeds only Schedule Send as the default-installed first-party Hub plugin', async () => {
         const manager = new HubPluginManager({ hapiHome, watch: false, includeBundledCore: true })
         await manager.start()
         const plugins = manager.listPlugins()
         const webContributions = manager.collectWebContributions()
 
-        expect(plugins.map((plugin) => plugin.id).sort()).toEqual(bundledCorePlugins.map((plugin) => plugin.manifest.id).sort())
-        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
+        expect(plugins.map((plugin) => plugin.id)).toEqual([HAPI_SCHEDULE_SEND_PLUGIN_ID])
+        expect(plugins.find((plugin) => plugin.id === HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID)).toBeUndefined()
+        expect(plugins.find((plugin) => plugin.id === HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toBeUndefined()
+        expect(plugins.find((plugin) => plugin.id === HAPI_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
             source: 'user-home',
             enabled: true,
             active: true,
             install: { sourceType: 'user-home' }
         })
-        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)).toMatchObject({
-            source: 'user-home',
-            enabled: false,
-            active: false,
-            install: { sourceType: 'user-home' }
-        })
-        expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
-            source: 'user-home',
-            enabled: false,
-            active: false,
-            runtimes: { runner: { entry: 'dist/runner.js', active: false } }
-        })
         expect(webContributions).toEqual([
             expect.objectContaining({
-                pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+                pluginId: HAPI_SCHEDULE_SEND_PLUGIN_ID,
                 contributions: expect.objectContaining({
                     composerActions: [expect.objectContaining({ id: 'schedule-send', kind: 'pluginMessageAction' })]
                 })
@@ -390,52 +394,28 @@ describe('HubPluginManager', () => {
         ])
         expect(manager.collectCapabilities()).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+                pluginId: HAPI_SCHEDULE_SEND_PLUGIN_ID,
                 capabilityId: 'schedule-send',
                 kind: 'chat.composer.messageAction',
                 status: 'ready'
-            }),
-            expect.objectContaining({
-                pluginId: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
-                capabilityId: 'serverchan-notifier',
-                kind: 'notification.channel',
-                status: 'disabled'
-            }),
-            expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
-                capabilityId: 'runner-launch-presets',
-                kind: 'runner.spawnExtension',
-                status: 'disabled'
             })
+        ]))
+        expect(manager.collectCapabilities()).not.toEqual(expect.arrayContaining([
+            expect.objectContaining({ pluginId: HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID }),
+            expect.objectContaining({ pluginId: HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID })
         ]))
         expect(manager.collectContributionStates()).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                pluginId: HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
+                pluginId: HAPI_SCHEDULE_SEND_PLUGIN_ID,
                 contributionType: 'messageAction',
                 contributionId: 'schedule-send',
                 registered: true,
                 active: true
-            }),
-            expect.objectContaining({
-                pluginId: HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID,
-                contributionType: 'notificationChannel',
-                contributionId: 'serverchan',
-                registered: false,
-                active: false
             })
         ]))
-        const launchPresetsPanel = manager.getPlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)?.contributions.web?.settingsPanels?.[0]
-        expect(launchPresetsPanel?.components).toEqual([
-            expect.objectContaining({ kind: 'runnerSpawnDefaultsEditor', configKey: 'rulesJson' })
-        ])
-        expect(JSON.stringify(launchPresetsPanel)).not.toMatch(/blocked|allowed|permissionMode/)
 
-        const deleteResult = await manager.deletePlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)
-        expect(deleteResult.deleted).toBe(true)
-        expect(manager.listPlugins().map((plugin) => plugin.id)).not.toContain(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)
-
-        await manager.disablePlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
-        expect(manager.getPlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
+        await manager.disablePlugin(HAPI_SCHEDULE_SEND_PLUGIN_ID)
+        expect(manager.getPlugin(HAPI_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
             enabled: false,
             status: 'disabled'
         })
@@ -456,7 +436,7 @@ describe('HubPluginManager', () => {
         await manager.dispose()
 
         expect(plugins.map((plugin) => plugin.id)).not.toContain('com.hapi.examples.notification-logger')
-        expect(plugins.map((plugin) => plugin.id)).toContain(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
+        expect(plugins.map((plugin) => plugin.id)).toContain(HAPI_SCHEDULE_SEND_PLUGIN_ID)
     })
 
     it('activates and protects bundled Hub example plugins from deletion', async () => {
@@ -487,7 +467,7 @@ describe('HubPluginManager', () => {
         expect(afterWatchWindow).toBe(loadedAt)
     })
 
-    it('activates bundled ServerChan notifier with filters, timeout, and secret redaction', async () => {
+    it('activates installed ServerChan notifier with filters, timeout, and secret redaction', async () => {
         const calls: Array<{ url: string; body: URLSearchParams }> = []
         const originalFetch = globalThis.fetch
         globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
@@ -500,6 +480,7 @@ describe('HubPluginManager', () => {
         }) as typeof fetch
 
         try {
+            installBundledFirstPartyPlugin(hapiHome, HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID)
             const manager = new HubPluginManager({
                 hapiHome,
                 watch: false,
@@ -508,7 +489,7 @@ describe('HubPluginManager', () => {
                 env: { SERVERCHAN_SENDKEY: 'SCT_SECRET_VALUE' }
             })
             await manager.start()
-            await manager.enablePlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID, {
+            await manager.enablePlugin(HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID, {
                 titlePrefix: 'HAPI Test',
                 namespaces: ['default'],
                 sessionPathPrefixes: ['/tmp/project'],
@@ -526,7 +507,7 @@ describe('HubPluginManager', () => {
             expect(calls[0]?.url).toBe('https://sctapi.ftqq.com/SCT_SECRET_VALUE.send')
             expect(calls[0]?.body.get('title')).toBe('HAPI Test Ready for input')
             expect(calls[0]?.body.get('desp')).toContain('https://hapi.example.test/sessions/session-1')
-            expect(JSON.stringify(manager.getPlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID))).not.toContain('SCT_SECRET_VALUE')
+            expect(JSON.stringify(manager.getPlugin(HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID))).not.toContain('SCT_SECRET_VALUE')
         } finally {
             globalThis.fetch = originalFetch
         }

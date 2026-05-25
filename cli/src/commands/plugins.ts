@@ -35,7 +35,7 @@ import {
 } from '@hapi/protocol/plugins/foundation'
 import { assertPluginConfigSafeForPersistence, PluginTargetScopeSchema, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
-import { seedCorePluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
+import { seedDefaultFirstPartyPluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
 import type { PluginDeleteResult, PluginDiagnostic, PluginInstallAction, PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginListResponse, PluginReloadResult, PluginStateFile, PluginTargetScope } from '@hapi/protocol/plugins'
 import type { PluginMarketplaceEntryView, PluginMarketplaceInstallPlanResponse } from '@hapi/protocol/plugins/marketplace'
 
@@ -105,7 +105,7 @@ function pluginId(record: DiscoveredPluginRecord): string {
 }
 
 async function loadLocalRecords(): Promise<{ records: DiscoveredPluginRecord[]; state: PluginStateFile; parseError?: string }> {
-    await seedCorePluginsAsUserPlugins(configuration.happyHomeDir)
+    await seedDefaultFirstPartyPluginsAsUserPlugins(configuration.happyHomeDir)
     const stateResult = await readPluginState(getPluginStateFile(configuration.happyHomeDir))
     const bundledPluginDirs = [
         ...(process.env.HAPI_ENABLE_BUNDLED_EXAMPLES === '1' && process.env.HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS !== '1'

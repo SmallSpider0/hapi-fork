@@ -1,14 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { PluginManifestLiteSchema, pluginManifestRequiresRunnerInstall } from '@hapi/protocol/plugins'
 import {
-    HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
-    HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
-    HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
+    HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+    HAPI_SCHEDULE_SEND_PLUGIN_ID,
+    HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID,
+    bundledFirstPartyPlugins
 } from '@hapi/protocol/plugins/bundledCore'
 import { bundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { RunnerPluginManager } from './runnerPluginManager'
@@ -35,6 +36,20 @@ function writeState(hapiHome: string, enabled = true): void {
     writeFileSync(join(hapiHome, 'plugins.json'), JSON.stringify({
         enabled: { 'com.example.runner': { enabled } }
     }, null, 2))
+}
+
+
+function installBundledFirstPartyPlugin(hapiHome: string, pluginId: string): void {
+    const plugin = bundledFirstPartyPlugins.find((entry) => entry.manifest.id === pluginId)
+    if (!plugin) throw new Error(`Missing bundled plugin ${pluginId}`)
+    const root = join(hapiHome, 'plugins', plugin.manifest.id)
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, 'hapi.plugin.json'), JSON.stringify(plugin.manifest, null, 2))
+    for (const file of plugin.files) {
+        const target = join(root, file.path)
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, file.content)
+    }
 }
 
 describe('RunnerPluginManager runtime', () => {
@@ -184,7 +199,7 @@ describe('RunnerPluginManager runtime', () => {
         await manager.dispose()
     })
 
-    it('seeds and runs core Runner plugins as user-home plugins without installing Hub-only core runtime', async () => {
+    it('does not default-install optional Runner plugins with first-party defaults enabled', async () => {
         const manager = new RunnerPluginManager({
             hapiHome: testDir,
             machineId: 'runner-1',
@@ -193,30 +208,19 @@ describe('RunnerPluginManager runtime', () => {
         })
         await manager.start()
 
-        const plugins = manager.listPlugins()
-        expect(plugins.map((plugin) => plugin.id)).toEqual(expect.arrayContaining([
-            'com.example.runner',
-            HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID
+        const pluginIds = manager.listPlugins().map((plugin) => plugin.id)
+        expect(pluginIds).toContain('com.example.runner')
+        expect(pluginIds).not.toEqual(expect.arrayContaining([
+            HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+            HAPI_SCHEDULE_SEND_PLUGIN_ID,
+            HAPI_SERVERCHAN_NOTIFIER_PLUGIN_ID
         ]))
-        expect(plugins.map((plugin) => plugin.id)).not.toEqual(expect.arrayContaining([
-            HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID,
-            HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
-        ]))
-        expect(manager.getPlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
-            source: 'user-home',
-            enabled: false,
-            active: false,
-            contributions: {
-                runner: {
-                    spawnOptionsProviders: [expect.objectContaining({ id: 'runner-launch-presets' })]
-                }
-            }
-        })
 
         await manager.dispose()
     })
 
-    it('applies bundled Runner launch presets before building spawn args and respects manual fields', async () => {
+    it('applies installed Runner launch presets before building spawn args and respects manual fields', async () => {
+        installBundledFirstPartyPlugin(testDir, HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)
         const manager = new RunnerPluginManager({
             hapiHome: testDir,
             machineId: 'runner-1',
@@ -224,7 +228,7 @@ describe('RunnerPluginManager runtime', () => {
             includeBundledCore: true
         })
         await manager.start()
-        await manager.enablePlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID, {
+        await manager.enablePlugin(HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID, {
             agentIds: ['codex'],
             directoryPrefixes: ['/repo'],
             model: 'gpt-5-codex',
@@ -244,13 +248,13 @@ describe('RunnerPluginManager runtime', () => {
         })
         expect(defaults.diagnostics).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+                pluginId: HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
                 code: 'runner-launch-presets-applied'
             })
         ]))
         expect(defaults.applied).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                pluginId: HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
+                pluginId: HAPI_RUNNER_LAUNCH_PRESETS_PLUGIN_ID,
                 contributionId: 'runner-launch-presets',
                 label: expect.any(String),
                 fields: expect.arrayContaining(['model', 'modelReasoningEffort', 'permissionMode'])

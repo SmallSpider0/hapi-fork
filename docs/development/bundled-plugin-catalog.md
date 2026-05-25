@@ -7,20 +7,28 @@ Date: 2026-05-22
 
 Bundled plugins must demonstrate the plugin model by adding real user-facing capability, not by exposing toy switches in Settings.
 
-Default bundled plugins are split into two classes:
+Bundled plugin definitions are split into two classes:
 
-- **Core first-party plugins**: shipped and discovered by default. They may be enabled by default only when replacing an existing core UX with plugin-owned semantics.
+- **Core first-party plugins**: installed and discovered by default. They may be enabled by default only when replacing an existing core UX with plugin-owned semantics.
+- **Ordinary first-party plugins**: available through the normal plugin install path, but not installed or discovered by default.
 - **Examples**: developer/test samples. They are not discovered in normal Hub/Runner startup unless `HAPI_ENABLE_BUNDLED_EXAMPLES=1` is set.
 
-## Default core plugins
+## Default-installed first-party plugin
 
 | Plugin id | Positions | Default | Purpose |
 |---|---|---:|---|
-| `com.hapi.core.schedule-send` | Web + Hub | enabled | Adds the chat composer delay picker and owns the Hub message-action plan for reliable scheduled delivery. |
-| `com.hapi.core.serverchan-notifier` | Web + Hub | disabled | Adds a ServerChan notification channel with plugin-owned event switches and selectable recent agent/workspace filters. Ready-for-input notifications are on by default. Requires `SERVERCHAN_SENDKEY` in Hub env. |
-| `com.hapi.core.runner-launch-presets` | Web + Runner | disabled | Adds Runner launch defaults by agent/workspace: model, permission/yolo mode, Claude effort, and Codex reasoning effort. |
+| `com.hapi.schedule-send` | Web + Hub | installed + enabled | Adds the chat composer delay picker and owns the Hub message-action plan for reliable scheduled delivery. |
 
-Only Schedule Send is default-enabled because it replaces an existing first-party chat-box feature. Other core plugins are installed/discoverable, but require explicit enablement on the relevant target(s).
+Only Schedule Send is default-installed because it replaces an existing first-party chat-box feature.
+
+## Ordinary first-party plugins
+
+| Plugin id | Positions | Default | Purpose |
+|---|---|---:|---|
+| `com.hapi.serverchan-notifier` | Web + Hub | not installed | Adds a ServerChan notification channel with plugin-owned event switches and selectable recent agent/workspace filters. Ready-for-input notifications are on by default. Requires `SERVERCHAN_SENDKEY` in Hub env. |
+| `com.hapi.runner-launch-presets` | Web + Runner | not installed | Adds Runner launch defaults by agent/workspace: model, permission/yolo mode, Claude effort, and Codex reasoning effort. |
+
+These ordinary first-party plugins must be installed through the normal plugin flow, then explicitly enabled on the relevant target(s). Existing development homes that already had them auto-seeded keep those user-home copies until deleted.
 
 ## Marketplace readiness notes
 

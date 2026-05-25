@@ -14,7 +14,7 @@ Branch context: `feat/plugin-runtime-management-roadmap`
 - Hub/Runner inventory 上报 `contributionStates` 与 `capabilities`。
 - Hub 新增 `GET /api/plugins/capabilities`，支持 `target` 与 `sessionId`；聊天页用 `sessionId` 解析 `session-runner` readiness。
 - `POST /api/sessions/:id/messages` 只接受 `pluginAction`；旧 `scheduledAt` / `delivery.notBefore` public API 被 strict schema 拒绝。
-- 定时发送已迁移为 `com.hapi.core.schedule-send` Web+Hub 插件；core 只保留内部可靠队列与 `scheduled_at` 索引。
+- 定时发送已迁移为 `com.hapi.schedule-send` Web+Hub 插件；core 只保留内部可靠队列与 `scheduled_at` 索引。
 - Settings 插件详情页展示 capability parts/status/diagnostics。
 - 生成的 Plugin API reference 已更新。
 
@@ -279,7 +279,7 @@ GET /api/plugins/capabilities?sessionId=<id>
 {
   "capabilities": [
     {
-      "pluginId": "com.hapi.core.schedule-send",
+      "pluginId": "com.hapi.schedule-send",
       "pluginName": "Schedule Send",
       "capabilityId": "schedule-send",
       "kind": "chat.composer.messageAction",
@@ -368,7 +368,7 @@ Hub core 负责把 `MessageSendPlan` 转成 MessageService 调用。插件不直
   "text": "hello",
   "localId": "local-123",
   "pluginAction": {
-    "pluginId": "com.hapi.core.schedule-send",
+    "pluginId": "com.hapi.schedule-send",
     "capabilityId": "schedule-send",
     "actionId": "schedule-send",
     "position": "hub",
@@ -646,7 +646,7 @@ Capability 可声明 `configScopes` 仅用于 UI 引导，不改变真实存储�
 
 ```json
 {
-  "id": "com.hapi.core.schedule-send",
+  "id": "com.hapi.schedule-send",
   "name": "Schedule Send",
   "version": "0.1.0",
   "pluginApiVersion": "0.1",
@@ -795,7 +795,7 @@ export function activate(ctx) {
 
 改动：
 
-- `com.hapi.core.schedule-send` 加 Hub runtime entry。
+- `com.hapi.schedule-send` 加 Hub runtime entry。
 - 移除 Web 对 `deliveryNotBefore` 的业务识别，改为 `delayPicker` primitive。
 - Web composer 从 capabilities 渲染。
 - Public `scheduledAt` / `delivery.notBefore` 直接移除；新请求只走 `pluginAction`。

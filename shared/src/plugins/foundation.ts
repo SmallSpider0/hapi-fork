@@ -944,7 +944,7 @@ export async function readPluginState(stateFile: string): Promise<PluginStateRea
     }
 
     try {
-        const rawState = JSON.parse(await readFile(stateFile, 'utf8'))
+        const rawState = normalizePluginStateInput(JSON.parse(await readFile(stateFile, 'utf8')))
         const parsed = PluginStateFileSchema.safeParse(rawState)
         if (!parsed.success) {
             return {
@@ -960,6 +960,34 @@ export async function readPluginState(stateFile: string): Promise<PluginStateRea
             parseError: error instanceof Error ? error.message : String(error),
             failClosed: true
         }
+    }
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+    return Boolean(value && typeof value === 'object' && !Array.isArray(value))
+}
+
+function booleanRecord(value: unknown): Record<string, boolean> {
+    if (!isPlainRecord(value)) {
+        return {}
+    }
+    return Object.fromEntries(
+        Object.entries(value).filter((entry): entry is [string, boolean] => typeof entry[1] === 'boolean')
+    )
+}
+
+function normalizePluginStateInput(rawState: unknown): unknown {
+    if (!isPlainRecord(rawState) || !('seededCorePluginIds' in rawState)) {
+        return rawState
+    }
+    const { seededCorePluginIds, seededDefaultPluginIds, ...rest } = rawState
+    const normalizedSeeded = {
+        ...booleanRecord(seededCorePluginIds),
+        ...booleanRecord(seededDefaultPluginIds)
+    }
+    return {
+        ...rest,
+        ...(Object.keys(normalizedSeeded).length > 0 ? { seededDefaultPluginIds: normalizedSeeded } : {})
     }
 }
 

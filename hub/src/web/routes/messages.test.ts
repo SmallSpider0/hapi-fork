@@ -12,7 +12,7 @@ import { createMessagesRoutes } from './messages'
 
 function createScheduleAction(notBefore: number) {
     return {
-        pluginId: 'com.hapi.core.schedule-send',
+        pluginId: 'com.hapi.schedule-send',
         capabilityId: 'schedule-send',
         position: 'hub' as const,
         actionId: 'schedule-send',
@@ -45,7 +45,7 @@ function createPluginManager() {
                     type: 'messageDelivery' as const,
                     delivery: { notBefore },
                     source: {
-                        pluginId: 'com.hapi.core.schedule-send',
+                        pluginId: 'com.hapi.schedule-send',
                         capabilityId: 'schedule-send',
                         actionId: 'schedule-send'
                     }
@@ -130,7 +130,7 @@ describe('POST /api/sessions/:id/messages — pluginAction message plan', () => 
             plan: {
                 type: 'messageDelivery',
                 delivery: { notBefore },
-                source: { pluginId: 'com.hapi.core.schedule-send', capabilityId: 'schedule-send', actionId: 'schedule-send' }
+                source: { pluginId: 'com.hapi.schedule-send', capabilityId: 'schedule-send', actionId: 'schedule-send' }
             }
         })
     })

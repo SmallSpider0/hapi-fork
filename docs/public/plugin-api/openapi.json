@@ -4081,7 +4081,7 @@
                             "additionalProperties": false
                         }
                     },
-                    "seededCorePluginIds": {
+                    "seededDefaultPluginIds": {
                         "type": "object",
                         "propertyNames": {
                             "type": "string"

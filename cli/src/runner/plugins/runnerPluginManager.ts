@@ -33,7 +33,7 @@ import {
     runnerPluginConfigScope,
     sanitizePluginConfigForView
 } from '@hapi/protocol/plugins'
-import { seedCorePluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
+import { seedDefaultFirstPartyPluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
 import packageJson from '../../../package.json'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import {
@@ -621,7 +621,7 @@ export class RunnerPluginManager {
         const items: PluginReloadItem[] = []
         const managerDiagnostics: PluginDiagnosticView[] = []
         if (this.options.includeBundledCore === true) {
-            await seedCorePluginsAsUserPlugins(this.options.hapiHome)
+            await seedDefaultFirstPartyPluginsAsUserPlugins(this.options.hapiHome)
         }
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
@@ -717,7 +717,7 @@ export class RunnerPluginManager {
     private async discoverPluginRecords(): Promise<DiscoveredPluginRecord[]> {
         const bundledDisabled = (this.options.env ?? process.env).HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
         if (this.options.includeBundledCore === true) {
-            await seedCorePluginsAsUserPlugins(this.options.hapiHome)
+            await seedDefaultFirstPartyPluginsAsUserPlugins(this.options.hapiHome)
         }
         const bundledPluginDirs = [
             ...(this.options.includeBundledExamples && !bundledDisabled ? [await prepareBundledExamplePlugins(this.options.hapiHome)] : [])

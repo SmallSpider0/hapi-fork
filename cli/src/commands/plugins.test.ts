@@ -1,10 +1,25 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createHash } from 'node:crypto'
+import { bundledFirstPartyPlugins } from '@hapi/protocol/plugins/bundledCore'
 
 type PluginsModule = typeof import('./plugins')
+
+
+function installBundledFirstPartyPlugin(hapiHome: string, pluginId: string): void {
+    const plugin = bundledFirstPartyPlugins.find((entry) => entry.manifest.id === pluginId)
+    if (!plugin) throw new Error(`Missing bundled plugin ${pluginId}`)
+    const root = join(hapiHome, 'plugins', plugin.manifest.id)
+    mkdirSync(root, { recursive: true })
+    writeFileSync(join(root, 'hapi.plugin.json'), JSON.stringify(plugin.manifest, null, 2))
+    for (const file of plugin.files) {
+        const target = join(root, file.path)
+        mkdirSync(dirname(target), { recursive: true })
+        writeFileSync(target, file.content)
+    }
+}
 
 function writeManifest(root: string, overrides: Record<string, unknown> = {}) {
     writeFileSync(join(root, 'hapi.plugin.json'), JSON.stringify({
@@ -106,7 +121,7 @@ describe('hapi plugins command', () => {
         ]))
     })
 
-    it('lists default-enabled core plugins as user-home plugins even when examples are disabled', async () => {
+    it('lists default-installed first-party plugins as user-home plugins even when examples are disabled', async () => {
         rmSync(pluginRoot, { recursive: true, force: true })
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 
@@ -115,18 +130,23 @@ describe('hapi plugins command', () => {
         const payload = JSON.parse(logs.join('\n')) as { plugins: Array<{ id: string; source: string; enabled: boolean }> }
         expect(payload.plugins).toEqual(expect.arrayContaining([
             expect.objectContaining({
-                id: 'com.hapi.core.schedule-send',
+                id: 'com.hapi.schedule-send',
                 source: 'user-home',
                 enabled: true
             })
         ]))
+        expect(payload.plugins.map((plugin) => plugin.id)).not.toEqual(expect.arrayContaining([
+            'com.hapi.serverchan-notifier',
+            'com.hapi.runner-launch-presets'
+        ]))
     })
 
-    it('inspects bundled semantic contribution descriptors', async () => {
+    it('inspects installed semantic contribution descriptors', async () => {
         rmSync(pluginRoot, { recursive: true, force: true })
+        installBundledFirstPartyPlugin(hapiHome, 'com.hapi.serverchan-notifier')
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 
-        await handlePluginsCommand(['inspect', 'com.hapi.core.serverchan-notifier', '--json'])
+        await handlePluginsCommand(['inspect', 'com.hapi.serverchan-notifier', '--json'])
 
         const payload = JSON.parse(logs.join('\n')) as {
             plugin: {
