@@ -589,24 +589,20 @@ function formatPackageSize(size?: number): string {
     return `${(size / (1024 * 1024)).toFixed(1)} MiB`
 }
 
-function MarketplaceDetailPanel(props: {
+export function MarketplaceDetailPanel(props: {
     entry: PluginMarketplaceEntryView
     version?: string
     plan: PluginInstallPlanResponse | null
     pendingAction: MarketplacePendingAction | null
-    disabled: boolean
     overwrite: boolean
     t: (key: string, params?: Record<string, string | number>) => string
     locale: 'en' | 'zh-CN'
     onVersionChange: (version: string) => void
-    onInstall: () => void
-    onClose: () => void
 }) {
     const { entry, t, locale } = props
     const release = marketplaceReleaseForVersion(entry, props.version)
     const localNewer = marketplaceHasLocalNewerVersion(entry, props.version)
     const installedVersion = marketplaceInstalledVersions(entry).join(' + ')
-    const intent = marketplaceInstallIntent(entry, props.overwrite, props.version)
     const name = localizedPluginName(entry, locale)
     const description = localizedPluginDescription(entry, locale)
     const featureIntro = localizedText(entry.display?.featureIntro, locale).trim()
@@ -614,17 +610,13 @@ function MarketplaceDetailPanel(props: {
     const network = release?.manifest.permissions?.network ?? []
     const secrets = release?.manifest.permissions?.secrets ?? []
     const packageSize = formatPackageSize(release?.package.size)
-    const installLabel = props.pendingAction === 'install' ? t('settings.plugins.marketplace.installing') : marketplaceInstallButtonLabel(t, intent)
 
     return (
         <div className="space-y-3">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="text-base font-semibold">{name}</div>
-                    <div className="break-all text-xs text-[var(--app-hint)]">{entry.id} · {entry.repo}</div>
-                    {description ? <div className="mt-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
-                </div>
-                <Button type="button" variant="outline" size="sm" onClick={props.onClose}>{t('settings.plugins.marketplace.closeDetails')}</Button>
+            <div className="min-w-0">
+                <div className="text-base font-semibold">{name}</div>
+                <div className="break-all text-xs text-[var(--app-hint)]">{entry.id} · {entry.repo}</div>
+                {description ? <div className="mt-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
             </div>
 
             <div className="grid gap-2 text-sm sm:grid-cols-2">
@@ -692,19 +684,11 @@ function MarketplaceDetailPanel(props: {
                 </div>
             </div>
 
-            <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
-                {t('settings.plugins.marketplace.trustWarning')}
-            </div>
-
             {localNewer && !props.overwrite && release ? (
                 <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
                     {t('settings.plugins.marketplace.localVersionNewer', { installed: installedVersion, version: release.version })}
                 </div>
             ) : null}
-
-            <div className="flex flex-wrap justify-end gap-2">
-                <Button type="button" disabled={props.disabled || Boolean(props.pendingAction) || !marketplaceActionEnabled(intent)} onClick={props.onInstall}>{installLabel}</Button>
-            </div>
 
             {props.pendingAction === 'check' ? <LoadingState label={t('settings.plugins.marketplace.checkingInstall')} className="p-2" /> : null}
             <InstallPlanCard plan={props.plan} t={t} locale={locale} />
@@ -1141,13 +1125,10 @@ export default function PluginsPage() {
                                                     version={marketplaceVersions[entry.id]}
                                                     plan={selectedMarketplacePlan}
                                                     pendingAction={marketplacePending?.pluginId === entry.id ? marketplacePending.action : null}
-                                                    disabled={Boolean(marketplacePending && marketplacePending.pluginId !== entry.id)}
                                                     overwrite={overwriteMarketplace}
                                                     t={t}
                                                     locale={locale}
                                                     onVersionChange={(version) => setMarketplaceVersions((current) => ({ ...current, [entry.id]: version }))}
-                                                    onInstall={() => void installMarketplacePlugin(entry)}
-                                                    onClose={() => setSelectedMarketplaceEntryId(null)}
                                                 />
                                             ) : null}
                                         </MarketplacePluginCard>

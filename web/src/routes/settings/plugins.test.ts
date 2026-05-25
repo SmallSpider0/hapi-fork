@@ -1,10 +1,11 @@
 import { createElement } from 'react'
-import { render, screen } from '@testing-library/react'
-import { describe, expect, it } from 'vitest'
+import { cleanup, render, screen } from '@testing-library/react'
+import { afterEach, describe, expect, it } from 'vitest'
 import type { PluginListItem } from '@hapi/protocol/plugins/admin'
 import type { PluginMarketplaceEntryView } from '@hapi/protocol/plugins/marketplace'
 import {
     DEFAULT_PLUGIN_SETTINGS_TAB,
+    MarketplaceDetailPanel,
     MarketplacePluginCard,
     createMarketplaceInstallPlanKey,
     groupPluginListForDisplay,
@@ -71,6 +72,8 @@ const t = (key: string, params?: Record<string, string | number>): string => {
     if (!params) return key
     return Object.entries(params).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), key)
 }
+
+afterEach(() => cleanup())
 
 describe('groupPluginListForDisplay', () => {
     it('defaults the settings page to installed plugins', () => {
@@ -168,6 +171,37 @@ describe('MarketplacePluginCard', () => {
         expect(screen.getByRole('button', { name: 'settings.plugins.marketplace.closeDetails' })).toBeInTheDocument()
         const details = screen.getByText('inline marketplace details')
         expect(details.closest('[data-plugin-id="com.example.market"]')).toHaveAttribute('data-expanded', 'true')
+    })
+
+    it('keeps marketplace detail content free of duplicate warning and action buttons', () => {
+        const entry = marketplaceEntry()
+        render(createElement(
+            MarketplacePluginCard,
+            {
+                entry,
+                t,
+                locale: 'en',
+                disabled: false,
+                overwrite: false,
+                pendingAction: null,
+                expanded: true,
+                onDetails: () => undefined,
+                onInstall: () => undefined
+            },
+            createElement(MarketplaceDetailPanel, {
+                entry,
+                plan: null,
+                pendingAction: null,
+                overwrite: false,
+                t,
+                locale: 'en',
+                onVersionChange: () => undefined
+            })
+        ))
+
+        expect(screen.queryByText('settings.plugins.marketplace.trustWarning')).not.toBeInTheDocument()
+        expect(screen.getAllByRole('button', { name: 'settings.plugins.marketplace.closeDetails' })).toHaveLength(1)
+        expect(screen.getAllByRole('button', { name: 'settings.plugins.marketplace.action.install' })).toHaveLength(1)
     })
 
     it('shows local-newer installed marketplace plugins as non-installable by default', () => {
