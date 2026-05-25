@@ -37,8 +37,9 @@ import { seedDefaultFirstPartyPluginsAsUserPlugins } from '@hapi/protocol/plugin
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { HUB_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
 import { activateRuntimeRecord, safeMtime, stableStringify } from '@hapi/protocol/plugins/runtime/activation'
-import { diagnosticView, reloadItemIsOk } from '@hapi/protocol/plugins/runtime/diagnostics'
+import { diagnosticView, errorMessage, reloadItemIsOk } from '@hapi/protocol/plugins/runtime/diagnostics'
 import { applyRuntimeCompatibility } from '@hapi/protocol/plugins/runtime/compatibility'
+import { redactText } from '@hapi/protocol/plugins/runtime/registryBase'
 import {
     aggregateCapabilityStatus,
     webContributionsForPart,
@@ -61,6 +62,7 @@ export interface HubPluginManagerOptions {
     watchDebounceMs?: number
     includeBundledCore?: boolean
     includeBundledExamples?: boolean
+    activationTimeoutMs?: number
 }
 
 type ActivePluginInstance = {
@@ -97,6 +99,18 @@ function buildPluginSettingsUrl(publicUrl: string | undefined, pluginId: string)
     } catch {
         return `${publicUrl.replace(/\/+$/, '')}${path}`
     }
+}
+
+function isHubMessageActionResult(value: unknown): value is HubMessageActionResult {
+    if (!value || typeof value !== 'object') {
+        return false
+    }
+    const record = value as Record<string, unknown>
+    if (record.ok === false) {
+        return typeof record.code === 'string' && record.code.length > 0
+            && typeof record.message === 'string' && record.message.length > 0
+    }
+    return record.ok === true && 'plan' in record
 }
 
 export class HubPluginManager {
@@ -262,16 +276,38 @@ export class HubPluginManager {
                 message: `Plugin message action ${args.pluginId}:${args.actionId} is not active.`
             }
         }
-        return await action.contribution.plan({
-            namespace: args.namespace,
-            session: args.session,
-            text: args.text,
-            localId: args.localId,
-            attachments: args.attachments,
-            payload: args.payload,
-            capabilityId: args.capabilityId,
-            actionId: args.actionId
-        })
+        try {
+            const result = await action.contribution.plan({
+                namespace: args.namespace,
+                session: args.session,
+                text: args.text,
+                localId: args.localId,
+                attachments: args.attachments,
+                payload: args.payload,
+                capabilityId: args.capabilityId,
+                actionId: args.actionId
+            })
+            if (!isHubMessageActionResult(result)) {
+                return {
+                    ok: false,
+                    code: 'plugin-action-invalid-result',
+                    message: `Plugin message action ${args.pluginId}:${args.actionId} returned an invalid result.`
+                }
+            }
+            if (!result.ok) {
+                return {
+                    ...result,
+                    message: this.sanitizeRuntimeDiagnostic(args.pluginId, result.message)
+                }
+            }
+            return result
+        } catch (error) {
+            return {
+                ok: false,
+                code: 'plugin-action-failed',
+                message: `Plugin message action failed: ${this.sanitizeRuntimeDiagnostic(args.pluginId, error)}`
+            }
+        }
     }
 
     async testNotification(pluginId: string, namespace: string): Promise<PluginNotificationTestResponse> {
@@ -534,6 +570,7 @@ export class HubPluginManager {
             activationFailureLabel: 'hub plugin',
             importQueryName: 'hapiPlugin',
             reloadMarker: 'hapi-reload',
+            activationTimeoutMs: this.options.activationTimeoutMs,
             env: this.options.env,
             createRegistry: () => new HubPluginRegistry(this.options.publicUrl),
             createInstance: ({ pluginId, registry, record: activatedRecord, signature: activatedSignature, loadedAt }) => ({
@@ -597,6 +634,13 @@ export class HubPluginManager {
             pluginApiVersion: record.manifest?.pluginApiVersion,
             version: record.manifest?.version
         })
+    }
+
+    private sanitizeRuntimeDiagnostic(pluginId: string, value: unknown): string {
+        const declaredSecrets = this.activePlugins.get(pluginId)?.record.manifest?.permissions?.secrets
+            ?? this.records.find((record) => record.manifest?.id === pluginId)?.manifest?.permissions?.secrets
+            ?? []
+        return redactText(errorMessage(value), declaredSecrets, this.options.env ?? process.env)
     }
 
     private async disposeActive(pluginId: string): Promise<void> {

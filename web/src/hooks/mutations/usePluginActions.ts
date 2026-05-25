@@ -40,6 +40,7 @@ export function usePluginActions(api: ApiClient | null): {
             await queryClient.invalidateQueries({ queryKey: queryKeys.plugins(target) })
         }
         await queryClient.invalidateQueries({ queryKey: queryKeys.pluginDiagnostics })
+        await queryClient.invalidateQueries({ queryKey: queryKeys.pluginCapabilitiesRoot })
         if (id) {
             await queryClient.invalidateQueries({ queryKey: queryKeys.plugin(id, target) })
         }

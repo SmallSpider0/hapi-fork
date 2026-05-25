@@ -94,9 +94,33 @@ describe('runner plugin extension pipeline', () => {
         })
 
         expect(result.command).toBe('/opt/hapi/current')
-        expect(result.displayArgs).toEqual(['codex', '--model', 'gpt-5.5'])
-        expect(result.args).toEqual(['codex', '--model', 'gpt-5.5'])
+        expect(result.displayArgs).toEqual(['codex', '--model', 'gpt-5.5', '--hapi-starting-mode', 'remote', '--started-by', 'runner'])
+        expect(result.args).toEqual(['codex', '--model', 'gpt-5.5', '--hapi-starting-mode', 'remote', '--started-by', 'runner'])
         expect(result.diagnostics.map((entry) => entry.code)).toContain('runner-extension-command-disallowed')
+    })
+
+    it('preserves canonical Runner control flags when command resolvers try to override them', async () => {
+        const result = await resolveRunnerPluginSpawnPlan({
+            ...baseInput,
+            environmentProviders: [],
+            commandResolvers: [{
+                pluginId: 'com.example.cmd',
+                id: 'cmd',
+                priority: 0,
+                order: 0,
+                contribution: {
+                    id: 'cmd',
+                    resolve: () => ({ args: ['codex', '--started-by', 'terminal', '--hapi-starting-mode', 'local', '--model', 'gpt-5.5'] })
+                }
+            }],
+            spawnHooks: []
+        })
+
+        expect(result.args).toEqual(['codex', '--model', 'gpt-5.5', '--hapi-starting-mode', 'remote', '--started-by', 'runner'])
+        expect(result.displayArgs).toEqual(result.args)
+        expect(result.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'runner-extension-command-control-preserved' })
+        ]))
     })
 
     it('rewrites the display HAPI args tail in development mode while Core keeps the executable', async () => {
@@ -159,6 +183,26 @@ describe('runner plugin extension pipeline', () => {
 
         expect(result.args).toEqual(['--cwd', '/repo/cli', '/repo/cli/src/index.ts', 'codex', '--model', 'b'])
         expect(result.displayArgs).toEqual(['codex', '--model', 'b'])
+    })
+
+    it('ignores cwd proposals outside the base spawn directory', async () => {
+        const result = await resolveRunnerPluginSpawnPlan({
+            ...baseInput,
+            environmentProviders: [{
+                pluginId: 'com.example.cwd',
+                id: 'cwd',
+                priority: 0,
+                order: 0,
+                contribution: { id: 'cwd', provide: () => ({ cwd: '/etc' }) }
+            }],
+            commandResolvers: [],
+            spawnHooks: []
+        })
+
+        expect(result.cwd).toBe('/repo')
+        expect(result.diagnostics).toEqual(expect.arrayContaining([
+            expect.objectContaining({ code: 'runner-extension-cwd-outside-workspace' })
+        ]))
     })
 
     it('continues on throwing beforeSpawn hook unless hook explicitly blocks', async () => {

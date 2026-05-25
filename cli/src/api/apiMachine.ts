@@ -404,7 +404,17 @@ export class ApiMachineClient {
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsLocalDirectory, async (params: unknown) => {
             const request = RunnerPluginsLocalDirectoryListRequestSchema.parse(params ?? {})
-            return await manager.listLocalDirectory(request.path)
+            const requestedPath = request.path?.trim()
+            if (!this.normalizedWorkspaceRoots?.length) {
+                return { success: false, path: requestedPath ?? '', error: 'Workspace browsing is not enabled for this machine' }
+            }
+            const resolvedPath = requestedPath
+                ? await this.resolveForWorkspaceCheck(requestedPath)
+                : this.normalizedWorkspaceRoots[0]!
+            if (!this.isWithinWorkspaceRoots(resolvedPath)) {
+                return { success: false, path: resolvedPath, error: 'Path is outside workspace roots' }
+            }
+            return await manager.listLocalDirectory(resolvedPath)
         })
 
         this.rpcHandlerManager.registerHandler(RPC_METHODS.RunnerPluginsInstallLocal, async (params: unknown) => {

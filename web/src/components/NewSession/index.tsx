@@ -280,7 +280,11 @@ export function NewSession(props: {
         void props.api.previewRunnerSpawnOptions(machineId, {
             directory: deferredDirectory,
             agent,
-            model: manual.has('model') && model !== 'auto' ? model : undefined,
+            model: manual.has('model')
+                ? agent === 'opencode'
+                    ? (opencodeSelectedModel ?? undefined)
+                    : (model !== 'auto' ? model : undefined)
+                : undefined,
             effort: manual.has('effort') && effort !== 'auto' ? effort : undefined,
             modelReasoningEffort: manual.has('modelReasoningEffort') && modelReasoningEffort !== 'default' ? modelReasoningEffort : undefined,
             permissionMode: manual.has('permissionMode') ? permissionMode : undefined,
@@ -292,7 +296,11 @@ export function NewSession(props: {
             if (cancelled) return
             const options = result.options ?? {}
             if (options.model && !manual.has('model')) {
-                setModel(options.model)
+                if (agent === 'opencode') {
+                    setOpencodeSelectedModel(options.model)
+                } else {
+                    setModel(options.model)
+                }
             }
             if (options.effort && !manual.has('effort')) {
                 setEffort(options.effort as ClaudeEffort)
@@ -330,6 +338,7 @@ export function NewSession(props: {
         deferredDirectory,
         agent,
         model,
+        opencodeSelectedModel,
         effort,
         modelReasoningEffort,
         permissionMode,

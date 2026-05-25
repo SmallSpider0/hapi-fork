@@ -13,31 +13,69 @@ class PluginActionHttpError extends Error {
     }
 }
 
-function isMessageSendPlan(value: unknown): value is MessageSendPlan {
+const MAX_PLUGIN_MESSAGE_DELAY_MS = 7 * 24 * 60 * 60 * 1000
+
+function validateMessageSendPlan(value: unknown, args: {
+    action: PluginMessageActionRequest
+    localId?: string
+    attachments: AttachmentMetadata[]
+    now?: number
+}): { ok: true; plan: MessageSendPlan } | { ok: false; message: string } {
     if (!value || typeof value !== 'object') {
-        return false
+        return { ok: false, message: 'Plugin message action returned an invalid message plan.' }
     }
     const record = value as Record<string, unknown>
     if (record.type === 'immediate') {
-        return true
+        return { ok: true, plan: { type: 'immediate' } }
     }
     if (record.type !== 'messageDelivery') {
-        return false
+        return { ok: false, message: 'Plugin message action returned an invalid message plan type.' }
     }
     const delivery = record.delivery
     if (!delivery || typeof delivery !== 'object') {
-        return false
+        return { ok: false, message: 'Plugin message action returned an invalid delivery plan.' }
     }
     const notBefore = (delivery as Record<string, unknown>).notBefore
-    if (notBefore !== undefined && typeof notBefore !== 'number') {
-        return false
+    if (notBefore !== undefined) {
+        if (typeof notBefore !== 'number' || !Number.isFinite(notBefore) || !Number.isInteger(notBefore) || notBefore <= 0) {
+            return { ok: false, message: 'Plugin message action returned an invalid delivery time.' }
+        }
+        if (!args.localId) {
+            return { ok: false, message: 'Scheduled plugin messages require localId.' }
+        }
+        if (args.attachments.length > 0) {
+            return { ok: false, message: 'Scheduled plugin messages with attachments are not supported.' }
+        }
+        if (notBefore > (args.now ?? Date.now()) + MAX_PLUGIN_MESSAGE_DELAY_MS) {
+            return { ok: false, message: 'Plugin message action scheduled delivery too far in the future.' }
+        }
     }
     const source = record.source
     if (!source || typeof source !== 'object') {
-        return false
+        return { ok: false, message: 'Plugin message action returned an invalid message source.' }
     }
     const sourceRecord = source as Record<string, unknown>
-    return typeof sourceRecord.pluginId === 'string' && typeof sourceRecord.actionId === 'string'
+    if (sourceRecord.pluginId !== args.action.pluginId || sourceRecord.actionId !== args.action.actionId) {
+        return { ok: false, message: 'Plugin message action returned a message source that does not match the request.' }
+    }
+    if (args.action.capabilityId && sourceRecord.capabilityId !== args.action.capabilityId) {
+        return { ok: false, message: 'Plugin message action returned a capability source that does not match the request.' }
+    }
+    return {
+        ok: true,
+        plan: {
+            type: 'messageDelivery',
+            delivery: {
+                ...(notBefore !== undefined ? { notBefore } : {})
+            },
+            source: {
+                pluginId: args.action.pluginId,
+                actionId: args.action.actionId,
+                ...(args.action.capabilityId ? { capabilityId: args.action.capabilityId } : {})
+            },
+            ...('payload' in record ? { payload: record.payload } : {})
+        }
+    }
 }
 
 async function resolveMessagePlan(options: {
@@ -79,7 +117,15 @@ async function resolveMessagePlan(options: {
         if (!result.ok) {
             throw new PluginActionHttpError(result.code === 'plugin-action-not-active' ? 409 : 400, result.message)
         }
-        return result.plan
+        const validated = validateMessageSendPlan(result.plan, {
+            action,
+            localId: options.localId,
+            attachments: options.attachments
+        })
+        if (!validated.ok) {
+            throw new PluginActionHttpError(502, validated.message)
+        }
+        return validated.plan
     }
 
     const machineId = typeof options.session.metadata?.machineId === 'string'
@@ -107,10 +153,15 @@ async function resolveMessagePlan(options: {
     if (!response.ok) {
         throw new PluginActionHttpError(response.code === 'plugin-action-not-active' ? 409 : 400, response.message)
     }
-    if (!isMessageSendPlan(response.result)) {
-        throw new PluginActionHttpError(502, 'Runner plugin message action returned an invalid message plan.')
+    const validated = validateMessageSendPlan(response.result, {
+        action,
+        localId: options.localId,
+        attachments: options.attachments
+    })
+    if (!validated.ok) {
+        throw new PluginActionHttpError(502, validated.message)
     }
-    return response.result
+    return validated.plan
 }
 
 export function createMessagesRoutes(
@@ -200,7 +251,8 @@ export function createMessagesRoutes(
             if (error instanceof PluginActionHttpError) {
                 return c.json({ error: error.message }, error.status)
             }
-            return c.json({ error: error instanceof Error ? error.message : String(error) }, 500)
+            console.error('[messages] Plugin message action failed', error)
+            return c.json({ error: 'Plugin message action failed' }, 500)
         }
 
         await engine.sendMessage(sessionId, {

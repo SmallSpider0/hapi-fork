@@ -5,7 +5,7 @@ export const EMBEDDED_PLUGIN_MARKETPLACE_URL = 'embedded://hapi-marketplace/cata
 
 export const embeddedPluginMarketplaceCatalog = {
     "schemaVersion": "hapi-plugin-marketplace/v1",
-    "updatedAt": "2026-05-24T07:28:18.035Z",
+    "updatedAt": "2026-05-25T12:45:27.737Z",
     "plugins": [
         {
             "id": "com.hapi.runner-launch-presets",
@@ -56,7 +56,7 @@ export const embeddedPluginMarketplaceCatalog = {
             "releases": [
                 {
                     "version": "0.1.1",
-                    "tag": "hapi-source-0.1.1",
+                    "tag": "hapi-source-com.hapi.runner-launch-presets-v0.1.1",
                     "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.runner-launch-presets",
@@ -254,7 +254,7 @@ export const embeddedPluginMarketplaceCatalog = {
             "releases": [
                 {
                     "version": "0.1.1",
-                    "tag": "hapi-source-0.1.1",
+                    "tag": "hapi-source-com.hapi.schedule-send-v0.1.1",
                     "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.schedule-send",
@@ -459,7 +459,7 @@ export const embeddedPluginMarketplaceCatalog = {
             "releases": [
                 {
                     "version": "0.1.2",
-                    "tag": "hapi-source-0.1.2",
+                    "tag": "hapi-source-com.hapi.serverchan-notifier-v0.1.2",
                     "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.serverchan-notifier",

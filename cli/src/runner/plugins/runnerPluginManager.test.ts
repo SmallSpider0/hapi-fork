@@ -499,6 +499,25 @@ describe('RunnerPluginManager runtime', () => {
         expect(manager.getDiagnostics().some((diagnostic) => diagnostic.code === 'runner-plugin-activate-failed')).toBe(true)
     })
 
+    it('times out never-resolving activation without blocking the Runner manager', async () => {
+        writeFileSync(runnerEntry, 'export async function activate() { await new Promise(() => undefined) }')
+        writeState(testDir)
+        const manager = new RunnerPluginManager({
+            hapiHome: testDir,
+            machineId: 'runner-1',
+            env: {},
+            activationTimeoutMs: 20
+        })
+
+        const result = await manager.start()
+
+        expect(result.ok).toBe(false)
+        expect(result.results[0]).toMatchObject({ action: 'failed', status: 'failed' })
+        expect(result.results[0]?.message).toContain('timed out')
+        expect(manager.listPlugins()[0]).toMatchObject({ status: 'failed', active: false })
+        expect(manager.getInventory()).toMatchObject({ machineId: 'runner-1' })
+    })
+
     it('registers plugin agent adapters and exposes runner-local descriptors and factories', async () => {
         writeFileSync(runnerEntry, `
             export function activate(ctx) {

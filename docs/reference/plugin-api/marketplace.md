@@ -2,11 +2,11 @@
 
 # Plugin marketplace
 
-The marketplace is a static metadata catalog. Plugin packages stay in plugin authors' GitHub Releases; HAPI validates catalog metadata and downloaded package checksums before planning installation.
+The marketplace MVP is a static, source-first catalog. First-party plugins are embedded from `plugins/<id>` source directories, packaged on demand, and installed only after HAPI validates catalog metadata, source checksums, package checksums, and target compatibility.
 
 ## User flow
 
-1. Browse entries through Web Settings or `hapi plugins marketplace list`.
+1. Browse entries through Web Settings or `hapi plugins marketplace list` with the default namespace admin token.
 2. Create an install plan for a release.
 3. Review Hub/Runner target compatibility, conflicts, and offline skips.
 4. Execute the plan. Hub installs Hub/Web parts and distributes Runner parts via Runner RPC.
@@ -20,12 +20,15 @@ bun run marketplace:check
 ```
 
 
-Package rules:
+Source-first rules:
 
-- Publish `.tgz` or `.zip` assets from the plugin repository release.
-- Include `hapi.plugin.json` and `hapi.plugin.package.json` in the package.
-- Record `sha256:<64 hex>` checksum in `marketplace/catalog.v1.json`.
-- Do not commit installable plugin archives or plugin source trees under `marketplace/`.
+- Keep installable first-party plugin source under `plugins/<plugin-id>`.
+- Commit `hapi.plugin.json`, runtime entry files, and `hapi.marketplace.json` with the plugin source.
+- Run `bun run marketplace:generate` after source or metadata changes; it updates `marketplace/catalog.v1.json` and embedded source metadata.
+- Bump `hapi.plugin.json` version when source content changes for an existing marketplace release.
+- Do not commit installable plugin archives under `marketplace/`.
+
+Remote package catalogs are a future/trusted-distribution path. The first PR should document and validate the embedded source catalog as the supported default.
 
 ## Schemas
 

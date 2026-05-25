@@ -17,8 +17,8 @@ import { createPluginsRoutes } from './plugins'
 
 const secret = new TextEncoder().encode('test-secret-32-bytes-long-enough')
 
-async function token(): Promise<string> {
-    return await new SignJWT({ uid: 1, ns: 'default' })
+async function token(namespace = 'default'): Promise<string> {
+    return await new SignJWT({ uid: 1, ns: namespace })
         .setProtectedHeader({ alg: 'HS256' })
         .sign(secret)
 }
@@ -785,6 +785,7 @@ describe('plugin admin routes', () => {
         }, null, 2))
         const marketplaceService = new PluginMarketplaceService({
             sourceUrl: catalogPath,
+            allowLocalSources: true,
             cacheTtlMs: 0
         })
         const installRequests: unknown[] = []
@@ -1011,6 +1012,7 @@ describe('plugin admin routes', () => {
         }, null, 2))
         const marketplaceService = new PluginMarketplaceService({
             sourceUrl: catalogPath,
+            allowLocalSources: true,
             cacheTtlMs: 0
         })
         const app = createApp({
@@ -1195,6 +1197,81 @@ describe('plugin admin routes', () => {
             'local-directory:/tmp',
             'delete:com.example.plugin'
         ])
+    })
+
+    it('rejects Hub plugin admin mutations from non-default namespaces', async () => {
+        const calls: string[] = []
+        const app = createApp({
+            updatePluginConfig: async () => { calls.push('config'); return reloadResult('reloaded') },
+            enablePlugin: async () => { calls.push('enable'); return reloadResult('activated') },
+            disablePlugin: async () => { calls.push('disable'); return reloadResult('deactivated') },
+            reload: async () => { calls.push('reload'); return reloadResult('unchanged') },
+            installLocalPlugin: async () => { calls.push('install-local'); return installResult('installed') },
+            listLocalDirectory: async () => { calls.push('local-directory'); return { success: true, path: '/tmp', entries: [] } },
+            deletePlugin: async () => { calls.push('delete'); return deleteResult() }
+        } as never)
+        const headers = { authorization: `Bearer ${await token('tenant-a')}`, 'content-type': 'application/json' }
+
+        expect((await app.request('/api/plugins/com.example.plugin/config', { method: 'PATCH', headers, body: JSON.stringify({ config: { label: 'x' } }) })).status).toBe(403)
+        expect((await app.request('/api/plugins/com.example.plugin/enable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(403)
+        expect((await app.request('/api/plugins/com.example.plugin/disable', { method: 'POST', headers, body: JSON.stringify({}) })).status).toBe(403)
+        expect((await app.request('/api/plugins/com.example.plugin/reload', { method: 'POST', headers })).status).toBe(403)
+        expect((await app.request('/api/plugins/reload', { method: 'POST', headers })).status).toBe(403)
+        expect((await app.request('/api/plugins/install-local?target=hub', { method: 'POST', headers, body: JSON.stringify({ sourcePath: '/tmp/plugin' }) })).status).toBe(403)
+        expect((await app.request('/api/plugins/local-directory', { method: 'POST', headers, body: JSON.stringify({ path: '/tmp' }) })).status).toBe(403)
+        expect((await app.request('/api/plugins/com.example.plugin', { method: 'DELETE', headers })).status).toBe(403)
+        expect(calls).toEqual([])
+    })
+
+    it('rejects Hub marketplace reads and mutations from non-default namespaces', async () => {
+        const calls: string[] = []
+        const app = createApp({
+            listPlugins: () => { calls.push('list'); return [plugin] },
+            installPluginPackage: async () => { calls.push('install-package'); return installResult('installed') }
+        } as never)
+        const headers = { authorization: `Bearer ${await token('tenant-a')}`, 'content-type': 'application/json' }
+
+        expect((await app.request('/api/plugins/marketplace', { headers })).status).toBe(403)
+        expect((await app.request('/api/plugins/marketplace/refresh', { method: 'POST', headers })).status).toBe(403)
+        expect((await app.request('/api/plugins/marketplace/com.hapi.schedule-send', { headers })).status).toBe(403)
+        expect((await app.request('/api/plugins/marketplace/com.hapi.schedule-send/install-plan', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ enable: true })
+        })).status).toBe(403)
+        expect((await app.request('/api/plugins/marketplace/com.hapi.schedule-send/install', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ enable: true })
+        })).status).toBe(403)
+        expect((await app.request('/api/plugins/install-plan', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ filename: 'plugin.tgz', contentBase64: '', checksum: `sha256:${'a'.repeat(64)}`, format: 'tgz' })
+        })).status).toBe(403)
+        expect((await app.request('/api/plugins/install-plan/plan-1/execute', { method: 'POST', headers })).status).toBe(403)
+        expect(calls).toEqual([])
+    })
+
+    it('allows non-default namespaces to mutate their own Runner plugin targets', async () => {
+        const online = { ...makeMachine('runner-tenant', true), namespace: 'tenant-a' }
+        const calls: string[] = []
+        const app = createApp({ listPlugins: () => [] } as never, {
+            getMachineByNamespace: (machineId: string, namespace: string) => machineId === online.id && namespace === online.namespace ? online : null,
+            enableRunnerPlugin: async (machineId: string, id: string) => {
+                calls.push(`${machineId}:${id}`)
+                return runnerReloadResult(machineId)
+            }
+        } as never)
+
+        const response = await app.request('/api/plugins/com.example.runner/enable?target=runner:runner-tenant', {
+            method: 'POST',
+            headers: { authorization: `Bearer ${await token('tenant-a')}`, 'content-type': 'application/json' },
+            body: JSON.stringify({})
+        })
+
+        expect(response.status).toBe(200)
+        expect(calls).toEqual(['runner-tenant:com.example.runner'])
     })
 
     it('returns 503 when manager is unavailable', async () => {

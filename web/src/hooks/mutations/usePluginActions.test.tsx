@@ -106,6 +106,7 @@ describe('usePluginActions', () => {
             expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugins() })
         })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.pluginDiagnostics })
+        expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.pluginCapabilitiesRoot })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.example.plugin') })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugin('com.installed.plugin') })
         expect(invalidateSpy).toHaveBeenCalledWith({ queryKey: queryKeys.plugins('hub') })

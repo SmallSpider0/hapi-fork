@@ -42,6 +42,8 @@ export interface PluginMarketplaceServiceOptions {
     fetch?: MarketplaceFetch
     now?: () => number
     cacheTtlMs?: number
+    allowLocalSources?: boolean
+    allowInsecureHttp?: boolean
 }
 
 export interface MarketplaceCatalogSnapshot {
@@ -97,6 +99,10 @@ function isFileUrl(url: string): boolean {
 
 function isHttpUrl(url: string): boolean {
     return url.startsWith('https://') || url.startsWith('http://')
+}
+
+function isHttpsUrl(url: string): boolean {
+    return url.startsWith('https://')
 }
 
 function isEmbeddedUrl(url: string): boolean {
@@ -213,6 +219,8 @@ export class PluginMarketplaceService {
     private readonly fetchImpl: MarketplaceFetch
     private readonly now: () => number
     private readonly cacheTtlMs: number
+    private readonly allowLocalSources: boolean
+    private readonly allowInsecureHttp: boolean
 
     constructor(options: PluginMarketplaceServiceOptions = {}) {
         this.sourceUrl = options.sourceUrl?.trim() || process.env.HAPI_PLUGIN_MARKETPLACE_URL?.trim() || DEFAULT_PLUGIN_MARKETPLACE_URL
@@ -220,6 +228,8 @@ export class PluginMarketplaceService {
         this.fetchImpl = options.fetch ?? (async (url) => await fetch(url))
         this.now = options.now ?? (() => Date.now())
         this.cacheTtlMs = options.cacheTtlMs ?? 10 * 60 * 1000
+        this.allowLocalSources = options.allowLocalSources ?? process.env.HAPI_PLUGIN_MARKETPLACE_ALLOW_LOCAL === '1'
+        this.allowInsecureHttp = options.allowInsecureHttp ?? process.env.HAPI_PLUGIN_MARKETPLACE_ALLOW_HTTP === '1'
     }
 
     async getCatalog(options: { force?: boolean } = {}): Promise<MarketplaceCatalogSnapshot> {
@@ -319,11 +329,14 @@ export class PluginMarketplaceService {
 
     private async readText(sourceUrl: string): Promise<string> {
         if (isFileUrl(sourceUrl)) {
+            this.assertLocalSourceAllowed('Marketplace file catalogs')
             return await readFile(fileURLToPath(sourceUrl), 'utf8')
         }
         if (!isHttpUrl(sourceUrl)) {
+            this.assertLocalSourceAllowed('Marketplace local catalogs')
             return await readFile(sourceUrl, 'utf8')
         }
+        this.assertRemoteUrlAllowed(sourceUrl, 'Marketplace catalog')
         const response = await this.fetchImpl(sourceUrl)
         if (!response.ok) {
             throw new Error(`Marketplace catalog fetch failed: HTTP ${response.status} ${response.statusText}`)
@@ -336,11 +349,14 @@ export class PluginMarketplaceService {
             throw new Error(`Marketplace release ${release.manifest.id} ${release.version} does not provide a package distribution.`)
         }
         if (isFileUrl(release.package.url)) {
+            this.assertLocalSourceAllowed('Marketplace file packages')
             return await readFile(fileURLToPath(release.package.url))
         }
         if (!isHttpUrl(release.package.url)) {
+            this.assertLocalSourceAllowed('Marketplace local packages')
             return await readFile(release.package.url)
         }
+        this.assertRemoteUrlAllowed(release.package.url, 'Marketplace package')
         const response = await this.fetchImpl(release.package.url)
         if (!response.ok) {
             throw new Error(`Marketplace package download failed: HTTP ${response.status} ${response.statusText}`)
@@ -437,6 +453,18 @@ export class PluginMarketplaceService {
                 ? dirname(dirname(catalogPath))
                 : dirname(catalogPath)
         }
-        return process.cwd()
+        throw new Error('Marketplace source catalogs from remote URLs require HAPI_PLUGIN_MARKETPLACE_SOURCE_ROOT or embedded source metadata.')
+    }
+
+    private assertLocalSourceAllowed(label: string): void {
+        if (!this.allowLocalSources) {
+            throw new Error(`${label} are disabled by default. Set HAPI_PLUGIN_MARKETPLACE_ALLOW_LOCAL=1 for trusted local development catalogs.`)
+        }
+    }
+
+    private assertRemoteUrlAllowed(url: string, label: string): void {
+        if (!isHttpsUrl(url) && !this.allowInsecureHttp) {
+            throw new Error(`${label} URL must use HTTPS. Set HAPI_PLUGIN_MARKETPLACE_ALLOW_HTTP=1 only for trusted local development.`)
+        }
     }
 }

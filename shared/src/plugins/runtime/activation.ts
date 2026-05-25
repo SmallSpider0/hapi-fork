@@ -55,6 +55,19 @@ export async function safeMtime(path: string): Promise<number> {
 }
 
 export type ReloadImportPathStrategy = 'hidden-sibling' | 'entry-suffix'
+const DEFAULT_RUNTIME_ACTIVATION_TIMEOUT_MS = 5000
+
+function withActivationTimeout<T>(work: Promise<T> | T, timeoutMs: number, label: string): Promise<T> {
+    let timeout: NodeJS.Timeout | null = null
+    return Promise.race([
+        Promise.resolve(work),
+        new Promise<never>((_, reject) => {
+            timeout = setTimeout(() => reject(new Error(`${label} timed out after ${timeoutMs}ms`)), timeoutMs)
+        })
+    ]).finally(() => {
+        if (timeout) clearTimeout(timeout)
+    })
+}
 
 export async function materializeReloadImportPath(args: {
     realPath: string
@@ -113,6 +126,7 @@ export async function activateRuntimeRecord<
     importQueryName: string
     reloadMarker: string
     reloadStrategy?: ReloadImportPathStrategy
+    activationTimeoutMs?: number
     env?: NodeJS.ProcessEnv
     createRegistry(): TRegistry
     createInstance(args: {
@@ -142,6 +156,7 @@ export async function activateRuntimeRecord<
 
     const declaredSecrets = options.record.manifest?.permissions?.secrets ?? []
     const declaredNetwork = options.record.manifest?.permissions?.network ?? []
+    const activationTimeoutMs = options.activationTimeoutMs ?? DEFAULT_RUNTIME_ACTIVATION_TIMEOUT_MS
     const registry = options.createRegistry()
     try {
         const importPath = await materializeReloadImportPath({
@@ -152,7 +167,7 @@ export async function activateRuntimeRecord<
             strategy: options.reloadStrategy
         })
         const importUrl = `${pathToFileURL(importPath).href}?${options.importQueryName}=${encodeURIComponent(pluginId)}&signature=${encodeURIComponent(options.signature)}`
-        const importedModule = await import(importUrl)
+        const importedModule = await withActivationTimeout(import(importUrl), activationTimeoutMs, `${options.runtimeDisplayName} plugin import ${pluginId}`)
         const activate = getActivate<RuntimePluginActivate<TContext>>(importedModule)
         if (!activate) {
             const message = `${options.runtimeDisplayName} runtime entry must export activate(ctx).`
@@ -178,7 +193,7 @@ export async function activateRuntimeRecord<
             env: options.env
         })
         try {
-            await activate(activation.ctx)
+            await withActivationTimeout(activate(activation.ctx), activationTimeoutMs, `${options.runtimeDisplayName} plugin activate ${pluginId}`)
             activation.close()
         } catch (error) {
             activation.close()

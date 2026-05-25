@@ -3,22 +3,27 @@ import { PluginMarketplaceService, type MarketplaceFetch } from './marketplaceSe
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { embeddedPluginMarketplaceCatalog } from '@hapi/protocol/plugins/marketplaceSources.generated'
 import type { PluginHostInfo } from '@hapi/protocol/plugins/admin'
 import { PluginMarketplaceCatalogSchema, type PluginMarketplaceEntry } from '@hapi/protocol/plugins/marketplace'
 import { createPluginMarketplaceHostContext } from '@hapi/protocol/plugins/runtime/versioning'
 
 function catalogResponse(): Awaited<ReturnType<MarketplaceFetch>> {
+    return jsonResponse({
+        schemaVersion: 'hapi-plugin-marketplace/v1',
+        updatedAt: '2026-05-24T00:00:00.000Z',
+        plugins: []
+    })
+}
+
+function jsonResponse(value: unknown): Awaited<ReturnType<MarketplaceFetch>> {
     return {
         ok: true,
         status: 200,
         statusText: 'OK',
         async text() {
-            return JSON.stringify({
-                schemaVersion: 'hapi-plugin-marketplace/v1',
-                updatedAt: '2026-05-24T00:00:00.000Z',
-                plugins: []
-            })
+            return JSON.stringify(value)
         },
         async arrayBuffer() {
             return new ArrayBuffer(0)
@@ -160,7 +165,7 @@ describe('PluginMarketplaceService', () => {
                 }))
             }]
         }))
-        const service = new PluginMarketplaceService({ sourceUrl: catalogPath })
+        const service = new PluginMarketplaceService({ sourceUrl: catalogPath, allowLocalSources: true })
         try {
             const { entry } = await service.getEntry('com.example.future')
 
@@ -243,9 +248,96 @@ describe('PluginMarketplaceService', () => {
 
         const service = new PluginMarketplaceService({
             sourceUrl: catalogPath,
-            sourceRoot: join(testDir, 'missing-checkout')
+            sourceRoot: join(testDir, 'missing-checkout'),
+            allowLocalSources: true
         })
 
         await expect(service.buildInstallPlanRequest('com.hapi.schedule-send')).rejects.toThrow('source checksum mismatch')
+    })
+
+    it('rejects untrusted local and insecure remote catalogs by default', async () => {
+        const testDir = mkdtempSync(join(tmpdir(), 'hapi-marketplace-policy-'))
+        const catalogPath = join(testDir, 'catalog.v1.json')
+        writeFileSync(catalogPath, JSON.stringify({
+            schemaVersion: 'hapi-plugin-marketplace/v1',
+            updatedAt: '2026-05-24T00:00:00.000Z',
+            plugins: []
+        }))
+        try {
+            await expect(new PluginMarketplaceService({ sourceUrl: catalogPath }).getCatalog()).rejects.toThrow('local catalogs are disabled')
+            await expect(new PluginMarketplaceService({
+                sourceUrl: 'http://example.com/catalog.v1.json',
+                fetch: async () => catalogResponse()
+            }).getCatalog()).rejects.toThrow('must use HTTPS')
+        } finally {
+            rmSync(testDir, { recursive: true, force: true })
+        }
+    })
+
+    it('rejects untrusted local and insecure marketplace packages by default', async () => {
+        const catalogForPackage = (url: string) => ({
+            schemaVersion: 'hapi-plugin-marketplace/v1',
+            updatedAt: '2026-05-24T00:00:00.000Z',
+            plugins: [{
+                id: 'com.example.package-policy',
+                name: 'Package Policy Plugin',
+                repo: 'example/package-policy',
+                releases: [{
+                    version: '0.1.0',
+                    tag: 'v0.1.0',
+                    manifest: {
+                        id: 'com.example.package-policy',
+                        name: 'Package Policy Plugin',
+                        version: '0.1.0',
+                        pluginApiVersion: '0.1'
+                    },
+                    package: {
+                        filename: 'plugin.tgz',
+                        url,
+                        format: 'tgz',
+                        checksum: `sha256:${'a'.repeat(64)}`
+                    }
+                }]
+            }]
+        })
+        const serviceForPackage = (url: string) => new PluginMarketplaceService({
+            sourceUrl: 'https://example.com/catalog.v1.json',
+            fetch: async () => jsonResponse(catalogForPackage(url))
+        })
+
+        await expect(serviceForPackage(pathToFileURL('/tmp/plugin.tgz').toString()).buildInstallPlanRequest('com.example.package-policy')).rejects.toThrow('file packages are disabled')
+        await expect(serviceForPackage('ftp://example.com/plugin.tgz').buildInstallPlanRequest('com.example.package-policy')).rejects.toThrow('local packages are disabled')
+        await expect(serviceForPackage('http://example.com/plugin.tgz').buildInstallPlanRequest('com.example.package-policy')).rejects.toThrow('must use HTTPS')
+    })
+
+    it('rejects remote source catalogs without a trusted source root or embedded source metadata', async () => {
+        const service = new PluginMarketplaceService({
+            sourceUrl: 'https://example.com/catalog.v1.json',
+            fetch: async () => jsonResponse({
+                schemaVersion: 'hapi-plugin-marketplace/v1',
+                updatedAt: '2026-05-24T00:00:00.000Z',
+                plugins: [{
+                    id: 'com.example.source-policy',
+                    name: 'Source Policy Plugin',
+                    repo: 'example/source-policy',
+                    releases: [{
+                        version: '0.1.0',
+                        tag: 'hapi-source-com.example.source-policy-v0.1.0',
+                        manifest: {
+                            id: 'com.example.source-policy',
+                            name: 'Source Policy Plugin',
+                            version: '0.1.0',
+                            pluginApiVersion: '0.1'
+                        },
+                        source: {
+                            type: 'hapi-source',
+                            path: 'plugins/com.example.source-policy'
+                        }
+                    }]
+                }]
+            })
+        })
+
+        await expect(service.buildInstallPlanRequest('com.example.source-policy')).rejects.toThrow('require HAPI_PLUGIN_MARKETPLACE_SOURCE_ROOT')
     })
 })

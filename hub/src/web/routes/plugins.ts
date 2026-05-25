@@ -38,6 +38,7 @@ import { PluginMarketplaceService } from '../../plugins/marketplaceService'
 import type { HubPluginManager } from '../../plugins/pluginManager'
 import type { Machine, SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
+import { DEFAULT_NAMESPACE } from '../../utils/accessToken'
 
 function requirePluginManager(c: Context<WebAppEnv>, getPluginManager: () => HubPluginManager | null): HubPluginManager | Response {
     const manager = getPluginManager()
@@ -82,6 +83,17 @@ function requireExplicitInstallTarget(c: Context<WebAppEnv>, target: PluginTarge
     return target
 }
 
+function requireHubPluginAdmin(c: Context<WebAppEnv>): Response | null {
+    if (c.get('namespace') === DEFAULT_NAMESPACE) {
+        return null
+    }
+    return c.json({ error: 'Hub plugin management is restricted to the default namespace.' }, 403)
+}
+
+function requireHubPluginAdminForTarget(c: Context<WebAppEnv>, target: PluginTargetScope | null): Response | null {
+    return !target || target === 'hub' ? requireHubPluginAdmin(c) : null
+}
+
 export function createPluginsRoutes(
     getPluginManager: () => HubPluginManager | null,
     getSyncEngine: () => SyncEngine | null = () => null,
@@ -102,6 +114,8 @@ export function createPluginsRoutes(
         if (manager instanceof Response) return manager
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const { payload } = await buildListPayload({
             manager,
             engine: getSyncEngine(),
@@ -119,6 +133,8 @@ export function createPluginsRoutes(
         if (manager instanceof Response) return manager
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         if (target && target !== 'hub') {
             const engine = requireSyncEngine(c, getSyncEngine)
             if (engine instanceof Response) return engine
@@ -160,6 +176,8 @@ export function createPluginsRoutes(
     app.post('/plugins/reload', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         if (target && target !== 'hub') {
             const engine = requireSyncEngine(c, getSyncEngine)
             if (engine instanceof Response) return engine
@@ -183,6 +201,8 @@ export function createPluginsRoutes(
         if (parsedTarget instanceof Response) return parsedTarget
         const target = requireExplicitInstallTarget(c, parsedTarget)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const json = await c.req.json().catch(() => null)
         const parsed = PluginInstallLocalRequestSchema.safeParse(json)
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
@@ -214,6 +234,8 @@ export function createPluginsRoutes(
         if (parsedTarget instanceof Response) return parsedTarget
         const target = requireExplicitInstallTarget(c, parsedTarget)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const json = await c.req.json().catch(() => null)
         const parsed = PluginInstallPackageRequestSchema.safeParse(json)
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
@@ -251,6 +273,8 @@ export function createPluginsRoutes(
     app.post('/plugins/local-directory', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const json = await c.req.json().catch(() => ({}))
         const parsed = PluginLocalDirectoryListRequestSchema.safeParse(json ?? {})
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
@@ -276,6 +300,8 @@ export function createPluginsRoutes(
     app.get('/plugins/:id', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         if (target && target !== 'hub') {
             if (target === 'all-runners') return c.json({ error: 'Plugin detail requires target=hub or target=runner:<machineId>.' }, 400)
             const engine = requireSyncEngine(c, getSyncEngine)
@@ -294,6 +320,8 @@ export function createPluginsRoutes(
     app.post('/plugins/:id/reload', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         if (target && target !== 'hub') {
             const engine = requireSyncEngine(c, getSyncEngine)
             if (engine instanceof Response) return engine
@@ -310,6 +338,8 @@ export function createPluginsRoutes(
     app.post('/plugins/:id/notification-test', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdmin(c)
+        if (hubAdminError) return hubAdminError
         if (target && target !== 'hub') {
             return c.json({ error: 'Notification test supports Hub plugin target only.' }, 400)
         }
@@ -325,6 +355,8 @@ export function createPluginsRoutes(
     app.post('/plugins/:id/enable', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const json = await c.req.json().catch(() => ({}))
         const parsed = PluginEnableRequestSchema.safeParse(json ?? {})
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
@@ -348,6 +380,8 @@ export function createPluginsRoutes(
     app.post('/plugins/:id/disable', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const json = await c.req.json().catch(() => ({}))
         const parsed = PluginDisableRequestSchema.safeParse(json ?? {})
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
@@ -371,6 +405,8 @@ export function createPluginsRoutes(
     app.delete('/plugins/:id', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         if (target && target !== 'hub') {
             const engine = requireSyncEngine(c, getSyncEngine)
             if (engine instanceof Response) return engine
@@ -395,6 +431,8 @@ export function createPluginsRoutes(
     app.patch('/plugins/:id/config', async (c) => {
         const target = parseTarget(c)
         if (target instanceof Response) return target
+        const hubAdminError = requireHubPluginAdminForTarget(c, target)
+        if (hubAdminError) return hubAdminError
         const json = await c.req.json().catch(() => null)
         const parsed = PluginConfigUpdateRequestSchema.safeParse(json)
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)

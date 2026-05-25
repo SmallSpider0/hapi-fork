@@ -1,4 +1,4 @@
-import { delimiter, isAbsolute, win32 } from 'node:path'
+import { delimiter, isAbsolute, relative, win32 } from 'node:path'
 import type { SpawnSessionOptions } from '@/modules/common/rpcTypes'
 import type { HappyCliSpawnPlan } from '@/utils/spawnHappyCLI'
 import type { PluginDiagnostic } from '@hapi/protocol/plugins'
@@ -33,7 +33,8 @@ const PROTECTED_ENV_KEYS = new Set([
     'HAPI_CLI_EXECUTABLE',
     'HAPI_INVOKED_CWD'
 ])
-const ALLOWED_HAPI_SUBCOMMANDS = new Set(['claude', 'codex', 'cursor', 'gemini', 'opencode', 'agent-plugin'])
+const ALLOWED_HAPI_SUBCOMMANDS = new Set(['claude', 'codex', 'cursor', 'gemini', 'kimi', 'opencode', 'agent-plugin'])
+const REQUIRED_RUNNER_CONTROL_FLAGS = new Set(['--hapi-starting-mode', '--started-by'])
 
 type MaybePromise<T> = T | Promise<T>
 export type RunnerPluginDiagnosticSanitizer = (pluginId: string, value: unknown) => string
@@ -127,6 +128,62 @@ function withTimeout<T>(work: MaybePromise<T>, timeoutMs: number, label: string)
 
 function isCrossPlatformAbsolutePath(value: string): boolean {
     return isAbsolute(value) || win32.isAbsolute(value)
+}
+
+function pathIsInsideWithPlatform(parentPath: string, childPath: string, platform: NodeJS.Platform): boolean {
+    const pathImpl = platform === 'win32' ? win32 : { relative, isAbsolute }
+    const rel = pathImpl.relative(parentPath, childPath)
+    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !pathImpl.isAbsolute(rel))
+}
+
+function appendMissingRunnerControlArgs(args: {
+    entry: { pluginId: string; id: string }
+    proposedArgs: string[]
+    baseDisplayArgs: string[]
+    diagnostics: PluginDiagnostic[]
+}): string[] {
+    const cleaned: string[] = []
+    const requiredPairs: string[] = []
+    for (let index = 0; index < args.baseDisplayArgs.length; index += 1) {
+        const flag = args.baseDisplayArgs[index]
+        if (!REQUIRED_RUNNER_CONTROL_FLAGS.has(flag)) continue
+        const value = args.baseDisplayArgs[index + 1]
+        if (value === undefined) continue
+        requiredPairs.push(flag, value)
+    }
+    if (requiredPairs.length === 0) {
+        return args.proposedArgs
+    }
+
+    let changed = false
+    for (let index = 0; index < args.proposedArgs.length; index += 1) {
+        const flag = args.proposedArgs[index]
+        if (!REQUIRED_RUNNER_CONTROL_FLAGS.has(flag)) {
+            cleaned.push(flag)
+            continue
+        }
+        const proposedValue = args.proposedArgs[index + 1]
+        const baseIndex = requiredPairs.indexOf(flag)
+        const requiredValue = baseIndex === -1 ? undefined : requiredPairs[baseIndex + 1]
+        if (proposedValue !== requiredValue) {
+            changed = true
+        }
+        index += proposedValue === undefined ? 0 : 1
+    }
+
+    for (let index = 0; index < requiredPairs.length; index += 2) {
+        cleaned.push(requiredPairs[index]!, requiredPairs[index + 1]!)
+    }
+
+    if (changed || cleaned.length !== args.proposedArgs.length) {
+        args.diagnostics.push(contributionDiagnostic(
+            args.entry,
+            'warning',
+            'runner-extension-command-control-preserved',
+            `${contributionLabel(args.entry)} attempted to modify Runner control flags; required remote Runner flags were restored.`
+        ))
+    }
+    return cleaned
 }
 
 function normalizeBaseEnv(env: NodeJS.ProcessEnv): Record<string, string> {
@@ -277,6 +334,7 @@ function applyEnvPatch(args: {
     pathDelimiter: string
     sanitizeDiagnostic?: RunnerPluginDiagnosticSanitizer
     platform: NodeJS.Platform
+    allowedCwdRoots?: string[]
 }): { cwd?: string } {
     const source = contributionLabel(args.entry)
     for (const [key, value] of Object.entries(args.proposal.env ?? {})) {
@@ -316,6 +374,10 @@ function applyEnvPatch(args: {
     if (args.proposal.cwd !== undefined) {
         if (!isCrossPlatformAbsolutePath(args.proposal.cwd)) {
             args.diagnostics.push(contributionDiagnostic(args.entry, 'warning', 'runner-extension-cwd-invalid', `${source} proposed a non-absolute cwd; proposal ignored.`))
+            return {}
+        }
+        if (args.allowedCwdRoots?.length && !args.allowedCwdRoots.some((root) => pathIsInsideWithPlatform(root, args.proposal.cwd!, args.platform))) {
+            args.diagnostics.push(contributionDiagnostic(args.entry, 'warning', 'runner-extension-cwd-outside-workspace', `${source} proposed a cwd outside the Runner spawn workspace; proposal ignored.`))
             return {}
         }
         const cwd = sanitizeForPlugin(args, args.entry.pluginId, args.proposal.cwd)
@@ -371,7 +433,8 @@ async function runEnvironmentProviders(input: ResolveRunnerSpawnPlanInput, state
                 diagnostics: state.diagnostics,
                 pathDelimiter: input.pathDelimiter ?? delimiter,
                 sanitizeDiagnostic: input.sanitizeDiagnostic,
-                platform: input.platform ?? process.platform
+                platform: input.platform ?? process.platform,
+                allowedCwdRoots: [input.basePlan.cwd]
             })
             if (cwdPatch.cwd) state.cwd = cwdPatch.cwd
         } catch (error) {
@@ -397,11 +460,17 @@ async function runCommandResolvers(input: ResolveRunnerSpawnPlanInput, state: {
             const context = buildContext(input, { ...input.basePlan, cwd: state.cwd, env: state.env, args: state.args, displayArgs: state.displayArgs, command: state.command })
             const parsed: RunnerCommandResolverProposal = RunnerCommandResolverProposalSchema.parse(await withTimeout(entry.contribution.resolve(context), timeoutMs, source))
             if (parsed.args && validateContributionCommandProposal(entry, parsed.args, state.diagnostics)) {
+                const nextDisplayArgs = appendMissingRunnerControlArgs({
+                    entry,
+                    proposedArgs: parsed.args,
+                    baseDisplayArgs: input.basePlan.displayArgs,
+                    diagnostics: state.diagnostics
+                })
                 const currentDisplayArgCount = state.displayArgs.length
-                state.displayArgs = parsed.args
+                state.displayArgs = nextDisplayArgs
                 state.args = input.basePlan.mode === 'development'
-                    ? [...state.args.slice(0, state.args.length - currentDisplayArgCount), ...parsed.args]
-                    : parsed.args
+                    ? [...state.args.slice(0, state.args.length - currentDisplayArgCount), ...nextDisplayArgs]
+                    : nextDisplayArgs
                 state.audit.push({ phase: 'command', pluginId: entry.pluginId, contributionId: entry.id, field: 'args', message: `${source} proposed HAPI args` })
             }
             const cwdPatch = applyEnvPatch({
@@ -413,7 +482,8 @@ async function runCommandResolvers(input: ResolveRunnerSpawnPlanInput, state: {
                 diagnostics: state.diagnostics,
                 pathDelimiter: input.pathDelimiter ?? delimiter,
                 sanitizeDiagnostic: input.sanitizeDiagnostic,
-                platform: input.platform ?? process.platform
+                platform: input.platform ?? process.platform,
+                allowedCwdRoots: [input.basePlan.cwd]
             })
             if (cwdPatch.cwd) state.cwd = cwdPatch.cwd
         } catch (error) {
@@ -447,7 +517,8 @@ async function runBeforeSpawnHooks(input: ResolveRunnerSpawnPlanInput, state: {
                 diagnostics: state.diagnostics,
                 pathDelimiter: input.pathDelimiter ?? delimiter,
                 sanitizeDiagnostic: input.sanitizeDiagnostic,
-                platform: input.platform ?? process.platform
+                platform: input.platform ?? process.platform,
+                allowedCwdRoots: [input.basePlan.cwd]
             })
             if (cwdPatch.cwd) state.cwd = cwdPatch.cwd
             if (parsed.block) {

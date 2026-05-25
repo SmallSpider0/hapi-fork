@@ -212,4 +212,96 @@ describe('ApiMachineClient runner plugin RPC handlers', () => {
             client.shutdown()
         }
     })
+
+    it('rejects runner plugin local directory browsing outside workspace roots', async () => {
+        const machine = makeMachine('machine-plugin-dir')
+        const root = mkdtempSync(join(tmpdir(), 'hapi-runner-plugin-ws-'))
+        const client = new ApiMachineClient('cli-token', machine, [root])
+        const listLocalDirectory = vi.fn(async () => ({ success: true, path: root, entries: [] }))
+        client.registerRunnerPluginHandlers({
+            getInventory: () => ({ machineId: machine.id, updatedAt: 1, plugins: [], diagnostics: [] }),
+            getPlugin: () => null,
+            listLocalDirectory,
+        } as never)
+
+        const outsideDir = mkdtempSync(join(tmpdir(), 'hapi-runner-plugin-outside-'))
+        try {
+            const result = await callMachineRpc(client, machine.id, RPC_METHODS.RunnerPluginsLocalDirectory, { path: outsideDir })
+
+            expect(result).toEqual({ success: false, path: outsideDir, error: 'Path is outside workspace roots' })
+            expect(listLocalDirectory).not.toHaveBeenCalled()
+        } finally {
+            rmSync(outsideDir, { recursive: true, force: true })
+            rmSync(root, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
+
+    it('rejects runner plugin local directory browsing when workspace roots are disabled', async () => {
+        const machine = makeMachine('machine-plugin-dir-disabled')
+        const client = new ApiMachineClient('cli-token', machine)
+        const listLocalDirectory = vi.fn(async () => ({ success: true, path: '/tmp', entries: [] }))
+        client.registerRunnerPluginHandlers({
+            getInventory: () => ({ machineId: machine.id, updatedAt: 1, plugins: [], diagnostics: [] }),
+            getPlugin: () => null,
+            listLocalDirectory,
+        } as never)
+
+        try {
+            const result = await callMachineRpc(client, machine.id, RPC_METHODS.RunnerPluginsLocalDirectory, { path: '/tmp' })
+            const defaultResult = await callMachineRpc(client, machine.id, RPC_METHODS.RunnerPluginsLocalDirectory, {})
+
+            expect(result).toEqual({ success: false, path: '/tmp', error: 'Workspace browsing is not enabled for this machine' })
+            expect(defaultResult).toEqual({ success: false, path: '', error: 'Workspace browsing is not enabled for this machine' })
+            expect(listLocalDirectory).not.toHaveBeenCalled()
+        } finally {
+            client.shutdown()
+        }
+    })
+
+    it('defaults runner plugin local directory browsing to the first workspace root', async () => {
+        const machine = makeMachine('machine-plugin-dir-default')
+        const root = mkdtempSync(join(tmpdir(), 'hapi-runner-plugin-ws-'))
+        const client = new ApiMachineClient('cli-token', machine, [root])
+        const listLocalDirectory = vi.fn(async (path?: string) => ({ success: true, path: path ?? '', entries: [] }))
+        client.registerRunnerPluginHandlers({
+            getInventory: () => ({ machineId: machine.id, updatedAt: 1, plugins: [], diagnostics: [] }),
+            getPlugin: () => null,
+            listLocalDirectory,
+        } as never)
+
+        try {
+            const result = await callMachineRpc(client, machine.id, RPC_METHODS.RunnerPluginsLocalDirectory, {})
+
+            expect(result).toEqual({ success: true, path: root, entries: [] })
+            expect(listLocalDirectory).toHaveBeenCalledWith(root)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
+
+    it('forwards workspace-contained runner plugin local directory browsing', async () => {
+        const machine = makeMachine('machine-plugin-dir-contained')
+        const root = mkdtempSync(join(tmpdir(), 'hapi-runner-plugin-ws-'))
+        const client = new ApiMachineClient('cli-token', machine, [root])
+        const innerDir = join(root, 'plugins')
+        mkdirSync(innerDir)
+        const listLocalDirectory = vi.fn(async (path?: string) => ({ success: true, path: path ?? '', entries: [] }))
+        client.registerRunnerPluginHandlers({
+            getInventory: () => ({ machineId: machine.id, updatedAt: 1, plugins: [], diagnostics: [] }),
+            getPlugin: () => null,
+            listLocalDirectory,
+        } as never)
+
+        try {
+            const result = await callMachineRpc(client, machine.id, RPC_METHODS.RunnerPluginsLocalDirectory, { path: innerDir })
+
+            expect(result).toEqual({ success: true, path: innerDir, entries: [] })
+            expect(listLocalDirectory).toHaveBeenCalledWith(innerDir)
+        } finally {
+            rmSync(root, { recursive: true, force: true })
+            client.shutdown()
+        }
+    })
 })

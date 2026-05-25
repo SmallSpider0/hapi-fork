@@ -83,6 +83,7 @@ export interface RunnerPluginManagerOptions {
     env?: NodeJS.ProcessEnv
     includeBundledCore?: boolean
     includeBundledExamples?: boolean
+    activationTimeoutMs?: number
 }
 
 type ActiveRunnerPluginInstance = {
@@ -705,6 +706,7 @@ export class RunnerPluginManager {
             importQueryName: 'hapiRunnerPlugin',
             reloadMarker: 'hapi-runner-reload',
             reloadStrategy: 'entry-suffix',
+            activationTimeoutMs: this.options.activationTimeoutMs,
             env: this.options.env,
             createRegistry: () => new RunnerPluginRegistry(this.options.machineId),
             createInstance: ({ pluginId, registry, record: activatedRecord, signature: activatedSignature, loadedAt }) => ({

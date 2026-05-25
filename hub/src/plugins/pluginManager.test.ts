@@ -491,6 +491,49 @@ describe('HubPluginManager', () => {
         await manager.dispose()
     })
 
+    it('redacts declared secrets from Hub message action failures', async () => {
+        writeManifest(pluginRoot, manifest({
+            permissions: { secrets: ['PLUGIN_TOKEN'] },
+            contributions: {
+                hub: {
+                    messageActions: [{ id: 'secret-action', displayName: 'Secret action' }]
+                }
+            }
+        }))
+        writePlugin(pluginRoot, `
+            export function activate(ctx) {
+                ctx.messages.registerAction({
+                    id: 'secret-action',
+                    kind: 'chat.composer.messageAction',
+                    plan() {
+                        return { ok: false, code: 'secret-error', message: 'failed with super-secret-value' };
+                    }
+                });
+            }
+        `)
+        await writePluginState(join(hapiHome, 'plugins.json'), {
+            enabled: { 'com.example.plugin': { enabled: true } }
+        })
+        const manager = new HubPluginManager({ hapiHome, watch: false, env: { PLUGIN_TOKEN: 'super-secret-value' } })
+        await manager.start()
+
+        const result = await manager.planMessageAction({
+            pluginId: 'com.example.plugin',
+            actionId: 'secret-action',
+            namespace: 'default',
+            session: createSession(),
+            text: 'hello',
+            attachments: [],
+            payload: {}
+        })
+
+        expect(result.ok).toBe(false)
+        if (result.ok) throw new Error('expected message action failure')
+        expect(result.message).toContain('[REDACTED]')
+        expect(result.message).not.toContain('super-secret-value')
+        await manager.dispose()
+    })
+
     it('does not self-trigger bundled example watch reloads when examples are unchanged', async () => {
         const manager = new HubPluginManager({ hapiHome, watch: true, watchDebounceMs: 20, includeBundledExamples: true })
         await manager.start()

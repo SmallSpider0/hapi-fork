@@ -21,6 +21,7 @@ import { createPluginMarketplaceHostContext, type PluginMarketplaceHostContext }
 import { buildInstallTargetCandidates, createInstallPlan, executeInstallPlan } from './installPlanService'
 import { marketplaceEntriesWithInstallState, marketplaceEntryMatches } from './marketplaceViewService'
 import { errorMessage, pluginAdminErrorStatus as errorStatus } from './errors'
+import { DEFAULT_NAMESPACE } from '../../utils/accessToken'
 
 async function buildMarketplaceViewState(options: {
     manager: HubPluginManager | null
@@ -42,6 +43,13 @@ async function buildMarketplaceViewState(options: {
             ...(candidate.target.hostInfo ? { hostInfo: candidate.target.hostInfo } : {})
         })))
     }
+}
+
+function requireHubPluginAdminNamespace(namespace: string): Response | null {
+    if (namespace === DEFAULT_NAMESPACE) {
+        return null
+    }
+    return Response.json({ error: 'Hub plugin management is restricted to the default namespace.' }, { status: 403 })
 }
 
 export function registerPluginInstallPlanAndMarketplaceRoutes(
@@ -75,6 +83,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     }
 
     app.post('/plugins/install-plan', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const manager = options.getPluginManager()
         if (!manager) return c.json({ error: 'Plugin manager is not ready' }, 503)
         const json = await c.req.json().catch(() => null)
@@ -93,6 +103,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     })
 
     app.post('/plugins/install-plan/:planId/execute', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const manager = options.getPluginManager()
         if (!manager) return c.json({ error: 'Plugin manager is not ready' }, 503)
         pruneInstallPlans()
@@ -115,6 +127,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     })
 
     app.get('/plugins/marketplace', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const service = options.resolveMarketplaceService()
         if (!service) return c.json({ error: 'Plugin marketplace is not ready' }, 503)
         try {
@@ -129,6 +143,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     })
 
     app.post('/plugins/marketplace/refresh', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const service = options.resolveMarketplaceService()
         if (!service) return c.json({ error: 'Plugin marketplace is not ready' }, 503)
         try {
@@ -142,6 +158,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     })
 
     app.get('/plugins/marketplace/:id', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const service = options.resolveMarketplaceService()
         if (!service) return c.json({ error: 'Plugin marketplace is not ready' }, 503)
         try {
@@ -155,6 +173,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     })
 
     app.post('/plugins/marketplace/:id/install-plan', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const manager = options.getPluginManager()
         if (!manager) return c.json({ error: 'Plugin manager is not ready' }, 503)
         const service = options.resolveMarketplaceService()
@@ -181,6 +201,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
     })
 
     app.post('/plugins/marketplace/:id/install', async (c) => {
+        const hubAdminError = requireHubPluginAdminNamespace(c.get('namespace'))
+        if (hubAdminError) return hubAdminError
         const manager = options.getPluginManager()
         if (!manager) return c.json({ error: 'Plugin manager is not ready' }, 503)
         const service = options.resolveMarketplaceService()

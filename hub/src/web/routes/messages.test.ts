@@ -3,7 +3,7 @@
  * Public delayed-send contract is pluginAction only; legacy scheduledAt/delivery
  * request fields are intentionally rejected by the strict request schema.
  */
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it, spyOn } from 'bun:test'
 import { Hono } from 'hono'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { WebAppEnv } from '../middleware/auth'
@@ -146,6 +146,87 @@ describe('POST /api/sessions/:id/messages — pluginAction message plan', () => 
         expect(response.status).toBe(400)
         const body = await response.json() as { error: string }
         expect(body.error).toContain('localId')
+        expect(sentMessages).toHaveLength(0)
+    })
+
+    it('returns generic errors for unexpected plugin action failures', async () => {
+        const errorSpy = spyOn(console, 'error').mockImplementation(() => {})
+        const pluginManager = {
+            planMessageAction: async () => {
+                throw new Error('secret-token-value')
+            }
+        } as unknown as HubPluginManager
+        const { app, sentMessages } = createApp({ pluginManager })
+        try {
+            const response = await app.request('/api/sessions/session-1/messages', {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({ text: 'hello', localId: 'local-secret', pluginAction: createScheduleAction(Date.now() + 60_000) })
+            })
+
+            expect(response.status).toBe(500)
+            const body = await response.json() as { error: string }
+            expect(body.error).toBe('Plugin message action failed')
+            expect(body.error).not.toContain('secret-token-value')
+            expect(errorSpy).toHaveBeenCalled()
+            expect(sentMessages).toHaveLength(0)
+        } finally {
+            errorSpy.mockRestore()
+        }
+    })
+
+    it('rejects malformed Hub plugin message plans before sending', async () => {
+        const pluginManager = {
+            planMessageAction: async () => ({
+                ok: true as const,
+                plan: {
+                    type: 'messageDelivery',
+                    delivery: { notBefore: Date.now() + 60_000 },
+                    source: { pluginId: 'com.other.plugin', actionId: 'wrong-action' }
+                }
+            })
+        } as unknown as HubPluginManager
+        const { app, sentMessages } = createApp({ pluginManager })
+
+        const response = await app.request('/api/sessions/session-1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ text: 'hello', localId: 'local-5', pluginAction: createScheduleAction(Date.now() + 60_000) })
+        })
+
+        expect(response.status).toBe(502)
+        const body = await response.json() as { error: string }
+        expect(body.error).toContain('source')
+        expect(sentMessages).toHaveLength(0)
+    })
+
+    it('enforces delayed-message invariants on Hub plugin plans', async () => {
+        const pluginManager = {
+            planMessageAction: async () => ({
+                ok: true as const,
+                plan: {
+                    type: 'messageDelivery',
+                    delivery: { notBefore: Date.now() + 60_000 },
+                    source: { pluginId: 'com.hapi.schedule-send', capabilityId: 'schedule-send', actionId: 'schedule-send' }
+                }
+            })
+        } as unknown as HubPluginManager
+        const { app, sentMessages } = createApp({ pluginManager })
+
+        const response = await app.request('/api/sessions/session-1/messages', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+                text: 'hello',
+                localId: 'local-6',
+                attachments: [{ id: 'att-6', filename: 'a.txt', mimeType: 'text/plain', size: 1, path: '/tmp/a.txt' }],
+                pluginAction: createScheduleAction(Date.now() + 60_000)
+            })
+        })
+
+        expect(response.status).toBe(502)
+        const body = await response.json() as { error: string }
+        expect(body.error).toContain('attachments')
         expect(sentMessages).toHaveLength(0)
     })
 
