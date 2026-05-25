@@ -433,6 +433,13 @@ function DeveloperDetails(props: {
                     <KeyValue label={t('settings.plugins.detail.manifestLabel')} value={plugin.manifestPath} />
                 </div>
 
+                {plugin.diagnostics.length > 0 ? (
+                    <div className="space-y-2">
+                        <div className="font-medium">{t('settings.plugins.diagnostics.title')}</div>
+                        <DiagnosticsList plugin={plugin} t={t} />
+                    </div>
+                ) : null}
+
                 <div className="space-y-2">
                     <div className="font-medium">{t('settings.plugins.detail.runtime')}</div>
                     {plugin.runtimeEntryPaths.length === 0 ? <div className="text-sm text-[var(--app-hint)]">{t('settings.plugins.none')}</div> : plugin.runtimeEntryPaths.map((entry) => (
@@ -795,10 +802,6 @@ export default function PluginPage() {
                                         <Button type="button" variant="outline" disabled={!dirtyConfig} onClick={() => { setConfigText(initialConfigText); setConfigError(null) }}>{t('settings.plugins.config.reset')}</Button>
                                     </div>
                                 </div>
-                            </SectionCard> : null}
-
-                            {plugin.diagnostics.length > 0 ? <SectionCard title={t('settings.plugins.diagnostics.title')}>
-                                <DiagnosticsList plugin={plugin} t={t} />
                             </SectionCard> : null}
 
                             <DeveloperDetails
