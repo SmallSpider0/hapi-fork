@@ -20,4 +20,4 @@ Contribution path:
 
 External GitHub Release package entries remain supported by the schema for future ecosystem use, but the initial built-in marketplace is source-first.
 
-Design: `docs/development/plugin-marketplace-design.md`.
+Reference: `docs/reference/plugin-api/marketplace.md`.

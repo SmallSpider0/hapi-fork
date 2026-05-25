@@ -36,7 +36,7 @@ Rules:
 Version maintenance checklist:
 
 - Runtime behavior or descriptor change: bump `hapi.plugin.json` `version` with SemVer.
-- Public SDK / Manifest required-field / extension-point breaking change: evaluate `HAPI_PLUGIN_API_VERSION` and update `docs/development/plugin-api-versioning.md`.
+- Public SDK / manifest required-field / extension-point breaking change: evaluate `HAPI_PLUGIN_API_VERSION` and supported versions in `shared/src/plugins/manifest.ts`; keep `docs/reference/plugin-api/manifest.md` accurate.
 - Keep `pluginApiVersion` as the contract the plugin actually needs; do not bump it just because the host current API changed if the required APIs still exist.
 - Prefer `compatibility.pluginApi` ranges such as `>=0.1 <0.2`; host checks all supported API contracts, not only its current default.
 - After editing a first-party plugin, run:

@@ -2,7 +2,7 @@
 
 # Plugin admin API
 
-Authenticated HAPI Web API endpoints for plugin management. `target` accepts `hub`, `runner:<machineId>`, or `all-runners` where supported.
+Authenticated HAPI Web API endpoints for plugin management. This page is generated from `scripts/plugin-api-docs/endpointCatalog.ts`.
 
 OpenAPI JSON: [/docs/plugin-api/openapi.json](/docs/plugin-api/openapi.json)
 
@@ -33,7 +33,6 @@ OpenAPI JSON: [/docs/plugin-api/openapi.json](/docs/plugin-api/openapi.json)
 
 ## Target semantics
 
-- `hub`: operate on the Hub process and Hub-local plugin directory.
-  Hub-local plugin inventory, marketplace installed-state reads, and mutations are server-owner operations; the first PR restricts them to the default namespace token.
+- `hub`: operate on the Hub process and Hub-local plugin directory. Hub-local inventory, marketplace installed-state reads, and mutations are restricted to the default namespace token.
 - `runner:<machineId>`: operate through target-scoped Runner RPC; Hub does not read or write Runner plugin files directly.
 - `all-runners`: fan out supported operations to all Runner machines in the namespace.

@@ -25,18 +25,12 @@ export default defineConfig({
       { text: 'Cursor Agent', link: '/guide/cursor' },
       { text: 'Voice Assistant', link: '/guide/voice-assistant' },
       {
-        text: 'Plugin API',
+        text: 'Plugins',
         items: [
-          { text: 'Overview', link: '/reference/plugin-api/' },
+          { text: 'Overview', link: '/guide/plugins' },
           { text: 'Quickstart', link: '/reference/plugin-api/quickstart' },
-          { text: 'Manifest', link: '/reference/plugin-api/manifest' },
-          { text: 'Runtimes', link: '/reference/plugin-api/runtimes' },
-          { text: 'Web Descriptors', link: '/reference/plugin-api/web-descriptors' },
-          { text: 'Admin API', link: '/reference/plugin-api/admin-api' },
-          { text: 'Marketplace', link: '/reference/plugin-api/marketplace' },
-          { text: 'Schemas', link: '/reference/plugin-api/schemas' },
-          { text: 'API Versioning', link: '/development/plugin-api-versioning' },
-          { text: 'SDK Change Checklist', link: '/development/plugin-sdk-change-checklist' }
+          { text: 'API Reference', link: '/reference/plugin-api/' },
+          { text: 'Schemas & OpenAPI', link: '/reference/plugin-api/schemas' }
         ]
       },
       { text: 'Why HAPI', link: '/guide/why-hapi' },

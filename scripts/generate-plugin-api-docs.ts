@@ -3,28 +3,19 @@ import { dirname, join, relative } from 'node:path'
 import { z } from 'zod'
 import { endpointCatalog } from './plugin-api-docs/endpointCatalog'
 import {
-    extractSdkDeclarations,
     renderAdminApiPage,
-    renderIndex,
-    renderManifestPage,
-    renderMarketplacePage,
-    renderRuntimesPage,
     renderSchemasIndex,
-    renderWebDescriptorsPage,
     schemaPublicPath,
     type JsonSchema,
     type SchemaRenderInput
 } from './plugin-api-docs/renderMarkdown'
 import { renderOpenApi } from './plugin-api-docs/renderOpenApi'
 import { schemaCatalog } from './plugin-api-docs/schemaCatalog'
-import { renderQuickstartPage } from './plugin-api-docs/renderTutorials'
-import { loadTutorialFixtures } from './plugin-api-docs/tutorialCatalog'
 
 const checkMode = process.argv.includes('--check')
 const root = process.cwd()
 const referenceRoot = join(root, 'docs/reference/plugin-api')
 const publicRoot = join(root, 'docs/public/plugin-api')
-const sdkFilePath = join(root, 'shared/src/plugins/sdk.ts')
 
 const obsoleteTopLevelPages = [
     'admin-rest-api.md',
@@ -84,18 +75,9 @@ function generateFiles(): GeneratedFile[] {
             publicPath: schemaPublicPath(doc.id)
         }
     })
-    const declarations = extractSdkDeclarations(sdkFilePath)
     const openApi = renderOpenApi({ endpoints: endpointCatalog, schemaDocs: schemaCatalog, jsonSchemas })
-    const tutorials = loadTutorialFixtures(root)
-
     const markdownFiles = new Map<string, string>([
-        ['index.md', renderIndex(inputs)],
-        ['quickstart.md', renderQuickstartPage(tutorials)],
-        ['manifest.md', renderManifestPage(inputs)],
-        ['runtimes.md', renderRuntimesPage(inputs, declarations)],
-        ['web-descriptors.md', renderWebDescriptorsPage(inputs)],
         ['admin-api.md', renderAdminApiPage(endpointCatalog)],
-        ['marketplace.md', renderMarketplacePage(inputs)],
         ['schemas.md', renderSchemasIndex(inputs)]
     ])
 

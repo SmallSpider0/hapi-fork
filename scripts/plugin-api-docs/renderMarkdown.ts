@@ -1,7 +1,3 @@
-import { readFileSync } from 'node:fs'
-import ts from 'typescript'
-import { HAPI_PLUGIN_API_VERSION, HAPI_SUPPORTED_PLUGIN_API_VERSIONS } from '../../shared/src/plugins'
-import { bundledExamplePlugins } from '../../shared/src/plugins/bundledExamples'
 import type { EndpointDoc, EndpointQueryParamDoc } from './endpointCatalog'
 import type { SchemaDoc, SchemaGroup } from './schemaCatalog'
 
@@ -13,13 +9,6 @@ export type SchemaRenderInput = {
     doc: SchemaDoc
     jsonSchema: JsonSchema
     publicPath: string
-}
-
-export type SdkDeclaration = {
-    name: string
-    kind: 'type' | 'interface'
-    summary: string
-    source: string
 }
 
 const groupLabels: Record<SchemaGroup, string> = {
@@ -37,87 +26,8 @@ export function schemaPublicPath(id: string): string {
     return `/docs/plugin-api/schemas/${id}.schema.json`
 }
 
-export function markdownSchemaLink(doc: SchemaDoc): string {
+function markdownSchemaLink(doc: SchemaDoc): string {
     return `[${doc.title}](${schemaPublicPath(doc.id)})`
-}
-
-export function jsonBlock(value: unknown): string {
-    const source = typeof value === 'string' ? value.trim() : JSON.stringify(value, null, 4)
-    return `\n\`\`\`json\n${source}\n\`\`\`\n`
-}
-
-function codeBlock(language: string, source: string): string {
-    return `\n\`\`\`${language}\n${source.trim()}\n\`\`\`\n`
-}
-
-function tsBlock(source: string): string {
-    return codeBlock('ts', source)
-}
-
-function shellBlock(source: string): string {
-    return codeBlock('bash', source)
-}
-
-function recommendedPluginApiRange(version: string): string {
-    const [majorRaw, minorRaw] = version.split('.')
-    const major = Number(majorRaw)
-    const minor = Number(minorRaw)
-    if (!Number.isFinite(major) || !Number.isFinite(minor)) return `>=${version}`
-    return `>=${version} <${major}.${minor + 1}`
-}
-
-function getProperties(schema: JsonSchema): Record<string, JsonSchema> {
-    const properties = schema.properties
-    if (!properties || typeof properties !== 'object' || Array.isArray(properties)) return {}
-    return properties as Record<string, JsonSchema>
-}
-
-function getRequired(schema: JsonSchema): Set<string> {
-    const required = schema.required
-    if (!Array.isArray(required)) return new Set()
-    return new Set(required.filter((entry): entry is string => typeof entry === 'string'))
-}
-
-function describeType(schema: JsonSchema): string {
-    if (typeof schema.const === 'string' || typeof schema.const === 'number' || typeof schema.const === 'boolean') {
-        return `const \`${String(schema.const)}\``
-    }
-    if (Array.isArray(schema.enum)) {
-        return schema.enum.map((entry) => `\`${String(entry)}\``).join(' | ')
-    }
-    if (typeof schema.type === 'string') {
-        if (schema.type === 'array' && schema.items && typeof schema.items === 'object') {
-            return `array<${describeType(schema.items as JsonSchema)}>`
-        }
-        return schema.type
-    }
-    if (Array.isArray(schema.type)) {
-        return schema.type.map(String).join(' | ')
-    }
-    if (Array.isArray(schema.anyOf)) return schema.anyOf.map((entry) => describeType(entry as JsonSchema)).join(' | ')
-    if (Array.isArray(schema.oneOf)) return schema.oneOf.map((entry) => describeType(entry as JsonSchema)).join(' | ')
-    if (schema.$ref && typeof schema.$ref === 'string') return schema.$ref.split('/').at(-1) ?? 'object'
-    return 'object'
-}
-
-function renderPropertiesTable(input: SchemaRenderInput, heading = '## Top-level fields'): string {
-    const properties = getProperties(input.jsonSchema)
-    const names = Object.keys(properties)
-    if (names.length === 0) return ''
-    const required = getRequired(input.jsonSchema)
-    const rows = names.map((name) => {
-        const property = properties[name] ?? {}
-        const description = typeof property.description === 'string' ? property.description : ''
-        return `| \`${escapeTableCell(name)}\` | ${required.has(name) ? 'yes' : 'no'} | ${escapeTableCell(describeType(property))} | ${escapeTableCell(description || '—')} |`
-    })
-    return [
-        heading,
-        '',
-        '| Field | Required | Type | Notes |',
-        '|---|---|---|---|',
-        ...rows,
-        ''
-    ].join('\n')
 }
 
 function escapeTableCell(value: string): string {
@@ -126,312 +36,6 @@ function escapeTableCell(value: string): string {
         .replace(/</g, '&lt;')
         .replace(/>/g, '&gt;')
         .replace(/\n/g, '<br>')
-}
-
-function schemaLinkByTitle(inputs: SchemaRenderInput[], title: string): string {
-    return markdownSchemaLink(requireSchemaInput(inputs, title).doc)
-}
-
-export function renderSchemasIndex(inputs: SchemaRenderInput[]): string {
-    const groups = [...new Set(inputs.map((input) => input.doc.group))]
-    const sections = groups.map((group) => {
-        const rows = inputs
-            .filter((input) => input.doc.group === group)
-            .map((input) => `| ${markdownSchemaLink(input.doc)} | ${input.doc.description} |`)
-        return [
-            `## ${groupLabels[group]}`,
-            '',
-            '| JSON Schema | Description |',
-            '|---|---|',
-            ...rows,
-            ''
-        ].join('\n')
-    })
-
-    return GENERATED_HEADER + [
-        '# Plugin API schemas',
-        '',
-        'Machine-readable JSON Schemas generated from Zod schemas under `shared/src/plugins/*`.',
-        '',
-        'The large schema bodies are intentionally published as JSON files only; human-facing pages link to them instead of duplicating thousands of generated Markdown lines.',
-        '',
-        ...sections
-    ].join('\n')
-}
-
-export function renderIndex(inputs: SchemaRenderInput[]): string {
-    return GENERATED_HEADER + [
-        '# Plugin API reference',
-        '',
-        `Current plugin API version: \`${HAPI_PLUGIN_API_VERSION}\``,
-        '',
-        `Supported plugin API versions in this checkout: ${HAPI_SUPPORTED_PLUGIN_API_VERSIONS.map((version) => `\`${version}\``).join(', ')}`,
-        '',
-        'HAPI plugins are trusted local extension packages. Hub and Runner runtimes execute plugin JavaScript in-process; Web only renders validated descriptors and never loads plugin JavaScript.',
-        '',
-        '## Read path',
-        '',
-        '- [Quickstart](./quickstart.md) — minimal Hub, Runner, and descriptor-only examples.',
-        '- [Manifest](./manifest.md) — `hapi.plugin.json` contract and placement rules.',
-        '- [Runtimes](./runtimes.md) — Hub, Runner, and agent extension SDK surfaces.',
-        '- [Web descriptors](./web-descriptors.md) — built-in UI primitives and descriptor examples.',
-        '- [Admin API](./admin-api.md) — authenticated management endpoints and OpenAPI link.',
-        '- [Marketplace](./marketplace.md) — static catalog and release-package flow.',
-        '- [Schemas](./schemas.md) — generated JSON Schema links.',
-        '',
-        '## Safety model',
-        '',
-        '- Disabled or invalid runtime plugins are not imported.',
-        '- Runtime entry paths must stay under the plugin root after `realpath`.',
-        '- Secret values are read from environment variables through `ctx.secrets.get(name)` and must not be saved in `$HAPI_HOME/plugins.json`.',
-        '- Network requests should go through `ctx.network.fetch`; `permissions.network` is a basic SDK allow-list check, not a sandbox boundary.',
-        '- Hub/Runner plugin code is trusted local code, not sandboxed code.',
-        '- Plugins cannot receive raw Store, SQLite, Socket.IO, SSE, or RPC gateway objects.',
-        '',
-        '## Runtime positions',
-        '',
-        '| Position | Executes plugin JS | Typical use |',
-        '|---|---:|---|',
-        '| Web | no | descriptor-only settings panels, composer actions, New Session fields |',
-        '| Hub | yes | notification channels, chat composer message actions |',
-        '| Runner | yes | spawn defaults, environment providers, command resolvers, hooks, agent adapters/actions |',
-        '',
-        `Manifest JSON Schema: ${schemaLinkByTitle(inputs, 'PluginManifestLite')}`
-    ].join('\n')
-}
-
-export function renderManifestPage(inputs: SchemaRenderInput[]): string {
-    const manifest = requireSchemaInput(inputs, 'PluginManifestLite')
-    const example = bundledExamplePlugins[0]?.manifest
-    return GENERATED_HEADER + [
-        '# Plugin manifest',
-        '',
-        '`hapi.plugin.json` is the cold-path contract. HAPI validates it before importing any runtime entry.',
-        '',
-        `Current plugin API version: \`${HAPI_PLUGIN_API_VERSION}\`; supported versions in this checkout: ${HAPI_SUPPORTED_PLUGIN_API_VERSIONS.map((version) => `\`${version}\``).join(', ')}.`,
-        '',
-        '## Version fields',
-        '',
-        '- `version`: the plugin package version. It must be full SemVer (`major.minor.patch`, with optional prerelease/build metadata). Marketplace releases use SemVer precedence; build metadata does not make a release newer.',
-        '- `pluginApiVersion`: the plugin runtime/manifest contract version the plugin was authored against. HAPI accepts any value listed in `HAPI_SUPPORTED_PLUGIN_API_VERSIONS`, not only the current default version.',
-        '- `compatibility.pluginApi`: an additional host capability range. HAPI checks the range against every API contract version reported by the host, so a host whose current API is newer can still accept an older plugin when it still supports that contract.',
-        '',
-        'Recommended first-party pattern:',
-        jsonBlock({
-            pluginApiVersion: HAPI_PLUGIN_API_VERSION,
-            compatibility: {
-                pluginApi: recommendedPluginApiRange(HAPI_PLUGIN_API_VERSION)
-            }
-        }),
-        '## Compatibility and cross-runtime rules',
-        '',
-        '- Use `compatibility.hapi`, `os`, and `arch` for host/runtime constraints.',
-        '- Use runtime-specific `compatibility.hub` / `compatibility.runner` when only one runtime needs an extension point or version range.',
-        '- Use `compatibility.crossRuntime.samePluginVersionAcrossTargets` or `allowVersionSkew` to make install plans warn/block when Hub and Runner targets would run unintended plugin version skew.',
-        '- `install.runnerPlacement`, `offlineRunnerPolicy`, and `minReadyRunnerCount` guide target selection but do not bypass compatibility checks.',
-        '',
-        'Compatibility example:',
-        jsonBlock({
-            compatibility: {
-                pluginApi: recommendedPluginApiRange(HAPI_PLUGIN_API_VERSION),
-                hub: { extensionPoints: ['hub.messageAction', 'web.composerAction'] },
-                runner: { extensionPoints: ['runner.spawnHook'] },
-                crossRuntime: {
-                    samePluginVersionAcrossTargets: true,
-                    allowVersionSkew: 'none'
-                }
-            },
-            install: {
-                runnerPlacement: 'compatible-runners',
-                offlineRunnerPolicy: 'skip',
-                minReadyRunnerCount: 1
-            }
-        }),
-        '',
-        '## Placement rules',
-        '',
-        '- `contributions.web` or capability `parts.web`: installed on Hub, rendered by Web as descriptors.',
-        '- `runtimes.hub`, `contributions.hub`, or capability `parts.hub`: requires Hub runtime placement.',
-        '- `runtimes.runner`, `contributions.runner`, `contributions.agent`, or capability `parts.runner`: requires Runner placement.',
-        '- A package may combine Web, Hub, and Runner parts; install-plan chooses compatible targets from the manifest.',
-        '',
-        renderPropertiesTable(manifest),
-        '## Permissions',
-        '',
-        '- `permissions.network`: HTTP(S) origins or URL prefixes allowed for `ctx.network.fetch`. Examples: `https://api.example.com`, `https://*.example.com/api/*`.',
-        '- `permissions.secrets`: environment variable names readable through `ctx.secrets.get(name)`.',
-        '- Permissions are install-time declarations plus SDK checks; Hub/Runner runtime JavaScript remains trusted local code, not sandboxed code.',
-        '',
-        '## Minimal example',
-        example ? jsonBlock(example) : '',
-        '## Schema',
-        '',
-        `Download: ${markdownSchemaLink(manifest.doc)}`
-    ].filter(Boolean).join('\n')
-}
-
-export function extractSdkDeclarations(sdkFilePath: string): SdkDeclaration[] {
-    const source = readFileSync(sdkFilePath, 'utf8')
-    const sourceFile = ts.createSourceFile(sdkFilePath, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
-    const declarations: SdkDeclaration[] = []
-
-    for (const statement of sourceFile.statements) {
-        if (!isExported(statement)) continue
-        if (!ts.isTypeAliasDeclaration(statement) && !ts.isInterfaceDeclaration(statement)) continue
-        const name = statement.name.text
-        const kind = ts.isInterfaceDeclaration(statement) ? 'interface' : 'type'
-        const summary = getJsDocSummary(source, statement) || 'Public plugin SDK type.'
-        declarations.push({
-            name,
-            kind,
-            summary,
-            source: source.slice(statement.getStart(sourceFile), statement.end)
-        })
-    }
-
-    return declarations
-}
-
-function isExported(node: ts.Node): boolean {
-    return Boolean(ts.getCombinedModifierFlags(node as ts.Declaration) & ts.ModifierFlags.Export)
-}
-
-function getJsDocSummary(source: string, node: ts.Node): string {
-    const ranges = ts.getLeadingCommentRanges(source, node.pos) ?? []
-    const jsDoc = ranges
-        .map((range) => source.slice(range.pos, range.end))
-        .find((comment) => comment.startsWith('/**'))
-    if (!jsDoc) return ''
-    return jsDoc
-        .replace(/^\/\*\*/, '')
-        .replace(/\*\/$/, '')
-        .split('\n')
-        .map((line) => line.replace(/^\s*\* ?/, '').trim())
-        .filter(Boolean)
-        .join(' ')
-}
-
-function renderDeclarationList(declarations: SdkDeclaration[], names: string[]): string {
-    return names.map((name) => {
-        const declaration = declarations.find((entry) => entry.name === name)
-        if (!declaration) return `### ${name}\n\n_Missing from generated SDK declarations._\n`
-        return [`### ${declaration.name}`, '', declaration.summary, tsBlock(declaration.source)].join('\n')
-    }).join('\n')
-}
-
-function renderSchemaBrief(input: SchemaRenderInput): string {
-    return [
-        `### ${input.doc.title}`,
-        '',
-        input.doc.description,
-        '',
-        `JSON Schema: ${markdownSchemaLink(input.doc)}`,
-        '',
-        renderPropertiesTable(input, '#### Top-level fields')
-    ].join('\n')
-}
-
-export function renderRuntimesPage(inputs: SchemaRenderInput[], declarations: SdkDeclaration[]): string {
-    const schemaNames = [
-        'PluginNotificationEvent',
-        'RunnerSpawnOptionsContext',
-        'RunnerSpawnOptionsProviderProposal',
-        'RunnerResolvedSpawnOptions',
-        'RunnerSpawnContext',
-        'RunnerEnvironmentProposal',
-        'RunnerCommandResolverProposal',
-        'RunnerSpawnHookProposal',
-        'RunnerResolvedSpawnPlan',
-        'AgentDescriptor',
-        'AgentCapabilityProviderResult',
-        'AgentCapabilityProviderSnapshot',
-        'AgentHistoryImportResult'
-    ]
-    return GENERATED_HEADER + [
-        '# Plugin runtimes',
-        '',
-        'Runtime plugins run as trusted local in-process JavaScript. Hub and Runner expose narrow registration APIs; core keeps auth, namespace, persistence, transport, and final session lifecycle control.',
-        tsBlock("import type { HubPluginContext, RunnerPluginContext } from '@hapi/protocol/plugins'"),
-        '## Common primitives',
-        renderDeclarationList(declarations, [
-            'MaybePromise',
-            'Disposable',
-            'PluginLogger',
-            'PluginConfigReader',
-            'PluginSecretReader',
-            'PluginNetwork'
-        ]),
-        '## Hub runtime',
-        '',
-        'Hub plugins can register notification channels and chat composer message-action planners. They do not receive raw Hub internals.',
-        renderDeclarationList(declarations, [
-            'HubPluginContext',
-            'PluginNotificationChannel',
-            'HubMessageActionContribution',
-            'HubMessageActionInput',
-            'HubMessageActionResult',
-            'MessageSendPlan',
-            'HubPluginModule'
-        ]),
-        '## Runner runtime',
-        '',
-        'Runner plugins can propose spawn defaults, environment patches, command args, spawn hooks, agent adapters, capability providers, and generic runner actions. Proposals are schema-validated and audited before core applies them.',
-        renderDeclarationList(declarations, [
-            'RunnerPluginContext',
-            'RunnerSpawnOptionsProviderContribution',
-            'RunnerEnvironmentProviderContribution',
-            'RunnerCommandResolverContribution',
-            'RunnerSpawnHookContribution',
-            'RunnerPluginActionContribution',
-            'RunnerPluginActionInput',
-            'RunnerPluginActionResult'
-        ]),
-        '## Agent extensions',
-        '',
-        'Agent adapters and capability providers execute in the Runner runtime. Hub and Web consume validated descriptors and snapshots.',
-        renderDeclarationList(declarations, [
-            'RunnerAgentAdapterContribution',
-            'RunnerAgentCapabilityProviderContribution',
-            'AgentBackend',
-            'AgentBackendFactory',
-            'AgentMessage',
-            'PermissionRequest',
-            'PermissionResponse'
-        ]),
-        '## Runtime DTO schemas',
-        '',
-        ...schemaNames.map((name) => renderSchemaBrief(requireSchemaInput(inputs, name)))
-    ].join('\n')
-}
-
-export function renderWebDescriptorsPage(inputs: SchemaRenderInput[]): string {
-    const web = requireSchemaInput(inputs, 'PluginWebContributions')
-    const example = bundledExamplePlugins.find((plugin) => plugin.manifest.contributions?.web)?.manifest.contributions?.web
-    return GENERATED_HEADER + [
-        '# Web descriptors',
-        '',
-        'Web contributions are declarative JSON descriptors. The Web app renders built-in components only and never executes plugin JavaScript.',
-        '',
-        `JSON Schema: ${markdownSchemaLink(web.doc)}`,
-        '',
-        '## Contribution groups',
-        '',
-        '| Group | Rendered surface | Notes |',
-        '|---|---|---|',
-        '| `settingsPanels` | Settings → Plugins detail | Components: text, badge, table, actionButton, schemaForm, runnerSpawnDefaultsEditor |',
-        '| `newSessionFields` | New Session form | text, number, boolean, select |',
-        '| `actions` / `badges` | Plugin detail metadata | Core plugin-management actions only |',
-        '| `composerActions` | Chat composer | `pluginMessageAction` routed to Hub or Runner action handlers |',
-        '',
-        '## Form fields',
-        '',
-        '- `schemaForm` fields support `text`, `number`, `boolean`, `select`, and `multiSelect`.',
-        '- `select` / `multiSelect` may use static `options` or an `optionsSource` such as `notification.agents` or `runner.models`.',
-        '- `secret: true` fields are redacted; secret values must still come from runtime environment variables.',
-        '',
-        '## Example',
-        example ? jsonBlock(example) : ''
-    ].filter(Boolean).join('\n')
 }
 
 function queryParams(endpoint: EndpointDoc): EndpointQueryParamDoc[] {
@@ -454,7 +58,7 @@ export function renderAdminApiPage(endpoints: EndpointDoc[]): string {
     return GENERATED_HEADER + [
         '# Plugin admin API',
         '',
-        'Authenticated HAPI Web API endpoints for plugin management. `target` accepts `hub`, `runner:<machineId>`, or `all-runners` where supported.',
+        'Authenticated HAPI Web API endpoints for plugin management. This page is generated from `scripts/plugin-api-docs/endpointCatalog.ts`.',
         '',
         'OpenAPI JSON: [/docs/plugin-api/openapi.json](/docs/plugin-api/openapi.json)',
         '',
@@ -464,59 +68,36 @@ export function renderAdminApiPage(endpoints: EndpointDoc[]): string {
         '',
         '## Target semantics',
         '',
-        '- `hub`: operate on the Hub process and Hub-local plugin directory.',
-        '  Hub-local plugin inventory, marketplace installed-state reads, and mutations are server-owner operations; the first PR restricts them to the default namespace token.',
+        '- `hub`: operate on the Hub process and Hub-local plugin directory. Hub-local inventory, marketplace installed-state reads, and mutations are restricted to the default namespace token.',
         '- `runner:<machineId>`: operate through target-scoped Runner RPC; Hub does not read or write Runner plugin files directly.',
         '- `all-runners`: fan out supported operations to all Runner machines in the namespace.'
     ].join('\n')
 }
 
-export function renderMarketplacePage(inputs: SchemaRenderInput[]): string {
+export function renderSchemasIndex(inputs: SchemaRenderInput[]): string {
+    const groups = [...new Set(inputs.map((input) => input.doc.group))]
+    const sections = groups.map((group) => {
+        const rows = inputs
+            .filter((input) => input.doc.group === group)
+            .map((input) => `| ${markdownSchemaLink(input.doc)} | ${escapeTableCell(input.doc.description)} |`)
+
+        return [
+            `## ${groupLabels[group]}`,
+            '',
+            '| Schema | Description |',
+            '|---|---|',
+            ...rows,
+            ''
+        ].join('\n')
+    })
+
     return GENERATED_HEADER + [
-        '# Plugin marketplace',
+        '# Plugin API schemas',
         '',
-        'The marketplace MVP is a static, source-first catalog. First-party plugins are embedded from `plugins/<id>` source directories, packaged on demand, and installed only after HAPI validates catalog metadata, source checksums, package checksums, and target compatibility.',
+        'Machine-readable JSON Schemas generated from Zod schemas under `shared/src/plugins/*`.',
         '',
-        '## User flow',
+        'These schemas are the public contract. Human-oriented tutorials are intentionally hand-written and short.',
         '',
-        '1. Browse entries through Web Settings or `hapi plugins marketplace list` with the default namespace admin token.',
-        '2. Create an install plan for a release.',
-        '3. Review Hub/Runner target compatibility, conflicts, and offline skips.',
-        '4. Execute the plan. Hub installs Hub/Web parts and distributes Runner parts via Runner RPC.',
-        '',
-        '## Developer flow',
-        '',
-        shellBlock(`bun run marketplace:validate
-bun run marketplace:check`),
-        '',
-        'Source-first rules:',
-        '',
-        '- Keep installable first-party plugin source under `plugins/<plugin-id>`.',
-        '- Commit `hapi.plugin.json`, runtime entry files, and `hapi.marketplace.json` with the plugin source.',
-        '- Run `bun run marketplace:generate` after source or metadata changes; it updates `marketplace/catalog.v1.json` and embedded source metadata.',
-        '- Bump `hapi.plugin.json` version when source content changes for an existing marketplace release.',
-        '- Do not commit installable plugin archives under `marketplace/`.',
-        '',
-        'Remote package catalogs are a future/trusted-distribution path. The first PR should document and validate the embedded source catalog as the supported default.',
-        '',
-        '## Schemas',
-        '',
-        `- Catalog: ${schemaLinkByTitle(inputs, 'PluginMarketplaceCatalog')}`,
-        `- List response: ${schemaLinkByTitle(inputs, 'PluginMarketplaceListResponse')}`,
-        `- Detail response: ${schemaLinkByTitle(inputs, 'PluginMarketplaceDetailResponse')}`,
-        `- Install request: ${schemaLinkByTitle(inputs, 'PluginMarketplaceInstallRequest')}`,
-        `- Install-plan response: ${schemaLinkByTitle(inputs, 'PluginMarketplaceInstallPlanResponse')}`
+        ...sections
     ].join('\n')
-}
-
-function requireSchemaInput(inputs: SchemaRenderInput[], title: string): SchemaRenderInput {
-    const match = inputs.find((input) => input.doc.title === title)
-    if (!match) {
-        throw new Error(`Missing schema render input: ${title}`)
-    }
-    return match
-}
-
-export function schemaGroupLabel(group: SchemaGroup): string {
-    return groupLabels[group]
 }

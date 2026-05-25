@@ -4,23 +4,23 @@
 
 Machine-readable JSON Schemas generated from Zod schemas under `shared/src/plugins/*`.
 
-The large schema bodies are intentionally published as JSON files only; human-facing pages link to them instead of duplicating thousands of generated Markdown lines.
+These schemas are the public contract. Human-oriented tutorials are intentionally hand-written and short.
 
 ## Manifest
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [PluginManifestLite](/docs/plugin-api/schemas/plugin-manifest.schema.json) | Cold-path hapi.plugin.json contract. Read before plugin code is imported. |
 
 ## State files
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [PluginStateFile](/docs/plugin-api/schemas/plugin-state-file.schema.json) | $HAPI_HOME/plugins.json enable/config state. Secret values must not be stored here. |
 
 ## Admin API
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [PluginTargetScope](/docs/plugin-api/schemas/plugin-target-scope.schema.json) | Target selector for Hub, one Runner, or all Runners. |
 | [PluginConfigScope](/docs/plugin-api/schemas/plugin-config-scope.schema.json) | Runtime/machine/agent-scoped config key. |
@@ -47,13 +47,13 @@ The large schema bodies are intentionally published as JSON files only; human-fa
 
 ## Hub runtime
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [PluginNotificationEvent](/docs/plugin-api/schemas/plugin-notification-event.schema.json) | Narrow event DTO sent to Hub notification channels. |
 
 ## Runner runtime
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [RunnerSpawnContext](/docs/plugin-api/schemas/runner-spawn-context.schema.json) | Runner spawn context visible to environment providers, command resolvers, and spawn hooks. |
 | [RunnerSpawnOptionsContext](/docs/plugin-api/schemas/runner-spawn-options-context.schema.json) | Runner spawn-options context visible to spawn options providers before command construction. |
@@ -66,7 +66,7 @@ The large schema bodies are intentionally published as JSON files only; human-fa
 
 ## Agent extensions
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [AgentDescriptor](/docs/plugin-api/schemas/agent-descriptor.schema.json) | Static agent descriptor used by plugin-backed agent adapters and Web selectors. |
 | [AgentCapabilityProviderResult](/docs/plugin-api/schemas/agent-capability-provider-result.schema.json) | Dynamic agent capability provider output. |
@@ -75,14 +75,14 @@ The large schema bodies are intentionally published as JSON files only; human-fa
 
 ## Web descriptors
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [PluginWebContributions](/docs/plugin-api/schemas/plugin-web-contributions.schema.json) | Declarative Web descriptor contributions. Web never executes plugin JavaScript. |
 | [PluginWebContributionView](/docs/plugin-api/schemas/plugin-web-contribution-view.schema.json) | Plugin Web contributions with plugin and target metadata. |
 
 ## Marketplace
 
-| JSON Schema | Description |
+| Schema | Description |
 |---|---|
 | [PluginMarketplaceCatalog](/docs/plugin-api/schemas/plugin-marketplace-catalog.schema.json) | Static marketplace catalog metadata. |
 | [PluginMarketplaceListResponse](/docs/plugin-api/schemas/plugin-marketplace-list-response.schema.json) | Marketplace catalog list response with installed state. |
