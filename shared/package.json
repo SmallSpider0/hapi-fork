@@ -22,6 +22,7 @@
         "./plugins/foundation": "./src/plugins/foundation.ts",
         "./plugins/admin": "./src/plugins/admin.ts",
         "./plugins/marketplace": "./src/plugins/marketplace.ts",
+        "./plugins/marketplaceSources.generated": "./src/plugins/marketplaceSources.generated.ts",
         "./plugins/extensionPoints": "./src/plugins/extensionPoints.ts",
         "./plugins/runtime/activation": "./src/plugins/runtime/activation.ts",
         "./plugins/runtime/capabilityView": "./src/plugins/runtime/capabilityView.ts",

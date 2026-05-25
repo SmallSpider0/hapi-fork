@@ -13,7 +13,9 @@ export const PluginInstallMetadataSchema = z.object({
         pluginId: z.string().min(1),
         repo: z.string().min(1),
         version: z.string().min(1),
-        assetUrl: z.string().min(1),
+        distribution: z.enum(['package', 'hapi-source']).optional(),
+        assetUrl: z.string().min(1).optional(),
+        sourcePath: z.string().min(1).optional(),
         checksum: z.string().min(1)
     }).strict().optional()
 }).strict()

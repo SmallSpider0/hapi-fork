@@ -32,19 +32,34 @@ function validateCatalogPolicy(catalog: PluginMarketplaceCatalog): string[] {
             }
             versions.add(release.version)
 
-            if (!isGitHubReleaseAsset(release.package.url, plugin.repo)) {
-                problems.push(issue(`${prefix}.package.url`, `must be a GitHub Release asset under https://github.com/${plugin.repo}/releases/download/...`))
+            if (release.package) {
+                if (!isGitHubReleaseAsset(release.package.url, plugin.repo)) {
+                    problems.push(issue(`${prefix}.package.url`, `must be a GitHub Release asset under https://github.com/${plugin.repo}/releases/download/...`))
+                }
+
+                const filename = basename(release.package.filename)
+                if (filename !== release.package.filename) {
+                    problems.push(issue(`${prefix}.package.filename`, 'must be a basename, not a path'))
+                }
+                if (release.package.format === 'zip' && !filename.toLowerCase().endsWith('.zip')) {
+                    problems.push(issue(`${prefix}.package.filename`, 'zip packages must end in .zip'))
+                }
+                if (release.package.format === 'tgz' && !/\.(?:tgz|tar\.gz)$/i.test(filename)) {
+                    problems.push(issue(`${prefix}.package.filename`, 'tgz packages must end in .tgz or .tar.gz'))
+                }
             }
 
-            const filename = basename(release.package.filename)
-            if (filename !== release.package.filename) {
-                problems.push(issue(`${prefix}.package.filename`, 'must be a basename, not a path'))
-            }
-            if (release.package.format === 'zip' && !filename.toLowerCase().endsWith('.zip')) {
-                problems.push(issue(`${prefix}.package.filename`, 'zip packages must end in .zip'))
-            }
-            if (release.package.format === 'tgz' && !/\.(?:tgz|tar\.gz)$/i.test(filename)) {
-                problems.push(issue(`${prefix}.package.filename`, 'tgz packages must end in .tgz or .tar.gz'))
+            if (release.source) {
+                const normalizedPath = release.source.path.replace(/\\/g, '/')
+                if (!normalizedPath.startsWith('plugins/')) {
+                    problems.push(issue(`${prefix}.source.path`, 'HAPI source plugins must live under plugins/'))
+                }
+                if (normalizedPath.startsWith('/') || normalizedPath.split('/').some((part) => part === '..')) {
+                    problems.push(issue(`${prefix}.source.path`, 'must be a relative path without traversal segments'))
+                }
+                if (!release.source.treeChecksum) {
+                    problems.push(issue(`${prefix}.source.treeChecksum`, 'is required for HAPI source plugins'))
+                }
             }
         }
     }

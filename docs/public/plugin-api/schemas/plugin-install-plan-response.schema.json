@@ -106,7 +106,11 @@
             "properties": {
                 "type": {
                     "type": "string",
-                    "const": "uploaded-package"
+                    "enum": [
+                        "uploaded-package",
+                        "marketplace-package",
+                        "marketplace-source"
+                    ]
                 },
                 "filename": {
                     "type": "string",
@@ -122,6 +126,14 @@
                         "tgz",
                         "zip"
                     ]
+                },
+                "assetUrl": {
+                    "type": "string",
+                    "minLength": 1
+                },
+                "sourcePath": {
+                    "type": "string",
+                    "minLength": 1
                 }
             },
             "required": [

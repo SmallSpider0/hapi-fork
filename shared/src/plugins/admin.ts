@@ -439,7 +439,9 @@ export const PluginInstallPackageRequestSchema = z.object({
         pluginId: z.string().min(1),
         repo: z.string().min(1),
         version: z.string().min(1),
-        assetUrl: z.string().min(1)
+        distribution: z.enum(['package', 'hapi-source']).optional(),
+        assetUrl: z.string().min(1).optional(),
+        sourcePath: z.string().min(1).optional()
     }).strict().optional(),
     enable: z.boolean().optional(),
     reload: z.boolean().optional(),
@@ -492,10 +494,12 @@ export const PluginInstallPlanResponseSchema = z.object({
         display: PluginDisplayMetadataSchema.optional()
     }).strict(),
     source: z.object({
-        type: z.literal('uploaded-package'),
+        type: z.enum(['uploaded-package', 'marketplace-package', 'marketplace-source']),
         filename: z.string().min(1),
         checksum: z.string().min(1),
-        format: PluginPackageFormatSchema.optional()
+        format: PluginPackageFormatSchema.optional(),
+        assetUrl: z.string().min(1).optional(),
+        sourcePath: z.string().min(1).optional()
     }).strict(),
     positions: z.array(PluginInstallPositionSchema).min(1),
     targets: z.array(PluginInstallPlanTargetSchema),

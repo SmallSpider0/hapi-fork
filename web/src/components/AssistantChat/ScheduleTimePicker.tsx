@@ -299,7 +299,7 @@ export function ScheduleTimePicker({
         <div
             ref={panelRef}
             role="dialog"
-            aria-label={t('composer.scheduleSend')}
+            aria-label={t('composer.delaySend')}
             style={
                 isMobilePanel
                     ? { position: 'fixed' }
@@ -317,7 +317,7 @@ export function ScheduleTimePicker({
             {/* Header */}
             <div className="px-3 pt-3 pb-2">
                 <p className="text-xs font-semibold text-[var(--app-hint)]">
-                    {title ?? t('composer.scheduleSend')}
+                    {title ?? t('composer.delaySend')}
                 </p>
             </div>
 
@@ -393,7 +393,7 @@ export function ScheduleTimePicker({
                             onClick={handleSpecificSubmit}
                             className="w-full rounded-lg bg-blue-500 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-blue-600 disabled:cursor-not-allowed disabled:opacity-40"
                         >
-                            {t('composer.scheduleSend')}
+                            {t('composer.delaySend')}
                         </button>
                     </div>
                 )}

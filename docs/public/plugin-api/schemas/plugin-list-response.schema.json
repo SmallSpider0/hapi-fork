@@ -491,7 +491,18 @@
                                         "type": "string",
                                         "minLength": 1
                                     },
+                                    "distribution": {
+                                        "type": "string",
+                                        "enum": [
+                                            "package",
+                                            "hapi-source"
+                                        ]
+                                    },
                                     "assetUrl": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    },
+                                    "sourcePath": {
                                         "type": "string",
                                         "minLength": 1
                                     },
@@ -505,7 +516,6 @@
                                     "pluginId",
                                     "repo",
                                     "version",
-                                    "assetUrl",
                                     "checksum"
                                 ],
                                 "additionalProperties": false
@@ -1125,7 +1135,18 @@
                                                     "type": "string",
                                                     "minLength": 1
                                                 },
+                                                "distribution": {
+                                                    "type": "string",
+                                                    "enum": [
+                                                        "package",
+                                                        "hapi-source"
+                                                    ]
+                                                },
                                                 "assetUrl": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                },
+                                                "sourcePath": {
                                                     "type": "string",
                                                     "minLength": 1
                                                 },
@@ -1139,7 +1160,6 @@
                                                 "pluginId",
                                                 "repo",
                                                 "version",
-                                                "assetUrl",
                                                 "checksum"
                                             ],
                                             "additionalProperties": false

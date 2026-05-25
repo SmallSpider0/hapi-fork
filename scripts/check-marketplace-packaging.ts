@@ -4,6 +4,7 @@ import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 
 const repoRoot = join(import.meta.dir, '..')
 const marketplaceRoot = join(repoRoot, 'marketplace')
+const pluginsRoot = join(repoRoot, 'plugins')
 const sourceRoots = ['cli/src', 'hub/src', 'shared/src', 'web/src'].map((entry) => join(repoRoot, entry))
 
 function toPosix(path: string): string {
@@ -54,6 +55,20 @@ function marketplaceFileProblems(): string[] {
     })
 }
 
+function pluginSourceProblems(): string[] {
+    return walkFiles(pluginsRoot).flatMap((filePath) => {
+        const rel = toPosix(relative(repoRoot, filePath))
+        const problems: string[] = []
+        if (/\.(?:zip|tgz|tar\.gz)$/i.test(rel)) {
+            problems.push(`${rel}: source plugins must not commit package archives.`)
+        }
+        if (/(^|\/)(node_modules|\.git|dist)(\/|$)/i.test(rel)) {
+            problems.push(`${rel}: source plugins must not commit dependencies, VCS internals, or built dist output.`)
+        }
+        return problems
+    })
+}
+
 function staticImportProblems(): string[] {
     const importPattern = /\bimport\s+(?:[^'"]+\s+from\s+)?['"]([^'"]+)['"]|\bimport\(\s*['"]([^'"]+)['"]/g
     const problems: string[] = []
@@ -84,6 +99,7 @@ function staticImportProblems(): string[] {
 
 const problems = [
     ...marketplaceFileProblems(),
+    ...pluginSourceProblems(),
     ...staticImportProblems()
 ]
 
@@ -95,4 +111,4 @@ if (problems.length > 0) {
     process.exit(1)
 }
 
-console.log('[marketplace:check-packaging] OK: marketplace contains metadata only and is not statically bundled.')
+console.log('[marketplace:check-packaging] OK: marketplace metadata is clean and source plugins contain no packaged artifacts.')

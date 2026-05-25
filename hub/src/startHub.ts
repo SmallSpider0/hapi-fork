@@ -149,15 +149,6 @@ export async function startHub(options: StartHubOptions = {}): Promise<HubInstan
         const notificationSource = formatSource(config.sources.telegramNotification)
         console.log(`[Hub] Telegram notifications: ${config.telegramNotification ? 'enabled' : 'disabled'} (${notificationSource})`)
     }
-    if (config.serverChanSendKey) {
-        const source = formatSource(config.sources.serverChanSendKey)
-        console.log(`[Hub] ServerChan secret: available for plugins (${source})`)
-        if (config.serverChanNotification) {
-            console.log('[Hub] SERVERCHAN_NOTIFICATION is legacy and no longer registers a core notification channel; enable the ServerChan Notifier plugin instead.')
-        }
-    } else {
-        console.log('[Hub] ServerChan secret: unavailable (no SERVERCHAN_SENDKEY)')
-    }
 
     // Display tunnel status
     if (relayFlag.enabled) {

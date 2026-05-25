@@ -478,8 +478,8 @@ export function ComposerButtons(props: {
                         <button
                             ref={scheduleButtonRef}
                             type="button"
-                            aria-label={typeof scheduleAction.label === 'string' ? scheduleAction.label : t('composer.scheduleSend')}
-                            title={typeof scheduleAction.label === 'string' ? scheduleAction.label : t('composer.scheduleSend')}
+                            aria-label={typeof scheduleAction.label === 'string' ? scheduleAction.label : t('composer.delaySend')}
+                            title={typeof scheduleAction.label === 'string' ? scheduleAction.label : t('composer.delaySend')}
                             disabled={props.controlsDisabled || hasAttachments}
                             onClick={() => {
                                 if (hasSchedule && props.onClearSchedule) {
@@ -507,7 +507,7 @@ export function ComposerButtons(props: {
                                 pendingSchedule={props.pendingSchedule}
                                 presets={delayPickerUi.presets.map((preset) => ({
                                     id: preset.id,
-                                    label: typeof preset.label === 'string' ? preset.label : t('composer.scheduleSend'),
+                                    label: typeof preset.label === 'string' ? preset.label : t('composer.delaySend'),
                                     delayMs: preset.delayMs,
                                 }))}
                                 maxDelayMs={delayPickerUi.maxDelayMs}

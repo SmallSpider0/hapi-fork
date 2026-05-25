@@ -3,6 +3,205 @@
     "updatedAt": "2026-05-24T07:28:18.035Z",
     "plugins": [
         {
+            "id": "com.hapi.runner-launch-presets",
+            "name": "Runner Launch Presets",
+            "display": {
+                "name": {
+                    "en": "Runner Launch Presets",
+                    "zh-CN": "Runner 启动预设"
+                },
+                "description": {
+                    "en": "Applies default model, reasoning, and permission settings for Runner launches by agent and workspace.",
+                    "zh-CN": "按 Agent 和工作区为 Runner 启动自动应用默认模型、思考强度和权限设置。"
+                },
+                "featureIntro": {
+                    "en": "- Applies launch defaults before agent command args are built.\n- Matches all agents/workspaces or selected agents and workspace prefixes.\n- Supports model, Claude effort, Codex reasoning effort, and permission/yolo defaults.\n- User-selected fields in the New Session UI override presets.",
+                    "zh-CN": "- 在构建 agent 启动参数前应用默认值。\n- 可匹配全部或指定 Agent、指定工作区前缀。\n- 支持模型、Claude effort、Codex reasoning effort、权限/yolo 默认值。\n- 新建会话 UI 中用户手动选择的字段优先。"
+                }
+            },
+            "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
+            "repo": "tiann/hapi",
+            "homepage": "https://github.com/tiann/hapi",
+            "author": {
+                "name": "HAPI",
+                "url": "https://github.com/tiann/hapi"
+            },
+            "license": "AGPL-3.0-only",
+            "categories": [
+                "runner",
+                "utility"
+            ],
+            "keywords": [
+                "runner",
+                "launch",
+                "presets",
+                "defaults",
+                "model",
+                "permissions"
+            ],
+            "runtimes": [
+                "runner"
+            ],
+            "capabilities": [
+                {
+                    "kind": "runner.spawnExtension",
+                    "label": "Runner Launch Presets"
+                }
+            ],
+            "releases": [
+                {
+                    "version": "0.1.1",
+                    "tag": "hapi-source-0.1.1",
+                    "releasedAt": "2026-05-24T07:28:18.035Z",
+                    "manifest": {
+                        "id": "com.hapi.runner-launch-presets",
+                        "name": "Runner Launch Presets",
+                        "version": "0.1.1",
+                        "pluginApiVersion": "0.1",
+                        "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
+                        "display": {
+                            "name": {
+                                "en": "Runner Launch Presets",
+                                "zh-CN": "Runner 启动预设"
+                            },
+                            "description": {
+                                "en": "Applies default model, reasoning, and permission settings for Runner launches by agent and workspace.",
+                                "zh-CN": "按 Agent 和工作区为 Runner 启动自动应用默认模型、思考强度和权限设置。"
+                            },
+                            "featureIntro": {
+                                "en": "- Applies launch defaults before agent command args are built.\n- Matches all agents/workspaces or selected agents and workspace prefixes.\n- Supports model, Claude effort, Codex reasoning effort, and permission/yolo defaults.\n- User-selected fields in the New Session UI override presets.",
+                                "zh-CN": "- 在构建 agent 启动参数前应用默认值。\n- 可匹配全部或指定 Agent、指定工作区前缀。\n- 支持模型、Claude effort、Codex reasoning effort、权限/yolo 默认值。\n- 新建会话 UI 中用户手动选择的字段优先。"
+                            }
+                        },
+                        "capabilities": [
+                            {
+                                "id": "runner-launch-presets",
+                                "kind": "runner.spawnExtension",
+                                "displayName": "Runner Launch Presets",
+                                "description": "Applies configured launch defaults before an agent process starts.",
+                                "display": {
+                                    "name": {
+                                        "en": "Runner Launch Presets",
+                                        "zh-CN": "Runner 启动预设"
+                                    },
+                                    "description": {
+                                        "en": "Applies configured launch defaults before an agent process starts.",
+                                        "zh-CN": "在 agent 进程启动前应用启动默认值。"
+                                    }
+                                },
+                                "parts": {
+                                    "web": {
+                                        "required": true,
+                                        "contributions": [
+                                            {
+                                                "type": "settingsPanel",
+                                                "id": "runner-launch-presets"
+                                            }
+                                        ]
+                                    },
+                                    "runner": {
+                                        "required": true,
+                                        "target": "selected-runner",
+                                        "contributions": [
+                                            {
+                                                "type": "spawnOptionsProvider",
+                                                "id": "runner-launch-presets"
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        ],
+                        "runtimes": {
+                            "runner": {
+                                "entry": "src/runner.js"
+                            }
+                        },
+                        "contributions": {
+                            "runner": {
+                                "spawnOptionsProviders": [
+                                    {
+                                        "id": "runner-launch-presets",
+                                        "displayName": "Runner Launch Presets",
+                                        "description": "Applies default launch options before command args are built.",
+                                        "display": {
+                                            "name": {
+                                                "en": "Runner Launch Presets",
+                                                "zh-CN": "Runner 启动预设"
+                                            },
+                                            "description": {
+                                                "en": "Applies default launch options before command args are built.",
+                                                "zh-CN": "在构建命令参数前应用启动默认值。"
+                                            }
+                                        }
+                                    }
+                                ]
+                            },
+                            "web": {
+                                "settingsPanels": [
+                                    {
+                                        "id": "runner-launch-presets",
+                                        "title": {
+                                            "en": "Runner Launch Presets",
+                                            "zh-CN": "Runner 启动预设"
+                                        },
+                                        "description": {
+                                            "en": "Set default launch options by agent and workspace. User choices in New Session override these defaults.",
+                                            "zh-CN": "按 Agent 和工作区设置默认启动参数。新建会话中用户手动选择的值会覆盖预设。"
+                                        },
+                                        "components": [
+                                            {
+                                                "id": "runner-launch-presets-editor",
+                                                "kind": "runnerSpawnDefaultsEditor",
+                                                "configKey": "rulesJson"
+                                            }
+                                        ]
+                                    }
+                                ]
+                            }
+                        },
+                        "compatibility": {
+                            "pluginApi": ">=0.1 <0.2",
+                            "hub": {
+                                "extensionPoints": [
+                                    "web.settingsPanel"
+                                ]
+                            },
+                            "runner": {
+                                "extensionPoints": [
+                                    "runner.spawnOptionsProvider"
+                                ]
+                            }
+                        },
+                        "install": {
+                            "runnerPlacement": "compatible-runners",
+                            "offlineRunnerPolicy": "skip",
+                            "minReadyRunnerCount": 1
+                        }
+                    },
+                    "source": {
+                        "type": "hapi-source",
+                        "path": "plugins/com.hapi.runner-launch-presets",
+                        "treeChecksum": "sha256:17639a98279ad0fc643e01db1aee49f4d6c812624590a666797adfaec1862eca",
+                        "embedded": true
+                    },
+                    "compatibility": {
+                        "pluginApi": ">=0.1 <0.2",
+                        "hub": {
+                            "extensionPoints": [
+                                "web.settingsPanel"
+                            ]
+                        },
+                        "runner": {
+                            "extensionPoints": [
+                                "runner.spawnOptionsProvider"
+                            ]
+                        }
+                    }
+                }
+            ]
+        },
+        {
             "id": "com.hapi.schedule-send",
             "name": "Schedule Send",
             "display": {
@@ -20,11 +219,11 @@
                 }
             },
             "description": "First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.",
-            "repo": "SmallSpider0/hapi-fork",
-            "homepage": "https://github.com/SmallSpider0/hapi-fork",
+            "repo": "tiann/hapi",
+            "homepage": "https://github.com/tiann/hapi",
             "author": {
                 "name": "HAPI",
-                "url": "https://github.com/SmallSpider0/hapi-fork"
+                "url": "https://github.com/tiann/hapi"
             },
             "license": "AGPL-3.0-only",
             "categories": [
@@ -50,12 +249,13 @@
             "releases": [
                 {
                     "version": "0.1.1",
-                    "tag": "hapi-first-party-plugins-v0.1.1",
+                    "tag": "hapi-source-0.1.1",
                     "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.schedule-send",
-                        "version": "0.1.1",
                         "name": "Schedule Send",
+                        "version": "0.1.1",
+                        "pluginApiVersion": "0.1",
                         "description": "First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.",
                         "display": {
                             "name": {
@@ -111,7 +311,7 @@
                         ],
                         "runtimes": {
                             "hub": {
-                                "entry": "dist/hub.js"
+                                "entry": "src/hub.js"
                             }
                         },
                         "contributions": {
@@ -187,15 +387,13 @@
                                     "web.composerAction"
                                 ]
                             }
-                        },
-                        "pluginApiVersion": "0.1"
+                        }
                     },
-                    "package": {
-                        "filename": "com.hapi.schedule-send-0.1.1.hapi-plugin.tgz",
-                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-first-party-plugins-v0.1.1/com.hapi.schedule-send-0.1.1.hapi-plugin.tgz",
-                        "format": "tgz",
-                        "checksum": "sha256:d24d860ad21c141c5ca321a49566250275183b0bce7edb8495aef187d7bc0f14",
-                        "size": 2498
+                    "source": {
+                        "type": "hapi-source",
+                        "path": "plugins/com.hapi.schedule-send",
+                        "treeChecksum": "sha256:60981a234359a3431824f5eebeea960ebf9511691c342bc02fdc8e738e935628",
+                        "embedded": true
                     },
                     "compatibility": {
                         "pluginApi": ">=0.1 <0.2",
@@ -227,11 +425,11 @@
                 }
             },
             "description": "First-party Hub plugin that sends selected HAPI notifications through ServerChan.",
-            "repo": "SmallSpider0/hapi-fork",
-            "homepage": "https://github.com/SmallSpider0/hapi-fork",
+            "repo": "tiann/hapi",
+            "homepage": "https://github.com/tiann/hapi",
             "author": {
                 "name": "HAPI",
-                "url": "https://github.com/SmallSpider0/hapi-fork"
+                "url": "https://github.com/tiann/hapi"
             },
             "license": "AGPL-3.0-only",
             "categories": [
@@ -256,12 +454,13 @@
             "releases": [
                 {
                     "version": "0.1.1",
-                    "tag": "hapi-first-party-plugins-v0.1.1",
+                    "tag": "hapi-source-0.1.1",
                     "releasedAt": "2026-05-24T07:28:18.035Z",
                     "manifest": {
                         "id": "com.hapi.serverchan-notifier",
-                        "version": "0.1.1",
                         "name": "ServerChan Notifier",
+                        "version": "0.1.1",
+                        "pluginApiVersion": "0.1",
                         "description": "First-party Hub plugin that sends selected HAPI notifications through ServerChan.",
                         "display": {
                             "name": {
@@ -317,7 +516,7 @@
                         ],
                         "runtimes": {
                             "hub": {
-                                "entry": "dist/hub.js"
+                                "entry": "src/hub.js"
                             }
                         },
                         "contributions": {
@@ -350,11 +549,11 @@
                                         "components": [
                                             {
                                                 "kind": "text",
-                                                "tone": "info",
                                                 "text": {
                                                     "en": "Set SERVERCHAN_SENDKEY in the Hub environment, then enable this plugin on Hub. Legacy SERVERCHAN_NOTIFICATION no longer creates a core notification channel.",
                                                     "zh-CN": "在 Hub 环境变量中设置 SERVERCHAN_SENDKEY 后启用此插件。旧的 SERVERCHAN_NOTIFICATION 不再创建核心通知通道。"
-                                                }
+                                                },
+                                                "tone": "info"
                                             },
                                             {
                                                 "kind": "schemaForm",
@@ -501,15 +700,13 @@
                                     "web.settingsPanel"
                                 ]
                             }
-                        },
-                        "pluginApiVersion": "0.1"
+                        }
                     },
-                    "package": {
-                        "filename": "com.hapi.serverchan-notifier-0.1.1.hapi-plugin.tgz",
-                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-first-party-plugins-v0.1.1/com.hapi.serverchan-notifier-0.1.1.hapi-plugin.tgz",
-                        "format": "tgz",
-                        "checksum": "sha256:2d2699127da39a96db77a87a9469f4fa4c1a3d138695d0243f102d1c95e0a889",
-                        "size": 5026
+                    "source": {
+                        "type": "hapi-source",
+                        "path": "plugins/com.hapi.serverchan-notifier",
+                        "treeChecksum": "sha256:b4184a9c41b021a18a640393ab8d47da6a15ee308d76549096da150cbde0b7b4",
+                        "embedded": true
                     },
                     "compatibility": {
                         "pluginApi": ">=0.1 <0.2",
@@ -517,206 +714,6 @@
                             "extensionPoints": [
                                 "hub.notificationChannel",
                                 "web.settingsPanel"
-                            ]
-                        }
-                    }
-                }
-            ]
-        },
-        {
-            "id": "com.hapi.runner-launch-presets",
-            "name": "Runner Launch Presets",
-            "display": {
-                "name": {
-                    "en": "Runner Launch Presets",
-                    "zh-CN": "Runner 启动预设"
-                },
-                "description": {
-                    "en": "Applies default model, reasoning, and permission settings for Runner launches by agent and workspace.",
-                    "zh-CN": "按 Agent 和工作区为 Runner 启动自动应用默认模型、思考强度和权限设置。"
-                },
-                "featureIntro": {
-                    "en": "- Applies launch defaults before agent command args are built.\n- Matches all agents/workspaces or selected agents and workspace prefixes.\n- Supports model, Claude effort, Codex reasoning effort, and permission/yolo defaults.\n- User-selected fields in the New Session UI override presets.",
-                    "zh-CN": "- 在构建 agent 启动参数前应用默认值。\n- 可匹配全部或指定 Agent、指定工作区前缀。\n- 支持模型、Claude effort、Codex reasoning effort、权限/yolo 默认值。\n- 新建会话 UI 中用户手动选择的字段优先。"
-                }
-            },
-            "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
-            "repo": "SmallSpider0/hapi-fork",
-            "homepage": "https://github.com/SmallSpider0/hapi-fork",
-            "author": {
-                "name": "HAPI",
-                "url": "https://github.com/SmallSpider0/hapi-fork"
-            },
-            "license": "AGPL-3.0-only",
-            "categories": [
-                "runner",
-                "utility"
-            ],
-            "keywords": [
-                "runner",
-                "launch",
-                "presets",
-                "defaults",
-                "model",
-                "permissions"
-            ],
-            "runtimes": [
-                "runner"
-            ],
-            "capabilities": [
-                {
-                    "kind": "runner.spawnExtension",
-                    "label": "Runner Launch Presets"
-                }
-            ],
-            "releases": [
-                {
-                    "version": "0.1.1",
-                    "tag": "hapi-first-party-plugins-v0.1.1",
-                    "releasedAt": "2026-05-24T07:28:18.035Z",
-                    "manifest": {
-                        "id": "com.hapi.runner-launch-presets",
-                        "version": "0.1.1",
-                        "name": "Runner Launch Presets",
-                        "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
-                        "display": {
-                            "name": {
-                                "en": "Runner Launch Presets",
-                                "zh-CN": "Runner 启动预设"
-                            },
-                            "description": {
-                                "en": "Applies default model, reasoning, and permission settings for Runner launches by agent and workspace.",
-                                "zh-CN": "按 Agent 和工作区为 Runner 启动自动应用默认模型、思考强度和权限设置。"
-                            },
-                            "featureIntro": {
-                                "en": "- Applies launch defaults before agent command args are built.\n- Matches all agents/workspaces or selected agents and workspace prefixes.\n- Supports model, Claude effort, Codex reasoning effort, and permission/yolo defaults.\n- User-selected fields in the New Session UI override presets.",
-                                "zh-CN": "- 在构建 agent 启动参数前应用默认值。\n- 可匹配全部或指定 Agent、指定工作区前缀。\n- 支持模型、Claude effort、Codex reasoning effort、权限/yolo 默认值。\n- 新建会话 UI 中用户手动选择的字段优先。"
-                            }
-                        },
-                        "capabilities": [
-                            {
-                                "id": "runner-launch-presets",
-                                "kind": "runner.spawnExtension",
-                                "displayName": "Runner Launch Presets",
-                                "description": "Applies configured launch defaults before an agent process starts.",
-                                "display": {
-                                    "name": {
-                                        "en": "Runner Launch Presets",
-                                        "zh-CN": "Runner 启动预设"
-                                    },
-                                    "description": {
-                                        "en": "Applies configured launch defaults before an agent process starts.",
-                                        "zh-CN": "在 agent 进程启动前应用启动默认值。"
-                                    }
-                                },
-                                "parts": {
-                                    "web": {
-                                        "required": true,
-                                        "contributions": [
-                                            {
-                                                "type": "settingsPanel",
-                                                "id": "runner-launch-presets"
-                                            }
-                                        ]
-                                    },
-                                    "runner": {
-                                        "required": true,
-                                        "target": "selected-runner",
-                                        "contributions": [
-                                            {
-                                                "type": "spawnOptionsProvider",
-                                                "id": "runner-launch-presets"
-                                            }
-                                        ]
-                                    }
-                                }
-                            }
-                        ],
-                        "runtimes": {
-                            "runner": {
-                                "entry": "dist/runner.js"
-                            }
-                        },
-                        "contributions": {
-                            "runner": {
-                                "spawnOptionsProviders": [
-                                    {
-                                        "id": "runner-launch-presets",
-                                        "displayName": "Runner Launch Presets",
-                                        "description": "Applies default launch options before command args are built.",
-                                        "display": {
-                                            "name": {
-                                                "en": "Runner Launch Presets",
-                                                "zh-CN": "Runner 启动预设"
-                                            },
-                                            "description": {
-                                                "en": "Applies default launch options before command args are built.",
-                                                "zh-CN": "在构建命令参数前应用启动默认值。"
-                                            }
-                                        }
-                                    }
-                                ]
-                            },
-                            "web": {
-                                "settingsPanels": [
-                                    {
-                                        "id": "runner-launch-presets",
-                                        "title": {
-                                            "en": "Runner Launch Presets",
-                                            "zh-CN": "Runner 启动预设"
-                                        },
-                                        "description": {
-                                            "en": "Set default launch options by agent and workspace. User choices in New Session override these defaults.",
-                                            "zh-CN": "按 Agent 和工作区设置默认启动参数。新建会话中用户手动选择的值会覆盖预设。"
-                                        },
-                                        "components": [
-                                            {
-                                                "id": "runner-launch-presets-editor",
-                                                "kind": "runnerSpawnDefaultsEditor",
-                                                "configKey": "rulesJson"
-                                            }
-                                        ]
-                                    }
-                                ]
-                            }
-                        },
-                        "compatibility": {
-                            "pluginApi": ">=0.1 <0.2",
-                            "hub": {
-                                "extensionPoints": [
-                                    "web.settingsPanel"
-                                ]
-                            },
-                            "runner": {
-                                "extensionPoints": [
-                                    "runner.spawnOptionsProvider"
-                                ]
-                            }
-                        },
-                        "install": {
-                            "runnerPlacement": "compatible-runners",
-                            "offlineRunnerPolicy": "skip",
-                            "minReadyRunnerCount": 1
-                        },
-                        "pluginApiVersion": "0.1"
-                    },
-                    "package": {
-                        "filename": "com.hapi.runner-launch-presets-0.1.1.hapi-plugin.tgz",
-                        "url": "https://github.com/SmallSpider0/hapi-fork/releases/download/hapi-first-party-plugins-v0.1.1/com.hapi.runner-launch-presets-0.1.1.hapi-plugin.tgz",
-                        "format": "tgz",
-                        "checksum": "sha256:d5a84738158fe70aec382834643614ffee2301c5f49556e8a8c7d2b6d48ea754",
-                        "size": 4090
-                    },
-                    "compatibility": {
-                        "pluginApi": ">=0.1 <0.2",
-                        "hub": {
-                            "extensionPoints": [
-                                "web.settingsPanel"
-                            ]
-                        },
-                        "runner": {
-                            "extensionPoints": [
-                                "runner.spawnOptionsProvider"
                             ]
                         }
                     }

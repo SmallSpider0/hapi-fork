@@ -3102,6 +3102,31 @@
                                     ],
                                     "additionalProperties": false
                                 },
+                                "source": {
+                                    "type": "object",
+                                    "properties": {
+                                        "type": {
+                                            "type": "string",
+                                            "const": "hapi-source"
+                                        },
+                                        "path": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        },
+                                        "treeChecksum": {
+                                            "type": "string",
+                                            "pattern": "^sha256:[a-f0-9]{64}$"
+                                        },
+                                        "embedded": {
+                                            "type": "boolean"
+                                        }
+                                    },
+                                    "required": [
+                                        "type",
+                                        "path"
+                                    ],
+                                    "additionalProperties": false
+                                },
                                 "compatibility": {
                                     "type": "object",
                                     "properties": {
@@ -3250,8 +3275,7 @@
                             "required": [
                                 "version",
                                 "tag",
-                                "manifest",
-                                "package"
+                                "manifest"
                             ],
                             "additionalProperties": false
                         }

@@ -609,7 +609,7 @@ export function MarketplaceDetailPanel(props: {
         || localizedText(release?.manifest.display?.featureIntro, locale).trim()
     const network = release?.manifest.permissions?.network ?? []
     const secrets = release?.manifest.permissions?.secrets ?? []
-    const packageSize = formatPackageSize(release?.package.size)
+    const packageSize = formatPackageSize(release?.package?.size)
 
     return (
         <div className="space-y-3">
@@ -661,9 +661,12 @@ export function MarketplaceDetailPanel(props: {
 
             <div className="space-y-2 rounded-lg border border-[var(--app-border)] p-3 text-sm">
                 <div className="font-medium">{t('settings.plugins.marketplace.packageDetails')}</div>
-                <div className="break-all text-xs text-[var(--app-hint)]">{release?.package.filename ?? t('settings.plugins.unknown')}{packageSize ? ` · ${packageSize}` : ''}</div>
-                {release?.package.url ? <div className="break-all text-xs text-[var(--app-hint)]">{release.package.url}</div> : null}
-                {release?.package.checksum ? <div className="break-all text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.checksum')}: {release.package.checksum}</div> : null}
+                <div className="break-all text-xs text-[var(--app-hint)]">
+                    {release?.package?.filename ?? release?.source?.path ?? t('settings.plugins.unknown')}{packageSize ? ` · ${packageSize}` : ''}
+                </div>
+                {release?.package?.url ? <div className="break-all text-xs text-[var(--app-hint)]">{release.package.url}</div> : null}
+                {release?.package?.checksum ? <div className="break-all text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.checksum')}: {release.package.checksum}</div> : null}
+                {release?.source?.treeChecksum ? <div className="break-all text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.checksum')}: {release.source.treeChecksum}</div> : null}
             </div>
 
             <div className="grid gap-2 text-sm sm:grid-cols-2">

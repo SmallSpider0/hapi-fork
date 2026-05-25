@@ -1,11 +1,13 @@
 # Plugin architecture guardrails
 
 HAPI plugins must be real extension implementations, not core features hidden behind a plugin toggle.
+This applies to every plugin source: first-party source plugins, marketplace plugins, uploaded packages, and local user plugins.
 
 ## Rules
 
-- Core packages provide generic extension points only.
-- Core `hub/src`, `web/src`, and `cli/src` must not hard-code first-party plugin IDs.
+- Core packages provide generic extension points only; first-party plugins do not get private extension surfaces.
+- Core `hub/src`, `web/src`, and `cli/src` must not hard-code plugin IDs, plugin names, contribution IDs, plugin-specific env/config keys, or plugin-specific API paths for any plugin.
+- Plugin identity may appear only in plugin-owned source/catalog/materialization metadata, tests, and generated marketplace source data.
 - Runtime-supported extension points are declared once in `shared/src/plugins/extensionPoints.ts`.
 - API routes must be named by extension point, not by plugin name.
   - Good: `/api/machines/:id/spawn-options/preview`
@@ -13,9 +15,13 @@ HAPI plugins must be real extension implementations, not core features hidden be
 - Web settings UI must be descriptor-driven.
   - Good: `kind: "runnerSpawnDefaultsEditor"`
   - Bad: `if (plugin.id === "...") <SpecialPluginEditor />`
+- Web descriptor components and composer action UI kinds must be reusable primitives.
+  - Good: `kind: "schemaForm"` or a documented generic primitive.
+  - Bad: `kind: "myPluginEditor"` plus a React switch that only works for one plugin.
 - Runtime behavior must be registered by plugin runtime code:
   - Hub: `ctx.notifications.registerChannel`, `ctx.messages.registerAction`
   - Runner: `ctx.runtime.registerSpawnOptionsProvider`, `ctx.runtime.registerEnvironmentProvider`, `ctx.runtime.registerCommandResolver`, `ctx.runtime.registerSpawnHook`, `ctx.actions.register`
+- Enable/disable controls lifecycle only. They must not be the branch that turns on a core-implemented plugin feature.
 - Shared runtime-only helpers live under `shared/src/plugins/runtime/*`; Hub/Runner should reuse them instead of duplicating activation, diagnostics, filesystem, registry, state CRUD, reload, compatibility, or capability-view logic.
 - Hub plugin admin routes should stay thin. Inventory, fanout, install-plan, marketplace, target, and notification-option logic live under `hub/src/plugins/admin/*`.
 
@@ -33,6 +39,15 @@ Source of truth: `shared/src/plugins/extensionPoints.ts`.
 - User-set `manualFields` win over plugin spawn-option defaults.
 - Env keys starting with `HAPI_`, plus protected auth/home keys, are not plugin-overridable. Windows env keys are compared case-insensitively.
 - `toolPaths` in `RunnerEnvironmentProposal` is reserved for future structured tool resolution. Current Runner records a warning and does not apply it.
+
+## Web descriptor primitive policy
+
+Built-in Web primitives are part of HAPI's generic plugin UI surface. They are allowed only when they can be used by any plugin that satisfies the descriptor schema.
+
+- `schemaForm`, `text`, `badge`, `table`, and `actionButton` are generic management primitives.
+- `delayPicker` is a generic composer action UI for any plugin that produces a delayed message-delivery plan; the action handler still comes from plugin runtime code.
+- `runnerSpawnDefaultsEditor` is a generic Runner spawn-defaults editor backed by plugin config; the effective launch behavior still comes from a Runner `spawnOptionsProvider`.
+- Adding a primitive requires schema docs/tests and must not add checks for a plugin ID or marketplace ID.
 
 ## Compatibility checks
 
@@ -55,9 +70,12 @@ bun typecheck
 bun run test
 bun run docs:plugin-api:check
 bun run marketplace:check
-rg "HAPI_(SERVERCHAN_NOTIFIER|RUNNER_LAUNCH_PRESETS)_PLUGIN_ID|com\\.hapi\\.(serverchan-notifier|runner-launch-presets)" hub/src web/src cli/src --glob '!**/*.test.ts'
-rg "launch-presets/resolve|resolveRunnerLaunchPresets|RunnerLaunchPresetsEditor" hub/src web/src cli/src --glob '!**/*.test.ts'
-rg "'hub\\.action'|\\\"hub\\.action\\\"" hub/src cli/src shared/src --glob '!**/*.test.ts'
+# `hub/src/plugins/pluginArchitecture.test.ts` is the authoritative guardrail test; the searches below are smoke checks.
+rg "HAPI_[A-Z0-9_]+_PLUGIN_ID|com\\.hapi\\." hub/src web/src cli/src --glob '!**/*.test.ts' --glob '!**/*.test.tsx'
+rg -P "(pluginId|plugin\\.id|plugin\\.manifest\\.id|record\\.manifest\\.id|manifest\\.id)\\s*(===|!==|==|!=)\\s*['\\\"](?!string|number|boolean|object|function|undefined|symbol|bigint)[^'\\\"]+['\\\"]|['\\\"](?!string|number|boolean|object|function|undefined|symbol|bigint)[^'\\\"]+['\\\"]\\s*(===|!==|==|!=)\\s*(pluginId|plugin\\.id|plugin\\.manifest\\.id|record\\.manifest\\.id|manifest\\.id)" hub/src web/src cli/src --glob '!**/*.test.ts' --glob '!**/*.test.tsx'
+rg -P "new\\s+Set\\s*\\(\\s*\\[[^\\]]*['\\\"][^'\\\"]+['\\\"][^\\]]*\\]\\s*\\)\\.has\\s*\\(\\s*(pluginId|plugin\\.id|plugin\\.manifest\\.id|record\\.manifest\\.id|manifest\\.id)\\s*\\)|\\[[^\\]]*['\\\"][^'\\\"]+['\\\"][^\\]]*\\]\\.includes\\s*\\(\\s*(pluginId|plugin\\.id|plugin\\.manifest\\.id|record\\.manifest\\.id|manifest\\.id)\\s*\\)" hub/src web/src cli/src --glob '!**/*.test.ts' --glob '!**/*.test.tsx'
+rg -i "launch-presets/resolve|resolveRunnerLaunchPresets|RunnerLaunchPresetsEditor|serverchan|SERVERCHAN|ServerChan|schedule-send|Schedule Send|runner-launch-presets|Runner Launch Presets" hub/src web/src cli/src --glob '!**/*.test.ts' --glob '!**/*.test.tsx'
+rg "'hub\\.action'|\\\"hub\\.action\\\"" hub/src cli/src shared/src --glob '!**/*.test.ts' --glob '!**/*.test.tsx'
 ```
 
 The `rg` commands should return no matches.

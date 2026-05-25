@@ -765,6 +765,8 @@ async function runMarketplace(args: string[]): Promise<void> {
         console.log(chalk.bold(`${payload.entry.name} (${payload.entry.id})`))
         console.log(`Repo: ${payload.entry.repo}`)
         console.log(`Latest: ${latest?.version ?? '(none)'}`)
+        console.log(`Source: ${latest?.source?.path ?? latest?.package?.url ?? '(none)'}`)
+        console.log(`Checksum: ${latest?.source?.treeChecksum ?? latest?.package?.checksum ?? '(none)'}`)
         console.log(`Categories: ${(payload.entry.categories ?? []).join(', ') || '(none)'}`)
         console.log(`Description: ${payload.entry.description ?? '(none)'}`)
         console.log(chalk.gray(`Marketplace: ${payload.sourceUrl}`))
@@ -788,7 +790,7 @@ async function runMarketplace(args: string[]): Promise<void> {
                 console.log(JSON.stringify(planPayload, null, 2))
                 return
             }
-            console.log(chalk.gray(`Marketplace asset: ${planPayload.marketplace.assetUrl}`))
+            console.log(chalk.gray(`Marketplace source: ${planPayload.marketplace.assetUrl ?? planPayload.marketplace.sourcePath ?? planPayload.marketplace.distribution}`))
             printInstallPlan(planPayload.plan)
             return
         }
@@ -805,7 +807,7 @@ async function runMarketplace(args: string[]): Promise<void> {
             console.log(JSON.stringify({ ...planPayload, result }, null, 2))
             return
         }
-        console.log(chalk.gray(`Marketplace asset: ${planPayload.marketplace.assetUrl}`))
+        console.log(chalk.gray(`Marketplace source: ${planPayload.marketplace.assetUrl ?? planPayload.marketplace.sourcePath ?? planPayload.marketplace.distribution}`))
         printInstallPlan(planPayload.plan)
         console.log(chalk.green(`Marketplace plugin ${action === 'update' ? 'update' : 'install'} ${result.ok ? 'completed' : 'completed with issues'}.`))
         for (const targetResult of result.targetResults ?? []) {

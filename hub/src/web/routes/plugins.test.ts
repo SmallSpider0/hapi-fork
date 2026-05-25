@@ -860,6 +860,124 @@ describe('plugin admin routes', () => {
         }
     })
 
+    it('installs embedded HAPI source marketplace plugins through the install planner', async () => {
+        const installRequests: unknown[] = []
+        const app = createApp({
+            listPlugins: () => [],
+            installPluginPackage: async (request: unknown) => {
+                installRequests.push(request)
+                return {
+                    ...installResult('installed'),
+                    pluginId: 'com.hapi.schedule-send',
+                    plugins: []
+                }
+            }
+        } as never)
+        const headers = { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' }
+
+        const listResponse = await app.request('/api/plugins/marketplace?q=schedule', { headers })
+        expect(listResponse.status).toBe(200)
+        const list = await listResponse.json() as { sourceUrl: string; entries: Array<{ id: string; releases: Array<{ source?: { path: string } }> }> }
+        expect(list.sourceUrl).toBe('embedded://hapi-marketplace/catalog.v1.json')
+        expect(list.entries.find((entry) => entry.id === 'com.hapi.schedule-send')?.releases[0]?.source?.path).toBe('plugins/com.hapi.schedule-send')
+
+        const planResponse = await app.request('/api/plugins/marketplace/com.hapi.schedule-send/install-plan', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ enable: true })
+        })
+        expect(planResponse.status).toBe(200)
+        const planPayload = await planResponse.json() as {
+            marketplace: { distribution: string; sourcePath?: string; checksum: string }
+            plan: { planId: string; source: { type: string; sourcePath?: string }; plugin: { id: string }; positions: string[]; targets: Array<{ action: string }> }
+        }
+        expect(planPayload.marketplace).toMatchObject({
+            distribution: 'hapi-source',
+            sourcePath: 'plugins/com.hapi.schedule-send'
+        })
+        expect(planPayload.marketplace.checksum).toMatch(/^sha256:[a-f0-9]{64}$/)
+        expect(planPayload.plan.source).toMatchObject({
+            type: 'marketplace-source',
+            sourcePath: 'plugins/com.hapi.schedule-send'
+        })
+        expect(planPayload.plan.plugin.id).toBe('com.hapi.schedule-send')
+        expect(planPayload.plan.positions).toEqual(['web', 'hub'])
+
+        const executeResponse = await app.request(`/api/plugins/install-plan/${planPayload.plan.planId}/execute`, {
+            method: 'POST',
+            headers
+        })
+        expect(executeResponse.status).toBe(200)
+        expect(installRequests).toHaveLength(1)
+        expect(installRequests[0]).toMatchObject({
+            format: 'tgz',
+            installSource: {
+                type: 'marketplace',
+                distribution: 'hapi-source',
+                sourcePath: 'plugins/com.hapi.schedule-send'
+            }
+        })
+    })
+
+    it('sends embedded source marketplace Runner installs as package bytes over Runner RPC', async () => {
+        const runner = makeMachine('runner-source', true)
+        runner.runnerState!.pluginInventory!.hostInfo!.supportedExtensionPoints.push('runner.spawnOptionsProvider')
+        const hubInstallRequests: unknown[] = []
+        const installRequests: unknown[] = []
+        const app = createApp({
+            listPlugins: () => [],
+            installPluginPackage: async (request: unknown) => {
+                hubInstallRequests.push(request)
+                return {
+                    ...installResult('installed'),
+                    pluginId: 'com.hapi.runner-launch-presets',
+                    plugins: []
+                }
+            }
+        } as never, {
+            getMachinesByNamespace: () => [runner],
+            getMachineByNamespace: () => runner,
+            listRunnerPlugins: async () => runner.runnerState!.pluginInventory!,
+            installRunnerPluginPackage: async (_machineId: string, request: unknown) => {
+                installRequests.push(request)
+                return runnerInstallResult('runner-source')
+            }
+        } as never)
+        const headers = { authorization: `Bearer ${await token()}`, 'content-type': 'application/json' }
+
+        const planResponse = await app.request('/api/plugins/marketplace/com.hapi.runner-launch-presets/install-plan', {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ runnerSelection: { mode: 'compatible' }, enable: true })
+        })
+        expect(planResponse.status).toBe(200)
+        const planPayload = await planResponse.json() as {
+            plan: { planId: string; targets: Array<{ target: { scope: string }; action: string }> }
+        }
+        expect(planPayload.plan.targets.map((entry) => entry.target.scope)).toEqual(['hub', 'runner:runner-source'])
+
+        const executeResponse = await app.request(`/api/plugins/install-plan/${planPayload.plan.planId}/execute`, {
+            method: 'POST',
+            headers
+        })
+        expect(executeResponse.status).toBe(200)
+        expect(hubInstallRequests).toHaveLength(1)
+        expect(installRequests).toHaveLength(1)
+        const request = installRequests[0] as {
+            sourcePath?: string
+            contentBase64?: string
+            checksum?: string
+            installSource?: { sourcePath?: string; distribution?: string }
+        }
+        expect(request.sourcePath).toBeUndefined()
+        expect(request.contentBase64?.length).toBeGreaterThan(0)
+        expect(request.checksum).toMatch(/^sha256:[a-f0-9]{64}$/)
+        expect(request.installSource).toMatchObject({
+            distribution: 'hapi-source',
+            sourcePath: 'plugins/com.hapi.runner-launch-presets'
+        })
+    })
+
     it('marks installed marketplace plugins as updateable only when the catalog version is newer', async () => {
         const testDir = mkdtempSync(join(tmpdir(), 'hapi-plugin-marketplace-route-'))
         const catalogPath = join(testDir, 'catalog.v1.json')

@@ -248,10 +248,14 @@ export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): 
             ...(options.manifest.display ? { display: options.manifest.display } : {})
         },
         source: {
-            type: 'uploaded-package',
+            type: options.request.installSource?.type === 'marketplace'
+                ? options.request.installSource.distribution === 'hapi-source' ? 'marketplace-source' : 'marketplace-package'
+                : 'uploaded-package',
             filename: options.request.filename,
             checksum: options.request.checksum,
-            format: options.packageFormat
+            format: options.packageFormat,
+            ...(options.request.installSource?.assetUrl ? { assetUrl: options.request.installSource.assetUrl } : {}),
+            ...(options.request.installSource?.sourcePath ? { sourcePath: options.request.installSource.sourcePath } : {})
         },
         positions,
         targets,

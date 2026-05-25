@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto'
-import { readFile } from 'node:fs/promises'
+import { execFile as execFileCallback } from 'node:child_process'
+import { lstat, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { promisify } from 'node:util'
 import {
     PluginMarketplaceCatalogSchema,
     type PluginMarketplaceCatalog,
@@ -9,9 +13,15 @@ import {
     type PluginMarketplaceRelease
 } from '@hapi/protocol/plugins/marketplace'
 import type { PluginInstallPlanRequest } from '@hapi/protocol/plugins/admin'
-import { inspectPluginPackagePayload } from '@hapi/protocol/plugins/foundation'
+import { HAPI_PLUGIN_MANIFEST_FILE } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_PACKAGE_MANIFEST_FILE, inspectPluginPackagePayload } from '@hapi/protocol/plugins/foundation'
+import {
+    EMBEDDED_PLUGIN_MARKETPLACE_URL,
+    embeddedPluginMarketplaceCatalog,
+    embeddedPluginMarketplaceSources
+} from '@hapi/protocol/plugins/marketplaceSources.generated'
 
-export const DEFAULT_PLUGIN_MARKETPLACE_URL = 'https://raw.githubusercontent.com/tiann/hapi/main/marketplace/catalog.v1.json'
+export const DEFAULT_PLUGIN_MARKETPLACE_URL = EMBEDDED_PLUGIN_MARKETPLACE_URL
 
 export type MarketplaceFetch = (url: string) => Promise<{
     ok: boolean
@@ -23,6 +33,7 @@ export type MarketplaceFetch = (url: string) => Promise<{
 
 export interface PluginMarketplaceServiceOptions {
     sourceUrl?: string
+    sourceRoot?: string
     fetch?: MarketplaceFetch
     now?: () => number
     cacheTtlMs?: number
@@ -40,13 +51,17 @@ export interface MarketplacePackageRequestResult {
         pluginId: string
         repo: string
         version: string
-        assetUrl: string
+        distribution: 'package' | 'hapi-source'
+        assetUrl?: string
+        sourcePath?: string
         checksum: string
     }
     request: PluginInstallPlanRequest
 }
 
 type NumericVersion = [number, number, number]
+type SourceFile = { path: string; contentBase64: string }
+const execFile = promisify(execFileCallback)
 
 function normalizeChecksum(checksum: string): string {
     const trimmed = checksum.trim().toLowerCase()
@@ -94,21 +109,124 @@ function isHttpUrl(url: string): boolean {
     return url.startsWith('https://') || url.startsWith('http://')
 }
 
+function isEmbeddedUrl(url: string): boolean {
+    return url.startsWith('embedded://')
+}
+
+function isEnoent(error: unknown): boolean {
+    return Boolean(error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT')
+}
+
 function withCacheBust(url: string, now: number): string {
     if (!isHttpUrl(url)) return url
     const separator = url.includes('?') ? '&' : '?'
     return `${url}${separator}_hapiCacheBust=${now}`
 }
 
+function assertRelativeSafePath(path: string): void {
+    const normalized = path.replace(/\\/g, '/')
+    if (!normalized || normalized.startsWith('/') || normalized.includes('\0')) {
+        throw new Error(`Unsafe marketplace source path: ${path}`)
+    }
+    if (normalized.split('/').some((part) => part === '..')) {
+        throw new Error(`Marketplace source path must not contain traversal segments: ${path}`)
+    }
+}
+
+function isPathInside(parentPath: string, childPath: string): boolean {
+    const rel = relative(parentPath, childPath)
+    return rel === '' || (rel.length > 0 && !rel.startsWith('..') && !isAbsolute(rel))
+}
+
+function marketplaceSourceTreeChecksum(files: SourceFile[]): string {
+    const hash = createHash('sha256')
+    for (const file of [...files].sort((left, right) => left.path.localeCompare(right.path))) {
+        assertRelativeSafePath(file.path)
+        hash.update(file.path)
+        hash.update('\0')
+        hash.update(Buffer.from(file.contentBase64, 'base64'))
+        hash.update('\0')
+    }
+    return `sha256:${hash.digest('hex')}`
+}
+
+async function readSourceDirectoryFiles(root: string): Promise<SourceFile[]> {
+    const resolvedRoot = resolve(root)
+    const files: SourceFile[] = []
+
+    async function walk(current: string): Promise<void> {
+        for (const entry of await readdir(current, { withFileTypes: true })) {
+            const fullPath = join(current, entry.name)
+            const stats = await lstat(fullPath)
+            if (stats.isSymbolicLink()) {
+                throw new Error(`Marketplace source must not contain symlinks: ${fullPath}`)
+            }
+            if (entry.isDirectory()) {
+                if (entry.name === 'node_modules' || entry.name === '.git') {
+                    throw new Error(`Marketplace source must not contain ${entry.name}: ${fullPath}`)
+                }
+                await walk(fullPath)
+                continue
+            }
+            if (!entry.isFile()) {
+                continue
+            }
+            const relativePath = relative(resolvedRoot, fullPath).split('\\').join('/')
+            assertRelativeSafePath(relativePath)
+            if (relativePath === HAPI_PLUGIN_PACKAGE_MANIFEST_FILE) {
+                continue
+            }
+            files.push({
+                path: relativePath,
+                contentBase64: (await readFile(fullPath)).toString('base64')
+            })
+        }
+    }
+
+    await walk(resolvedRoot)
+    return files.sort((left, right) => left.path.localeCompare(right.path))
+}
+
+async function createSourcePackageBytes(files: SourceFile[], release: PluginMarketplaceRelease): Promise<Buffer> {
+    const tempRoot = await mkdtemp(join(tmpdir(), 'hapi-marketplace-source-'))
+    try {
+        const pluginRoot = join(tempRoot, 'plugin')
+        await mkdir(pluginRoot, { recursive: true, mode: 0o700 })
+        for (const file of files) {
+            assertRelativeSafePath(file.path)
+            const targetPath = resolve(pluginRoot, file.path)
+            if (!isPathInside(pluginRoot, targetPath)) {
+                throw new Error(`Marketplace source file escapes plugin root: ${file.path}`)
+            }
+            await mkdir(dirname(targetPath), { recursive: true, mode: 0o700 })
+            await writeFile(targetPath, Buffer.from(file.contentBase64, 'base64'), { mode: 0o600 })
+        }
+        await writeFile(join(pluginRoot, HAPI_PLUGIN_PACKAGE_MANIFEST_FILE), JSON.stringify({
+            formatVersion: 'hapi-plugin-package/v1',
+            manifest: release.manifest,
+            files: [],
+            checksum: release.source?.treeChecksum ?? marketplaceSourceTreeChecksum(files)
+        }, null, 2), { mode: 0o600 })
+
+        const packagePath = join(tempRoot, 'plugin.tgz')
+        await execFile('tar', ['-czf', packagePath, '-C', pluginRoot, '.'], { maxBuffer: 1024 * 1024 * 10 })
+        return await readFile(packagePath)
+    } finally {
+        await rm(tempRoot, { recursive: true, force: true }).catch(() => undefined)
+    }
+}
+
 export class PluginMarketplaceService {
     private snapshot: MarketplaceCatalogSnapshot | null = null
     private readonly sourceUrl: string
+    private readonly sourceRoot?: string
     private readonly fetchImpl: MarketplaceFetch
     private readonly now: () => number
     private readonly cacheTtlMs: number
 
     constructor(options: PluginMarketplaceServiceOptions = {}) {
         this.sourceUrl = options.sourceUrl?.trim() || process.env.HAPI_PLUGIN_MARKETPLACE_URL?.trim() || DEFAULT_PLUGIN_MARKETPLACE_URL
+        this.sourceRoot = options.sourceRoot?.trim() || process.env.HAPI_PLUGIN_MARKETPLACE_SOURCE_ROOT?.trim() || undefined
         this.fetchImpl = options.fetch ?? (async (url) => await fetch(url))
         this.now = options.now ?? (() => Date.now())
         this.cacheTtlMs = options.cacheTtlMs ?? 10 * 60 * 1000
@@ -119,8 +237,9 @@ export class PluginMarketplaceService {
         if (!options.force && this.snapshot && now - this.snapshot.fetchedAt < this.cacheTtlMs) {
             return this.snapshot
         }
-        const raw = await this.readText(options.force ? withCacheBust(this.sourceUrl, now) : this.sourceUrl)
-        const parsed = PluginMarketplaceCatalogSchema.parse(JSON.parse(raw) as unknown)
+        const parsed = isEmbeddedUrl(this.sourceUrl)
+            ? PluginMarketplaceCatalogSchema.parse(embeddedPluginMarketplaceCatalog)
+            : PluginMarketplaceCatalogSchema.parse(JSON.parse(await this.readText(options.force ? withCacheBust(this.sourceUrl, now) : this.sourceUrl)) as unknown)
         this.snapshot = {
             sourceUrl: this.sourceUrl,
             fetchedAt: now,
@@ -159,16 +278,19 @@ export class PluginMarketplaceService {
     async buildInstallPlanRequest(pluginId: string, request: PluginMarketplaceInstallRequest = {}): Promise<MarketplacePackageRequestResult> {
         const { snapshot, entry } = await this.getEntry(pluginId)
         const release = this.selectRelease(entry, request.version)
-        const bytes = await this.downloadPackage(release)
+        const distribution = release.source ? 'hapi-source' : 'package'
+        const bytes = distribution === 'hapi-source'
+            ? await this.packageSourceRelease(snapshot, entry, release)
+            : await this.downloadPackage(release)
         const checksum = sha256(bytes)
-        if (normalizeChecksum(release.package.checksum) !== checksum) {
+        if (release.package && normalizeChecksum(release.package.checksum) !== checksum) {
             throw new Error(`Marketplace package checksum mismatch for ${entry.id} ${release.version}: expected ${normalizeChecksum(release.package.checksum)}, got ${checksum}.`)
         }
         const packageRequest = {
-            filename: release.package.filename,
+            filename: release.package?.filename ?? `${entry.id}-${release.version}.hapi-source.tgz`,
             contentBase64: bytes.toString('base64'),
             checksum,
-            format: release.package.format,
+            format: release.package?.format ?? 'tgz',
             ...(request.enable !== undefined ? { enable: request.enable } : {}),
             ...(request.reload !== undefined ? { reload: request.reload } : {}),
             ...(request.overwrite !== undefined ? { overwrite: request.overwrite } : {}),
@@ -179,7 +301,9 @@ export class PluginMarketplaceService {
                 pluginId: entry.id,
                 repo: entry.repo,
                 version: release.version,
-                assetUrl: release.package.url
+                distribution,
+                ...(release.package?.url ? { assetUrl: release.package.url } : {}),
+                ...(release.source?.path ? { sourcePath: release.source.path } : {})
             }
         } satisfies PluginInstallPlanRequest
 
@@ -194,7 +318,9 @@ export class PluginMarketplaceService {
                 pluginId: entry.id,
                 repo: entry.repo,
                 version: release.version,
-                assetUrl: release.package.url,
+                distribution,
+                ...(release.package?.url ? { assetUrl: release.package.url } : {}),
+                ...(release.source?.path ? { sourcePath: release.source.path } : {}),
                 checksum
             },
             request: packageRequest
@@ -216,6 +342,9 @@ export class PluginMarketplaceService {
     }
 
     private async downloadPackage(release: PluginMarketplaceRelease): Promise<Buffer> {
+        if (!release.package) {
+            throw new Error(`Marketplace release ${release.manifest.id} ${release.version} does not provide a package distribution.`)
+        }
         if (isFileUrl(release.package.url)) {
             return await readFile(fileURLToPath(release.package.url))
         }
@@ -227,5 +356,97 @@ export class PluginMarketplaceService {
             throw new Error(`Marketplace package download failed: HTTP ${response.status} ${response.statusText}`)
         }
         return Buffer.from(await response.arrayBuffer())
+    }
+
+    private async packageSourceRelease(
+        snapshot: MarketplaceCatalogSnapshot,
+        entry: PluginMarketplaceEntry,
+        release: PluginMarketplaceRelease
+    ): Promise<Buffer> {
+        if (!release.source) {
+            throw new Error(`Marketplace release ${entry.id} ${release.version} does not provide a source distribution.`)
+        }
+        const files = await this.loadSourceFiles(snapshot, entry, release)
+        const manifestFile = files.find((file) => file.path === HAPI_PLUGIN_MANIFEST_FILE)
+        if (!manifestFile) {
+            throw new Error(`Marketplace source ${release.source.path} does not contain ${HAPI_PLUGIN_MANIFEST_FILE}.`)
+        }
+        const sourceManifest = JSON.parse(Buffer.from(manifestFile.contentBase64, 'base64').toString('utf8')) as unknown
+        if (stableStringify(sourceManifest) !== stableStringify(release.manifest)) {
+            throw new Error(`Marketplace catalog manifest does not match source manifest for ${entry.id} ${release.version}.`)
+        }
+        if (release.source.treeChecksum) {
+            const actualTreeChecksum = marketplaceSourceTreeChecksum(files)
+            if (normalizeChecksum(release.source.treeChecksum) !== actualTreeChecksum) {
+                throw new Error(`Marketplace source checksum mismatch for ${entry.id} ${release.version}: expected ${normalizeChecksum(release.source.treeChecksum)}, got ${actualTreeChecksum}.`)
+            }
+        }
+        return await createSourcePackageBytes(files, release)
+    }
+
+    private async loadSourceFiles(
+        snapshot: MarketplaceCatalogSnapshot,
+        entry: PluginMarketplaceEntry,
+        release: PluginMarketplaceRelease
+    ): Promise<SourceFile[]> {
+        const source = release.source
+        if (!source) {
+            throw new Error(`Marketplace release ${entry.id} ${release.version} does not provide source metadata.`)
+        }
+        assertRelativeSafePath(source.path)
+        if (!source.path.replace(/\\/g, '/').startsWith('plugins/')) {
+            throw new Error(`Marketplace source path must stay under plugins/: ${source.path}`)
+        }
+        if (isEmbeddedUrl(snapshot.sourceUrl)) {
+            return this.loadEmbeddedSourceFiles(entry, release)
+        }
+
+        const root = await this.resolveSourceRoot(snapshot)
+        const sourcePath = resolve(root, source.path)
+        if (!isPathInside(root, sourcePath)) {
+            throw new Error(`Marketplace source path escapes source root: ${source.path}`)
+        }
+        try {
+            return await readSourceDirectoryFiles(sourcePath)
+        } catch (error) {
+            if (source.embedded && isEnoent(error)) {
+                return this.loadEmbeddedSourceFiles(entry, release)
+            }
+            throw error
+        }
+    }
+
+    private loadEmbeddedSourceFiles(entry: PluginMarketplaceEntry, release: PluginMarketplaceRelease): SourceFile[] {
+        const source = release.source
+        if (!source) {
+            throw new Error(`Marketplace release ${entry.id} ${release.version} does not provide source metadata.`)
+        }
+        const embedded = embeddedPluginMarketplaceSources[entry.id as keyof typeof embeddedPluginMarketplaceSources]
+        if (!embedded) {
+            throw new Error(`Embedded marketplace source for ${entry.id} was not found.`)
+        }
+        if (embedded.path !== source.path) {
+            throw new Error(`Embedded marketplace source path mismatch for ${entry.id}: expected ${source.path}, got ${embedded.path}.`)
+        }
+        return [...embedded.files]
+    }
+
+    private async resolveSourceRoot(snapshot: MarketplaceCatalogSnapshot): Promise<string> {
+        if (this.sourceRoot) {
+            return resolve(this.sourceRoot)
+        }
+        if (isFileUrl(snapshot.sourceUrl)) {
+            const catalogPath = fileURLToPath(snapshot.sourceUrl)
+            return basename(dirname(catalogPath)) === 'marketplace'
+                ? dirname(dirname(catalogPath))
+                : dirname(catalogPath)
+        }
+        if (!isHttpUrl(snapshot.sourceUrl) && !isEmbeddedUrl(snapshot.sourceUrl)) {
+            const catalogPath = resolve(snapshot.sourceUrl)
+            return basename(dirname(catalogPath)) === 'marketplace'
+                ? dirname(dirname(catalogPath))
+                : dirname(catalogPath)
+        }
+        return process.cwd()
     }
 }

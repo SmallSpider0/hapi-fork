@@ -29,12 +29,21 @@ export const PluginMarketplacePackageSchema = z.object({
 }).strict()
 export type PluginMarketplacePackage = z.infer<typeof PluginMarketplacePackageSchema>
 
+export const PluginMarketplaceSourceSchema = z.object({
+    type: z.literal('hapi-source'),
+    path: z.string().min(1),
+    treeChecksum: Sha256ChecksumSchema.optional(),
+    embedded: z.boolean().optional()
+}).strict()
+export type PluginMarketplaceSource = z.infer<typeof PluginMarketplaceSourceSchema>
+
 export const PluginMarketplaceReleaseSchema = z.object({
     version: z.string().min(1),
     tag: z.string().min(1),
     releasedAt: z.string().datetime({ offset: true }).optional(),
     manifest: PluginManifestLiteSchema,
-    package: PluginMarketplacePackageSchema,
+    package: PluginMarketplacePackageSchema.optional(),
+    source: PluginMarketplaceSourceSchema.optional(),
     compatibility: PluginManifestLiteSchema.shape.compatibility.optional(),
     yanked: z.object({
         reason: z.string().min(1),
@@ -46,6 +55,20 @@ export const PluginMarketplaceReleaseSchema = z.object({
             code: 'custom',
             message: 'release version must match manifest.version',
             path: ['version']
+        })
+    }
+    if (!release.package && !release.source) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'release must provide package or source distribution',
+            path: ['package']
+        })
+    }
+    if (release.package && release.source) {
+        ctx.addIssue({
+            code: 'custom',
+            message: 'release must not provide both package and source distribution',
+            path: ['source']
         })
     }
 })
@@ -144,7 +167,9 @@ export const PluginMarketplaceInstallPlanResponseSchema = z.object({
         pluginId: z.string().min(1),
         repo: z.string().min(1),
         version: z.string().min(1),
-        assetUrl: z.string().min(1),
+        distribution: z.enum(['package', 'hapi-source']),
+        assetUrl: z.string().min(1).optional(),
+        sourcePath: z.string().min(1).optional(),
         checksum: z.string().min(1)
     }).strict(),
     plan: PluginInstallPlanResponseSchema

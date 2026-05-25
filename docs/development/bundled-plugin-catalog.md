@@ -1,7 +1,7 @@
 # Bundled plugin catalog policy
 
-Status: implemented on `feat/plugin-runtime-management-roadmap`
-Date: 2026-05-22
+Status: implemented; first-party marketplace source lives in `plugins/`
+Date: 2026-05-25
 
 ## Goals
 
@@ -12,6 +12,8 @@ Bundled plugin definitions are split into two classes:
 - **Core first-party plugins**: installed and discovered by default. They may be enabled by default only when replacing an existing core UX with plugin-owned semantics.
 - **Ordinary first-party plugins**: available through the normal plugin install path, but not installed or discovered by default.
 - **Examples**: developer/test samples. They are not discovered in normal Hub/Runner startup unless `HAPI_ENABLE_BUNDLED_EXAMPLES=1` is set.
+
+First-party marketplace plugin source is maintained under `plugins/<plugin-id>/`. The marketplace catalog and embedded source module are generated from that tree with `bun run marketplace:generate`. The default-installed bundled copy is materialized from the generated embedded source so marketplace source and built-in seed behavior stay aligned.
 
 ## Default-installed first-party plugin
 

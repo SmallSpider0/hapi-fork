@@ -158,7 +158,9 @@ export class PluginRuntimeStateController {
                     pluginId: options.installSource!.pluginId,
                     repo: options.installSource!.repo,
                     version: options.installSource!.version,
-                    assetUrl: options.installSource!.assetUrl,
+                    distribution: options.installSource!.distribution ?? (options.installSource!.sourcePath ? 'hapi-source' : 'package'),
+                    ...(options.installSource!.assetUrl ? { assetUrl: options.installSource!.assetUrl } : {}),
+                    ...(options.installSource!.sourcePath ? { sourcePath: options.installSource!.sourcePath } : {}),
                     checksum: install.checksum
                 }
             } : {})

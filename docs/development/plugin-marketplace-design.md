@@ -1,12 +1,13 @@
 # Plugin marketplace design
 
-Status: design + MVP implementation on `feat/plugin-runtime-management-roadmap`
-Date: 2026-05-22
+Status: source-first MVP implementation
+Date: 2026-05-25
 
 ## Goals
 
 - Add a simple HAPI plugin marketplace so users can discover and install plugins from Web and CLI.
-- Use GitHub as the default distribution path: developers publish plugin packages in their own GitHub Releases, then contribute metadata to this repo.
+- Use HAPI repository source as the default initial distribution path: developers contribute first-party plugin source under `plugins/<plugin-id>/`.
+- Keep GitHub Release package entries as an optional future/external distribution path.
 - Reuse existing package install, manifest-derived target planning, Hub/Runner RPC fan-out, diagnostics, and scoped config.
 - Keep Web descriptor-only; Web never executes third-party plugin JavaScript.
 - Ensure release builds do not bundle marketplace plugin packages or source trees from this repo.
@@ -15,6 +16,7 @@ Date: 2026-05-22
 
 - No paid store, ratings, comments, accounts, or publisher backend for MVP.
 - No runtime `npm install`.
+- No plugin-local build step for the source-first MVP; runtime entries are plain ESM JavaScript.
 - No arbitrary browser-side plugin JS.
 - No dependency graph beyond future optional warnings; install one plugin package at a time.
 - No sandbox claim: Hub/Runner plugins remain trusted local in-process code.
@@ -36,7 +38,9 @@ MVP marketplace additions in this branch:
 
 - Shared marketplace catalog/install schemas.
 - Hub marketplace fetch/cache service and REST routes.
-- GitHub Release package download, checksum validation, manifest/catalog match validation, and reuse of the existing install-plan flow.
+- HAPI source plugin catalog generation and embedded source payloads.
+- Source tree checksum validation, manifest/catalog match validation, temporary package envelope creation, and reuse of the existing install-plan flow.
+- GitHub Release package download remains supported for external catalog entries.
 - Marketplace source metadata stored on Hub/Runner package installs.
 - CLI marketplace list/info/install commands.
 - Web Settings marketplace search/preview/install panel.
@@ -51,8 +55,8 @@ Remaining gaps:
 Release packaging baseline:
 
 - `bun run build:single-exe(:all)` compiles `cli/src/bootstrap.ts`, embeds Web `web/dist`, and embeds tool assets via explicit imports.
-- A marketplace directory is safe only if it stays metadata-only and runtime code fetches catalog data over HTTP/file URL. Static imports or committed plugin archives would risk bundling.
-- This design adds `bun run marketplace:check` (`marketplace:validate` + `marketplace:check-packaging`), wired into `build`, `build:single-exe`, and `build:single-exe:all`.
+- A marketplace directory is safe only if it stays metadata-only. First-party source plugins live under `plugins/` and are embedded through generated TypeScript (`shared/src/plugins/marketplaceSources.generated.ts`).
+- This design adds `bun run marketplace:check` (`marketplace:generate:check` + `marketplace:validate` + `marketplace:check-packaging`), wired into `build`, `build:single-exe`, and `build:single-exe:all`.
 
 ## External references
 
@@ -67,16 +71,18 @@ Adopted ideas:
 
 ### Marketplace source
 
-MVP source is a static catalog:
+MVP source is a generated static catalog:
 
 ```text
-marketplace/catalog.v1.json       # tracked metadata only
+plugins/<plugin-id>/              # first-party plugin source
+marketplace/catalog.v1.json       # generated tracked metadata only
+shared/src/plugins/marketplaceSources.generated.ts
 ```
 
-Runtime default URL after merge:
+Runtime default source:
 
 ```text
-https://raw.githubusercontent.com/tiann/hapi/main/marketplace/catalog.v1.json
+embedded://hapi-marketplace/catalog.v1.json
 ```
 
 Config overrides:
@@ -84,24 +90,26 @@ Config overrides:
 - `HAPI_PLUGIN_MARKETPLACE_URL` for a single custom catalog URL.
 - `$HAPI_HOME/plugin-marketplaces.json` later for multiple sources.
 - Local file URLs allowed for development.
+- `HAPI_PLUGIN_MARKETPLACE_SOURCE_ROOT` can point a local catalog at a checkout root for source-plugin development.
 
-The binary must not import this catalog. Hub fetches it at runtime, caches it in memory/disk, and exposes normalized results to Web/CLI.
+The binary imports the generated embedded source catalog so built-in marketplace plugins are available without a Git checkout or network access. Hub still supports HTTP/file catalogs for external package entries.
 
 ### Plugin package ownership
 
-Marketplace does not host plugin code in this repo.
+The initial marketplace hosts first-party plugin source in this repo.
 
 Developer flow:
 
+1. Developer edits `plugins/<plugin-id>/`.
+2. Plugin root contains `hapi.plugin.json`, `hapi.marketplace.json`, and `src/*.js`.
+3. Developer runs `bun run marketplace:generate`.
+4. Developer opens a PR containing source and generated metadata updates.
+
+External package flow remains supported for later ecosystem use:
+
 1. Developer maintains a public GitHub repo.
-2. Repo root contains `README.md`, `LICENSE`, `hapi.plugin.json`, and optional `versions.json`.
-3. Developer builds a plugin package:
-   - `plugin-id-vX.Y.Z.hapi-plugin.tgz` or `.zip`
-   - includes `hapi.plugin.json`
-   - includes `hapi.plugin.package.json`
-   - package manifest lists file checksums and package checksum
-4. Developer publishes a GitHub Release whose tag matches `hapi.plugin.json.version`.
-5. Developer opens PR adding one metadata entry to HAPI marketplace catalog.
+2. Developer builds a `.tgz` or `.zip` HAPI plugin package.
+3. Developer publishes it to GitHub Releases and adds a package release entry to a catalog.
 
 ### Catalog shape
 
@@ -141,13 +149,19 @@ type PluginMarketplaceRelease = {
     tag: string
     releasedAt?: string
     manifest: PluginManifestLite
-    package: {
+    package?: {
         filename: string
         url: string
         format: 'tgz' | 'zip'
         checksum: `sha256:${string}`
         size?: number
         packageManifestUrl?: string
+    }
+    source?: {
+        type: 'hapi-source'
+        path: `plugins/${string}`
+        treeChecksum: `sha256:${string}`
+        embedded?: boolean
     }
     compatibility?: PluginManifestLite['compatibility']
     yanked?: {
@@ -161,9 +175,11 @@ Rules:
 
 - `entry.id === release.manifest.id`.
 - Latest non-yanked compatible release is default.
-- `release.tag` should match plugin version by convention (`v${version}` or exact version), but catalog stores explicit asset URL to avoid guessing.
-- `package.url` should be a GitHub Release asset URL or raw URL; redirect allowed, final host shown before install.
+- `release.tag` should match plugin version by convention (`hapi-source-${version}` for built-ins, `v${version}` or exact version for packages).
+- For package releases, `package.url` should be a GitHub Release asset URL or raw URL; redirect allowed, final host shown before install.
+- For source releases, `source.path` must stay under `plugins/` and `treeChecksum` covers sorted file path/content pairs.
 - Catalog may embed `manifest` to render and plan without downloading every package. Install still downloads package and re-validates embedded `hapi.plugin.package.json`.
+  Source installs re-read embedded/local source files, validate tree checksum, validate manifest match, then create a temporary package envelope for the existing install-plan path.
 
 ### Optional `versions.json`
 
@@ -215,11 +231,11 @@ type PluginMarketplaceInstallPlanRequest = {
 Hub behavior:
 
 1. Resolve marketplace entry and compatible release.
-2. Download package to temp file.
-3. Verify checksum before extraction.
+2. If release is package-backed: download package and verify checksum.
+3. If release is HAPI-source-backed: load embedded/local source tree, verify `treeChecksum`, verify `hapi.plugin.json` matches catalog manifest, and create a temporary `.tgz` package envelope.
 4. Inspect `hapi.plugin.package.json`.
-5. Confirm catalog manifest and package manifest agree.
-6. Convert to current `PluginInstallPlanRequest` using `contentBase64`, `checksum`, `format`, and `manifest`.
+5. Confirm catalog manifest and package/source manifest agree.
+6. Convert to current `PluginInstallPlanRequest` using `contentBase64`, `checksum`, `format`, and marketplace source metadata.
 7. Reuse `createInstallPlan()` and existing execute path.
 
 Install route can either return a plan only or internally create + execute after user confirmation. Web should prefer explicit plan preview.
@@ -261,7 +277,7 @@ Settings → Plugins:
   - permissions/secrets/network from manifest
   - release selector
   - target compatibility preview
-  - package host/checksum
+- source path or package host/checksum
   - install/update button
 - Install flow:
   1. Click install.
@@ -331,13 +347,14 @@ Manual review:
 
 Invariant:
 
-> The HAPI release artifact may include marketplace metadata and UI code, but must not include third-party marketplace plugin packages or plugin source trees.
+> The HAPI release artifact may include first-party source plugins through generated embedded source, marketplace metadata, and UI code, but must not include third-party marketplace plugin packages.
 
 Rules:
 
-- `marketplace/` stores JSON/Markdown metadata only.
-- Plugin packages live in contributors' GitHub Releases.
-- Runtime code fetches catalog/package URLs; it must not statically import `marketplace/**`.
+- `marketplace/` stores generated JSON/Markdown metadata only.
+- First-party source plugins live in `plugins/` and are embedded through a generated TypeScript module.
+- External plugin packages live in contributors' GitHub Releases.
+- Runtime code must not statically import `marketplace/**`.
 - Web build must not copy `marketplace/**` into `web/dist`.
 - Bun single-exe build embeds only explicit source imports and generated Web assets.
 - Release/build scripts run `bun run marketplace:check`.
@@ -347,14 +364,17 @@ Guard behavior:
 - fails on `marketplace/**/*.tgz`, `.tar.gz`, `.zip`;
 - fails on `marketplace/**/hapi.plugin.json`;
 - fails on `marketplace/**/dist/**` or `marketplace/**/node_modules/**`;
+- fails on `plugins/**/node_modules/**`, `plugins/**/dist/**`, and plugin package archives;
 - fails on relative static imports from runtime source into top-level `marketplace/**`.
 
 Catalog validator behavior:
 
+- verifies generated marketplace files are up to date;
 - validates `marketplace/catalog.v1.json` with the shared marketplace schema;
 - enforces unique plugin ids and release versions;
-- enforces GitHub Release asset URLs under the declared `owner/repo`;
+- enforces GitHub Release asset URLs under the declared `owner/repo` for package releases;
 - enforces package filename extension matches `format`;
+- enforces source releases stay under `plugins/` and declare a tree checksum;
 - enforces SHA-256 checksums through the shared schema.
 
 ## Security posture
@@ -364,7 +384,7 @@ Marketplace should show this before install:
 - Hub/Runner plugins are trusted local code.
 - Manifest permissions are disclosure/UX metadata, not a hard sandbox.
 - Install only from maintainers/repos you trust.
-- Check package checksum and source repo.
+- Check source tree/package checksum and source repo.
 - Secrets are still provided through environment/context, not Web config storage.
 
 Future hardening:
@@ -377,14 +397,17 @@ Future hardening:
 
 ## Implementation phases
 
-### Phase 1: schema + fetch service
+### Phase 1: schema + source catalog generation
 
 - Add `shared/src/plugins/marketplace.ts` schemas.
+- Add `plugins/<plugin-id>/` source layout.
+- Add generator for `marketplace/catalog.v1.json` and embedded source module.
 - Add `hub/src/plugins/marketplaceService.ts`:
   - source URL config;
   - fetch/cache/refresh;
   - release selection;
-  - package download + checksum verify.
+  - package download + checksum verify;
+  - embedded/local HAPI source package envelope creation.
 - Add hub routes above.
 - Tests: schema parse, release selection, checksum mismatch, yanked release ignored.
 
@@ -412,7 +435,7 @@ Future hardening:
 
 - Add catalog validator script.
 - Add GitHub workflow on PR touching `marketplace/**`.
-- Generate `marketplace/catalog.v1.json` from per-plugin entries if PR conflicts become common.
+- Generate `marketplace/catalog.v1.json` and `shared/src/plugins/marketplaceSources.generated.ts` from `plugins/**`.
 
 ## Acceptance gates
 
@@ -420,9 +443,9 @@ Future hardening:
 - `bun typecheck`
 - `bun run test`
 - `bun run build:single-exe` or CI `bun run build:single-exe:all`
-- Manual install test from a sample GitHub Release asset:
+- Manual install test from an embedded source marketplace plugin:
   1. marketplace list shows entry;
   2. install plan matches manifest positions;
   3. install executes to Hub and selected Runner;
-  4. release artifact size does not grow by plugin package size;
-  5. `grep -R "marketplace/.*hapi.plugin.json\|\.hapi-plugin\|\.tgz\|\.zip" cli/dist-exe` finds no plugin payload paths.
+  4. installed metadata records `distribution: hapi-source`;
+  5. release artifact contains generated first-party source but no committed marketplace package archives.
