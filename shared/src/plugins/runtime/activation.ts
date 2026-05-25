@@ -90,6 +90,7 @@ export type RuntimeActivationRegistry<TContext> = {
         pluginId: string
         config?: Record<string, unknown>
         declaredSecrets?: string[]
+        declaredNetwork?: string[]
         env?: NodeJS.ProcessEnv
     }): { ctx: TContext; close(): void }
     disposeFrom(startIndex: number): Promise<void>
@@ -140,6 +141,7 @@ export async function activateRuntimeRecord<
     }
 
     const declaredSecrets = options.record.manifest?.permissions?.secrets ?? []
+    const declaredNetwork = options.record.manifest?.permissions?.network ?? []
     const registry = options.createRegistry()
     try {
         const importPath = await materializeReloadImportPath({
@@ -172,6 +174,7 @@ export async function activateRuntimeRecord<
             pluginId,
             config: options.record.config,
             declaredSecrets,
+            declaredNetwork,
             env: options.env
         })
         try {

@@ -142,6 +142,10 @@ function contributionSupportSuffix(t: (key: string) => string, entry: unknown): 
     return typeof supportStatus === 'string' ? ` · ${t(`settings.plugins.supportStatus.${supportStatus}`)}` : ''
 }
 
+function contributionExperimentalSuffix(t: (key: string) => string): string {
+    return ` · ${t('settings.plugins.contribution.experimental')}`
+}
+
 function formatConfig(value: unknown): string {
     return JSON.stringify(value ?? {}, null, 2)
 }
@@ -347,17 +351,17 @@ function ContributionsList(props: { plugin: PluginDetail; t: (key: string, param
         })),
         ...(plugin.contributions.voice?.providers ?? []).map((entry) => ({
             key: `voice-provider-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.voiceProvider')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}`,
+            label: `${t('settings.plugins.contribution.voiceProvider')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}${contributionExperimentalSuffix(t)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.deployment?.packs ?? []).map((entry) => ({
             key: `deployment-pack-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.deploymentPack')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}`,
+            label: `${t('settings.plugins.contribution.deploymentPack')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}${contributionExperimentalSuffix(t)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.integration?.protocolBridges ?? []).map((entry) => ({
             key: `integration-protocol-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.protocolBridge')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}`,
+            label: `${t('settings.plugins.contribution.protocolBridge')} · ${contributionName(t, locale, plugin.id, entry)}${contributionSupportSuffix(t, entry)}${contributionExperimentalSuffix(t)}`,
             variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.web?.settingsPanels ?? []).map((entry) => ({
@@ -370,11 +374,13 @@ function ContributionsList(props: { plugin: PluginDetail; t: (key: string, param
         })),
         ...(plugin.contributions.web?.actions ?? []).map((entry) => ({
             key: `web-action-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webAction')} · ${contributionName(t, locale, plugin.id, entry)}`
+            label: `${t('settings.plugins.contribution.webAction')} · ${contributionName(t, locale, plugin.id, entry)}${contributionExperimentalSuffix(t)}`,
+            variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.web?.badges ?? []).map((entry) => ({
             key: `web-badge-${String((entry as { id?: unknown }).id)}`,
-            label: `${t('settings.plugins.contribution.webBadge')} · ${contributionName(t, locale, plugin.id, entry)}`
+            label: `${t('settings.plugins.contribution.webBadge')} · ${contributionName(t, locale, plugin.id, entry)}${contributionExperimentalSuffix(t)}`,
+            variant: 'warning' as BadgeVariant
         })),
         ...(plugin.contributions.web?.composerActions ?? []).map((entry) => ({
             key: `web-composer-action-${String((entry as { id?: unknown }).id)}`,
@@ -454,6 +460,7 @@ function DeveloperDetails(props: {
 
                 <div className="space-y-2">
                     <div className="font-medium">{t('settings.plugins.detail.permissions')}</div>
+                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2 text-xs text-[var(--app-hint)]">{t('settings.plugins.detail.permissionsDescription')}</div>
                     <div>
                         <div className="mb-1 font-medium text-[var(--app-hint)]">{t('settings.plugins.detail.networkLabel')} · {targetScopeLabel(t, plugin.target?.scope)}</div>
                         {plugin.permissions.network.length === 0 ? <div className="text-[var(--app-hint)]">{t('settings.plugins.permissions.networkEmpty')}</div> : <div className="flex flex-wrap gap-2">{plugin.permissions.network.map((entry) => <Chip key={entry} label={entry} variant="warning" />)}</div>}

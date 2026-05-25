@@ -28,6 +28,7 @@
         "./plugins/runtime/compatibility": "./src/plugins/runtime/compatibility.ts",
         "./plugins/runtime/diagnostics": "./src/plugins/runtime/diagnostics.ts",
         "./plugins/runtime/fsHelpers": "./src/plugins/runtime/fsHelpers.ts",
+        "./plugins/runtime/networkPolicy": "./src/plugins/runtime/networkPolicy.ts",
         "./plugins/runtime/registryBase": "./src/plugins/runtime/registryBase.ts",
         "./plugins/runtime/reloadController": "./src/plugins/runtime/reloadController.ts",
         "./plugins/runtime/stateController": "./src/plugins/runtime/stateController.ts"

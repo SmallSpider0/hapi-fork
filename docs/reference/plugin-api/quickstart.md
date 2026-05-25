@@ -313,4 +313,5 @@ Hub-local path install reads files on the Hub machine.
 - Hub and Runner runtime plugins are trusted local in-process JavaScript.
 - Disabled or invalid runtime plugins are not imported.
 - Secrets are read from environment variables through `ctx.secrets.get(name)` and must not be saved in `plugins.json`.
+- Network requests should use `ctx.network.fetch`; `permissions.network` is a basic SDK allow-list check, not a sandbox.
 - Web contributions are descriptors only; Web does not execute plugin JavaScript.

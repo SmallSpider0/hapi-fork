@@ -42,6 +42,11 @@ export type PluginSecretReader = {
     get(name: string): string | undefined
 }
 
+/** Network client limited to permissions.network declarations. Basic SDK check only; not a sandbox. */
+export type PluginNetwork = {
+    fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>
+}
+
 /** Hub runtime notification channel contribution. */
 export type PluginNotificationChannel = {
     send(event: PluginNotificationEvent): void | Promise<void>
@@ -125,6 +130,7 @@ export type HubPluginContext = {
     logger: PluginLogger
     config: PluginConfigReader
     secrets: PluginSecretReader
+    network: PluginNetwork
     notifications: {
         registerChannel(channel: PluginNotificationChannel): Disposable
     }
@@ -209,6 +215,7 @@ export type RunnerPluginContext = {
     logger: PluginLogger
     config: PluginConfigReader
     secrets: PluginSecretReader
+    network: PluginNetwork
     runtime: {
         registerSpawnOptionsProvider(provider: RunnerSpawnOptionsProviderContribution): Disposable
         registerEnvironmentProvider(provider: RunnerEnvironmentProviderContribution): Disposable

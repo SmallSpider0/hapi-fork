@@ -116,6 +116,32 @@ function installTargetLabel(target: PluginTargetSummary): string {
     return target.displayName ?? target.scope
 }
 
+function networkPermissionWarnings(manifest: PluginManifestLite): string[] {
+    const declarations = manifest.permissions?.network ?? []
+    if (declarations.length === 0) return []
+
+    const warnings = [
+        `Plugin declares network access through ctx.network.fetch: ${declarations.join(', ')}. This is a basic SDK check, not a sandbox; install only trusted code.`
+    ]
+    const broadDeclarations = declarations.filter(isBroadNetworkDeclaration)
+    if (broadDeclarations.length > 0) {
+        warnings.push(`Plugin declares wildcard or broad network targets: ${broadDeclarations.join(', ')}. Review them before installing.`)
+    }
+    return warnings
+}
+
+function isBroadNetworkDeclaration(value: string): boolean {
+    const trimmed = value.trim().toLowerCase()
+    if (!trimmed) return false
+    if (trimmed === '*' || trimmed.startsWith('*://')) return true
+    try {
+        const url = new URL(trimmed)
+        return url.hostname.includes('*')
+    } catch {
+        return trimmed.includes('*')
+    }
+}
+
 export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): PluginInstallPlanResponse {
     const positions = inferPluginInstallPositions(options.manifest)
     const needsHub = positions.includes('hub')
@@ -125,7 +151,7 @@ export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): 
     const compatibleMode = runnerMode === 'compatible'
     const offlineRunnerPolicy = options.manifest.install?.offlineRunnerPolicy ?? 'skip'
     const targets: PluginInstallPlanTarget[] = []
-    const warnings: string[] = []
+    const warnings: string[] = networkPermissionWarnings(options.manifest)
     const blockingErrors: string[] = []
 
     const hubCandidate = options.candidates.find((candidate) => candidate.target.runtime === 'hub')

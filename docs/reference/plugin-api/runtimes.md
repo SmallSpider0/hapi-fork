@@ -61,6 +61,16 @@ export type PluginSecretReader = {
 }
 ```
 
+### PluginNetwork
+
+Network client limited to permissions.network declarations. Basic SDK check only; not a sandbox.
+
+```ts
+export type PluginNetwork = {
+    fetch(input: string | URL | Request, init?: RequestInit): Promise<Response>
+}
+```
+
 ## Hub runtime
 
 Hub plugins can register notification channels and chat composer message-action planners. They do not receive raw Hub internals.
@@ -74,6 +84,7 @@ export type HubPluginContext = {
     logger: PluginLogger
     config: PluginConfigReader
     secrets: PluginSecretReader
+    network: PluginNetwork
     notifications: {
         registerChannel(channel: PluginNotificationChannel): Disposable
     }
@@ -179,6 +190,7 @@ export type RunnerPluginContext = {
     logger: PluginLogger
     config: PluginConfigReader
     secrets: PluginSecretReader
+    network: PluginNetwork
     runtime: {
         registerSpawnOptionsProvider(provider: RunnerSpawnOptionsProviderContribution): Disposable
         registerEnvironmentProvider(provider: RunnerEnvironmentProviderContribution): Disposable

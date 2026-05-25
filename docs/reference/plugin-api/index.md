@@ -21,6 +21,7 @@ HAPI plugins are trusted local extension packages. Hub and Runner runtimes execu
 - Disabled or invalid runtime plugins are not imported.
 - Runtime entry paths must stay under the plugin root after `realpath`.
 - Secret values are read from environment variables through `ctx.secrets.get(name)` and must not be saved in `$HAPI_HOME/plugins.json`.
+- Network requests should go through `ctx.network.fetch`; `permissions.network` is a basic SDK allow-list check, not a sandbox boundary.
 - Hub/Runner plugin code is trusted local code, not sandboxed code.
 - Plugins cannot receive raw Store, SQLite, Socket.IO, SSE, or RPC gateway objects.
 

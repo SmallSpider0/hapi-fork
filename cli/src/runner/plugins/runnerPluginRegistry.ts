@@ -62,6 +62,7 @@ export class RunnerPluginRegistry extends PluginRuntimeRegistryBase<RunnerRuntim
         pluginId: string
         config?: Record<string, unknown>
         declaredSecrets?: string[]
+        declaredNetwork?: string[]
         env?: NodeJS.ProcessEnv
     }): { ctx: RunnerPluginContext; close(): void } {
         this.disposeSecretState.env = args.env ?? process.env
@@ -80,6 +81,7 @@ export class RunnerPluginRegistry extends PluginRuntimeRegistryBase<RunnerRuntim
             logger: common.logger,
             config: common.config,
             secrets: common.secrets,
+            network: common.network,
             runtime: {
                 registerSpawnOptionsProvider: (provider: unknown): Disposable => register('spawnOptionsProvider', provider),
                 registerEnvironmentProvider: (provider: unknown): Disposable => register('environmentProvider', provider),

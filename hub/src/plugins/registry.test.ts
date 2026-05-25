@@ -36,6 +36,19 @@ describe('HubPluginRegistry', () => {
         expect(JSON.stringify(registry.diagnostics)).not.toContain('secret-value')
     })
 
+    it('exposes network fetch with declared permission checks', async () => {
+        const registry = new HubPluginRegistry()
+        const activation = registry.createContext({
+            pluginId: 'com.example.plugin',
+            declaredNetwork: ['https://api.example.com']
+        })
+
+        await expect(activation.ctx.network.fetch('https://other.example.com/secret-path')).rejects.toThrow('not declared')
+
+        expect(registry.diagnostics.map((entry) => entry.code)).toEqual(['plugin-network-blocked'])
+        expect(JSON.stringify(registry.diagnostics)).not.toContain('secret-path')
+    })
+
     it('redacts declared secrets from logger messages and circular object arguments', () => {
         const registry = new HubPluginRegistry()
         const activation = registry.createContext({

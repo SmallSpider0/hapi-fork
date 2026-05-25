@@ -26,6 +26,10 @@ Supported plugin API version: `0.1`
 | `compatibility` | no | object | — |
 | `install` | no | object | — |
 
+## Permissions
+- `permissions.network`: HTTP(S) origins or URL prefixes allowed for `ctx.network.fetch`. Examples: `https://api.example.com`, `https://*.example.com/api/*`.
+- `permissions.secrets`: environment variable names readable through `ctx.secrets.get(name)`.
+- Permissions are install-time declarations plus SDK checks; Hub/Runner runtime JavaScript remains trusted local code, not sandboxed code.
 ## Minimal example
 
 ```json

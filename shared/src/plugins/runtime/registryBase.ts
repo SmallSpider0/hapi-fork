@@ -1,5 +1,6 @@
-import type { Disposable, PluginConfigReader, PluginLogger, PluginSecretReader } from '../sdk'
+import type { Disposable, PluginConfigReader, PluginLogger, PluginNetwork, PluginSecretReader } from '../sdk'
 import type { PluginDiagnostic } from '../types'
+import { createPluginNetwork } from './networkPolicy'
 
 export type PluginLogLevel = keyof PluginLogger
 
@@ -24,6 +25,7 @@ export type RuntimeContextParts = {
     logger: PluginLogger
     config: PluginConfigReader
     secrets: PluginSecretReader
+    network: PluginNetwork
     declaredSecrets: string[]
     env: NodeJS.ProcessEnv
     assertAccepting(message?: string): void
@@ -78,6 +80,7 @@ export abstract class PluginRuntimeRegistryBase<TType extends string> {
         pluginId: string
         config?: Record<string, unknown>
         declaredSecrets?: string[]
+        declaredNetwork?: string[]
         env?: NodeJS.ProcessEnv
     }): RuntimeContextParts {
         let acceptingRegistrations = true
@@ -105,6 +108,11 @@ export abstract class PluginRuntimeRegistryBase<TType extends string> {
                     return env[name]
                 }
             },
+            network: createPluginNetwork({
+                pluginId: args.pluginId,
+                declaredNetwork: args.declaredNetwork ?? [],
+                onDiagnostic: (severity, code, message) => this.addDiagnostic(severity, code, message, args.pluginId)
+            }),
             declaredSecrets,
             env,
             assertAccepting: (message?: string) => {

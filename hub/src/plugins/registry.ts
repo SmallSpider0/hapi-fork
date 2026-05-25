@@ -39,6 +39,7 @@ export class HubPluginRegistry extends PluginRuntimeRegistryBase<'messageAction'
         pluginId: string
         config?: Record<string, unknown>
         declaredSecrets?: string[]
+        declaredNetwork?: string[]
         env?: NodeJS.ProcessEnv
     }): { ctx: HubPluginContext; close(): void } {
         const common = this.createCommonContextParts(args)
@@ -48,6 +49,7 @@ export class HubPluginRegistry extends PluginRuntimeRegistryBase<'messageAction'
             logger: common.logger,
             config: common.config,
             secrets: common.secrets,
+            network: common.network,
             notifications: {
                 registerChannel: (channel: PluginNotificationChannel): Disposable => {
                     common.assertAccepting('Plugin notification channels can only be registered during activate(ctx).')

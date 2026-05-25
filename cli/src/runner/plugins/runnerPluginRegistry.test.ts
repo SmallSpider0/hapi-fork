@@ -86,6 +86,20 @@ describe('RunnerPluginRegistry', () => {
         expect(registry.diagnostics.every((entry) => entry.message.startsWith('[runner-plugin:runner-1:com.example.runner]'))).toBe(true)
     })
 
+    it('exposes network fetch with runner diagnostic prefix', async () => {
+        const registry = new RunnerPluginRegistry('runner-1')
+        const activation = registry.createContext({
+            pluginId: 'com.example.runner',
+            declaredNetwork: ['https://api.example.com']
+        })
+
+        await expect(activation.ctx.network.fetch('https://other.example.com/secret-path')).rejects.toThrow('not declared')
+
+        expect(registry.diagnostics.map((entry) => entry.code)).toEqual(['plugin-network-blocked'])
+        expect(registry.diagnostics[0]?.message.startsWith('[runner-plugin:runner-1:com.example.runner]')).toBe(true)
+        expect(JSON.stringify(registry.diagnostics)).not.toContain('secret-path')
+    })
+
     it('allows agent ids with namespaces while contribution ids stay manifest-local', () => {
         const registry = new RunnerPluginRegistry('runner-1')
         const activation = registry.createContext({ pluginId: 'com.example.runner' })

@@ -491,9 +491,10 @@ describe('HubPluginManager', () => {
         const calls: Array<{ url: string; body: URLSearchParams }> = []
         const originalFetch = globalThis.fetch
         globalThis.fetch = (async (url: string | URL | Request, init?: RequestInit) => {
+            const request = url instanceof Request ? url : new Request(url instanceof URL ? url.href : url, init)
             calls.push({
-                url: String(url),
-                body: init?.body as URLSearchParams
+                url: request.url,
+                body: new URLSearchParams(await request.clone().text())
             })
             return new Response('ok', { status: 200 })
         }) as typeof fetch

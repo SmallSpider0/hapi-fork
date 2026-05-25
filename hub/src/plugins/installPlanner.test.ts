@@ -259,6 +259,33 @@ describe('plugin install planner', () => {
         expect(overwrite.targets[0]).toMatchObject({ status: 'compatible', action: 'overwrite', existingVersion: '1.0.0' })
     })
 
+    it('warns when plugins declare network access', () => {
+        const plugin = manifest({
+            runtimes: { hub: { entry: 'hub.js' } },
+            permissions: { network: ['https://api.example.com'] }
+        })
+
+        const plan = planFor(plugin, [hubCandidate()])
+
+        expect(plan.warnings).toEqual([
+            'Plugin declares network access through ctx.network.fetch: https://api.example.com. This is a basic SDK check, not a sandbox; install only trusted code.'
+        ])
+    })
+
+    it('adds an extra warning for wildcard network targets', () => {
+        const plugin = manifest({
+            runtimes: { hub: { entry: 'hub.js' } },
+            permissions: { network: ['https://*.example.com'] }
+        })
+
+        const plan = planFor(plugin, [hubCandidate()])
+
+        expect(plan.warnings).toEqual([
+            'Plugin declares network access through ctx.network.fetch: https://*.example.com. This is a basic SDK check, not a sandbox; install only trusted code.',
+            'Plugin declares wildcard or broad network targets: https://*.example.com. Review them before installing.'
+        ])
+    })
+
     it('does not add generic Runner readiness errors when a required target already explains the conflict', () => {
         const plugin = manifest({
             version: '1.0.0',

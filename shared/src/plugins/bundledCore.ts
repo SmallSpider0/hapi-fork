@@ -247,7 +247,7 @@ export function activate(ctx) {
             const controller = new AbortController()
             const timeout = setTimeout(() => controller.abort(), readNumber(ctx, 'timeoutMs', 10000, 1000, 60000))
             try {
-                const response = await fetch(url, {
+                const response = await ctx.network.fetch(url, {
                     method: 'POST',
                     headers: { 'content-type': 'application/x-www-form-urlencoded' },
                     body: new URLSearchParams({

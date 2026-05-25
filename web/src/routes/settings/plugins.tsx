@@ -672,10 +672,11 @@ export function MarketplaceDetailPanel(props: {
                     <div className="space-y-1 text-xs text-[var(--app-hint)]">
                         <div>{t('settings.plugins.detail.networkLabel')}: {network.length ? network.join(', ') : t('settings.plugins.permissions.networkEmpty')}</div>
                         <div>{t('settings.plugins.detail.secretsLabel')}: {secrets.length ? secrets.join(', ') : t('settings.plugins.permissions.secretsEmpty')}</div>
+                        <div className="pt-1">{t('settings.plugins.detail.permissionsDescription')}</div>
                     </div>
                 </div>
                 <div className="rounded-lg border border-[var(--app-border)] p-3">
-                    <div className="mb-2 font-medium">{t('settings.plugins.detail.contributions')}</div>
+                    <div className="mb-2 font-medium">{t('settings.plugins.marketplace.features')}</div>
                     <div className="flex flex-wrap gap-1">
                         {(entry.capabilities ?? []).length > 0
                             ? entry.capabilities?.map((capability) => <Chip key={`${entry.id}-${capability.kind}`} label={capability.label ?? t(`settings.plugins.capabilityKind.${capability.kind}`)} />)
