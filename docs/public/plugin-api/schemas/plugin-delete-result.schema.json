@@ -78,6 +78,13 @@
                             "type": "string",
                             "minLength": 1
                         },
+                        "supportedPluginApiVersions": {
+                            "type": "array",
+                            "items": {
+                                "type": "string",
+                                "minLength": 1
+                            }
+                        },
                         "os": {
                             "type": "string",
                             "minLength": 1
@@ -182,6 +189,13 @@
                                     "pluginApiVersion": {
                                         "type": "string",
                                         "minLength": 1
+                                    },
+                                    "supportedPluginApiVersions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
                                     },
                                     "os": {
                                         "type": "string",
@@ -486,6 +500,13 @@
                                                                 "type": "string",
                                                                 "minLength": 1
                                                             },
+                                                            "supportedPluginApiVersions": {
+                                                                "type": "array",
+                                                                "items": {
+                                                                    "type": "string",
+                                                                    "minLength": 1
+                                                                }
+                                                            },
                                                             "os": {
                                                                 "type": "string",
                                                                 "minLength": 1
@@ -610,6 +631,13 @@
                                                 "pluginApiVersion": {
                                                     "type": "string",
                                                     "minLength": 1
+                                                },
+                                                "supportedPluginApiVersions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    }
                                                 },
                                                 "os": {
                                                     "type": "string",
@@ -856,6 +884,13 @@
                                     "type": "string",
                                     "minLength": 1
                                 },
+                                "supportedPluginApiVersions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
+                                },
                                 "os": {
                                     "type": "string",
                                     "minLength": 1
@@ -960,6 +995,13 @@
                                             "pluginApiVersion": {
                                                 "type": "string",
                                                 "minLength": 1
+                                            },
+                                            "supportedPluginApiVersions": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
                                             },
                                             "os": {
                                                 "type": "string",
@@ -1133,6 +1175,13 @@
                                                                     "pluginApiVersion": {
                                                                         "type": "string",
                                                                         "minLength": 1
+                                                                    },
+                                                                    "supportedPluginApiVersions": {
+                                                                        "type": "array",
+                                                                        "items": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
                                                                     },
                                                                     "os": {
                                                                         "type": "string",
@@ -1455,6 +1504,13 @@
                                                                         "type": "string",
                                                                         "minLength": 1
                                                                     },
+                                                                    "supportedPluginApiVersions": {
+                                                                        "type": "array",
+                                                                        "items": {
+                                                                            "type": "string",
+                                                                            "minLength": 1
+                                                                        }
+                                                                    },
                                                                     "os": {
                                                                         "type": "string",
                                                                         "minLength": 1
@@ -1579,6 +1635,13 @@
                                                         "pluginApiVersion": {
                                                             "type": "string",
                                                             "minLength": 1
+                                                        },
+                                                        "supportedPluginApiVersions": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
                                                         },
                                                         "os": {
                                                             "type": "string",
@@ -1882,6 +1945,13 @@
                                                         "pluginApiVersion": {
                                                             "type": "string",
                                                             "minLength": 1
+                                                        },
+                                                        "supportedPluginApiVersions": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
                                                         },
                                                         "os": {
                                                             "type": "string",
@@ -2204,6 +2274,13 @@
                                                             "type": "string",
                                                             "minLength": 1
                                                         },
+                                                        "supportedPluginApiVersions": {
+                                                            "type": "array",
+                                                            "items": {
+                                                                "type": "string",
+                                                                "minLength": 1
+                                                            }
+                                                        },
                                                         "os": {
                                                             "type": "string",
                                                             "minLength": 1
@@ -2328,6 +2405,13 @@
                                             "pluginApiVersion": {
                                                 "type": "string",
                                                 "minLength": 1
+                                            },
+                                            "supportedPluginApiVersions": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
                                             },
                                             "os": {
                                                 "type": "string",
@@ -2751,6 +2835,13 @@
                                                     "type": "string",
                                                     "minLength": 1
                                                 },
+                                                "supportedPluginApiVersions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    }
+                                                },
                                                 "os": {
                                                     "type": "string",
                                                     "minLength": 1
@@ -2875,6 +2966,13 @@
                                     "pluginApiVersion": {
                                         "type": "string",
                                         "minLength": 1
+                                    },
+                                    "supportedPluginApiVersions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
                                     },
                                     "os": {
                                         "type": "string",

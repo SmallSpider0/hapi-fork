@@ -2,7 +2,57 @@
 
 # Plugin manifest
 `hapi.plugin.json` is the cold-path contract. HAPI validates it before importing any runtime entry.
-Supported plugin API version: `0.1`
+Current plugin API version: `0.1`; supported versions in this checkout: `0.1`.
+## Version fields
+- `version`: the plugin package version. It must be full SemVer (`major.minor.patch`, with optional prerelease/build metadata). Marketplace releases use SemVer precedence; build metadata does not make a release newer.
+- `pluginApiVersion`: the plugin runtime/manifest contract version the plugin was authored against. HAPI accepts any value listed in `HAPI_SUPPORTED_PLUGIN_API_VERSIONS`, not only the current default version.
+- `compatibility.pluginApi`: an additional host capability range. HAPI checks the range against every API contract version reported by the host, so a host whose current API is newer can still accept an older plugin when it still supports that contract.
+Recommended first-party pattern:
+
+```json
+{
+    "pluginApiVersion": "0.1",
+    "compatibility": {
+        "pluginApi": ">=0.1 <0.2"
+    }
+}
+```
+
+## Compatibility and cross-runtime rules
+- Use `compatibility.hapi`, `os`, and `arch` for host/runtime constraints.
+- Use runtime-specific `compatibility.hub` / `compatibility.runner` when only one runtime needs an extension point or version range.
+- Use `compatibility.crossRuntime.samePluginVersionAcrossTargets` or `allowVersionSkew` to make install plans warn/block when Hub and Runner targets would run unintended plugin version skew.
+- `install.runnerPlacement`, `offlineRunnerPolicy`, and `minReadyRunnerCount` guide target selection but do not bypass compatibility checks.
+Compatibility example:
+
+```json
+{
+    "compatibility": {
+        "pluginApi": ">=0.1 <0.2",
+        "hub": {
+            "extensionPoints": [
+                "hub.messageAction",
+                "web.composerAction"
+            ]
+        },
+        "runner": {
+            "extensionPoints": [
+                "runner.spawnHook"
+            ]
+        },
+        "crossRuntime": {
+            "samePluginVersionAcrossTargets": true,
+            "allowVersionSkew": "none"
+        }
+    },
+    "install": {
+        "runnerPlacement": "compatible-runners",
+        "offlineRunnerPolicy": "skip",
+        "minReadyRunnerCount": 1
+    }
+}
+```
+
 ## Placement rules
 - `contributions.web` or capability `parts.web`: installed on Hub, rendered by Web as descriptors.
 - `runtimes.hub`, `contributions.hub`, or capability `parts.hub`: requires Hub runtime placement.
@@ -15,7 +65,7 @@ Supported plugin API version: `0.1`
 | `id` | yes | string | — |
 | `name` | yes | string | — |
 | `version` | yes | string | — |
-| `pluginApiVersion` | yes | const `0.1` | — |
+| `pluginApiVersion` | yes | `0.1` | — |
 | `description` | no | string | — |
 | `display` | no | object | — |
 | `capabilities` | no | array&lt;object&gt; | — |

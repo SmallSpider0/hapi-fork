@@ -34,7 +34,9 @@ export default defineConfig({
           { text: 'Web Descriptors', link: '/reference/plugin-api/web-descriptors' },
           { text: 'Admin API', link: '/reference/plugin-api/admin-api' },
           { text: 'Marketplace', link: '/reference/plugin-api/marketplace' },
-          { text: 'Schemas', link: '/reference/plugin-api/schemas' }
+          { text: 'Schemas', link: '/reference/plugin-api/schemas' },
+          { text: 'API Versioning', link: '/development/plugin-api-versioning' },
+          { text: 'SDK Change Checklist', link: '/development/plugin-sdk-change-checklist' }
         ]
       },
       { text: 'Why HAPI', link: '/guide/why-hapi' },

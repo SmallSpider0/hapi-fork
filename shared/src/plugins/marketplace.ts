@@ -8,6 +8,22 @@ const Sha256ChecksumSchema = z.string()
 const GitHubRepoSlugSchema = z.string()
     .regex(/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/, 'repo must be owner/name')
 
+const MarketplaceSemverSchema = z.string()
+    .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/, 'must be a semantic version')
+
+export const PluginMarketplaceReleaseManifestSchema = z.object({
+    id: z.string().min(1).max(128),
+    name: z.string().min(1),
+    version: MarketplaceSemverSchema,
+    pluginApiVersion: z.string().min(1),
+    display: PluginDisplayMetadataSchema.optional(),
+    permissions: z.object({
+        network: z.array(z.string().min(1)).optional(),
+        secrets: z.array(z.string().min(1)).optional()
+    }).strict().optional()
+}).passthrough()
+export type PluginMarketplaceReleaseManifest = z.infer<typeof PluginMarketplaceReleaseManifestSchema>
+
 export const PluginMarketplaceCategorySchema = z.enum([
     'notification',
     'runner',
@@ -38,13 +54,13 @@ export const PluginMarketplaceSourceSchema = z.object({
 export type PluginMarketplaceSource = z.infer<typeof PluginMarketplaceSourceSchema>
 
 export const PluginMarketplaceReleaseSchema = z.object({
-    version: z.string().min(1),
+    version: MarketplaceSemverSchema,
     tag: z.string().min(1),
     releasedAt: z.string().datetime({ offset: true }).optional(),
-    manifest: PluginManifestLiteSchema,
+    manifest: PluginMarketplaceReleaseManifestSchema,
     package: PluginMarketplacePackageSchema.optional(),
     source: PluginMarketplaceSourceSchema.optional(),
-    compatibility: PluginManifestLiteSchema.shape.compatibility.optional(),
+    compatibility: z.record(z.string(), z.unknown()).optional(),
     yanked: z.object({
         reason: z.string().min(1),
         replacedBy: z.string().min(1).optional()
@@ -95,6 +111,7 @@ export const PluginMarketplaceEntrySchema = z.object({
     }).strict()).optional(),
     releases: z.array(PluginMarketplaceReleaseSchema).min(1)
 }).strict().superRefine((entry, ctx) => {
+    const seenReleaseVersions = new Set<string>()
     for (const [index, release] of entry.releases.entries()) {
         if (release.manifest.id !== entry.id) {
             ctx.addIssue({
@@ -103,6 +120,14 @@ export const PluginMarketplaceEntrySchema = z.object({
                 path: ['releases', index, 'manifest', 'id']
             })
         }
+        if (seenReleaseVersions.has(release.version)) {
+            ctx.addIssue({
+                code: 'custom',
+                message: `duplicate marketplace release version ${release.version}`,
+                path: ['releases', index, 'version']
+            })
+        }
+        seenReleaseVersions.add(release.version)
     }
 })
 export type PluginMarketplaceEntry = z.infer<typeof PluginMarketplaceEntrySchema>
@@ -136,10 +161,12 @@ export const PluginMarketplaceInstallRequestSchema = z.object({
 export type PluginMarketplaceInstallRequest = z.infer<typeof PluginMarketplaceInstallRequestSchema>
 
 export const PluginMarketplaceEntryViewSchema = PluginMarketplaceEntrySchema.safeExtend({
+    latestCompatibleVersion: z.string().min(1).optional(),
     installed: z.object({
         version: z.string().min(1).optional(),
         enabled: z.boolean().optional(),
         updateAvailable: z.boolean().optional(),
+        updateVersion: z.string().min(1).optional(),
         yanked: z.boolean().optional()
     }).strict().optional()
 }).strict()

@@ -4,7 +4,8 @@ import {
     PluginInstallPlanRequestSchema,
     PluginInstallPlanResponseSchema,
     PluginInstallResultSchema,
-    type PluginInstallPlanRequest
+    type PluginInstallPlanRequest,
+    type PluginListItem
 } from '@hapi/protocol/plugins/admin'
 import {
     PluginMarketplaceDetailResponseSchema,
@@ -16,9 +17,32 @@ import type { WebAppEnv } from '../../web/middleware/auth'
 import type { SyncEngine } from '../../sync/syncEngine'
 import type { HubPluginManager } from '../pluginManager'
 import { PluginMarketplaceService } from '../marketplaceService'
-import { createInstallPlan, executeInstallPlan } from './installPlanService'
+import { createPluginMarketplaceHostContext, type PluginMarketplaceHostContext } from '@hapi/protocol/plugins/runtime/versioning'
+import { buildInstallTargetCandidates, createInstallPlan, executeInstallPlan } from './installPlanService'
 import { marketplaceEntriesWithInstallState, marketplaceEntryMatches } from './marketplaceViewService'
 import { errorMessage, pluginAdminErrorStatus as errorStatus } from './errors'
+
+async function buildMarketplaceViewState(options: {
+    manager: HubPluginManager | null
+    engine: SyncEngine | null
+    namespace: string
+}): Promise<{ plugins: PluginListItem[]; hostContext?: PluginMarketplaceHostContext }> {
+    if (!options.manager) {
+        return { plugins: [] }
+    }
+    const candidates = await buildInstallTargetCandidates({
+        manager: options.manager,
+        engine: options.engine,
+        namespace: options.namespace
+    })
+    return {
+        plugins: candidates.flatMap((candidate) => candidate.plugins),
+        hostContext: createPluginMarketplaceHostContext(candidates.map((candidate) => ({
+            runtime: candidate.target.runtime,
+            ...(candidate.target.hostInfo ? { hostInfo: candidate.target.hostInfo } : {})
+        })))
+    }
+}
 
 export function registerPluginInstallPlanAndMarketplaceRoutes(
     app: Hono<WebAppEnv>,
@@ -96,7 +120,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
         try {
             const snapshot = await service.getCatalog()
             const filters = { query: c.req.query('q')?.trim(), category: c.req.query('category')?.trim(), runtime: c.req.query('runtime')?.trim() }
-            const entries = marketplaceEntriesWithInstallState(snapshot.catalog.plugins.filter((entry) => marketplaceEntryMatches(entry, filters)), options.getPluginManager()?.listPlugins() ?? [])
+            const viewState = await buildMarketplaceViewState({ manager: options.getPluginManager(), engine: options.getSyncEngine(), namespace: c.get('namespace') })
+            const entries = marketplaceEntriesWithInstallState(snapshot.catalog.plugins.filter((entry) => marketplaceEntryMatches(entry, filters)), viewState.plugins, viewState.hostContext)
             return c.json(PluginMarketplaceListResponseSchema.parse({ sourceUrl: snapshot.sourceUrl, fetchedAt: snapshot.fetchedAt, entries }))
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
@@ -108,7 +133,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
         if (!service) return c.json({ error: 'Plugin marketplace is not ready' }, 503)
         try {
             const snapshot = await service.getCatalog({ force: true })
-            const entries = marketplaceEntriesWithInstallState(snapshot.catalog.plugins, options.getPluginManager()?.listPlugins() ?? [])
+            const viewState = await buildMarketplaceViewState({ manager: options.getPluginManager(), engine: options.getSyncEngine(), namespace: c.get('namespace') })
+            const entries = marketplaceEntriesWithInstallState(snapshot.catalog.plugins, viewState.plugins, viewState.hostContext)
             return c.json(PluginMarketplaceListResponseSchema.parse({ sourceUrl: snapshot.sourceUrl, fetchedAt: snapshot.fetchedAt, entries }))
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
@@ -120,7 +146,8 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
         if (!service) return c.json({ error: 'Plugin marketplace is not ready' }, 503)
         try {
             const { snapshot, entry } = await service.getEntry(c.req.param('id'))
-            const [entryView] = marketplaceEntriesWithInstallState([entry], options.getPluginManager()?.listPlugins() ?? [])
+            const viewState = await buildMarketplaceViewState({ manager: options.getPluginManager(), engine: options.getSyncEngine(), namespace: c.get('namespace') })
+            const [entryView] = marketplaceEntriesWithInstallState([entry], viewState.plugins, viewState.hostContext)
             return c.json(PluginMarketplaceDetailResponseSchema.parse({ sourceUrl: snapshot.sourceUrl, fetchedAt: snapshot.fetchedAt, entry: entryView }))
         } catch (error) {
             return c.json({ error: errorMessage(error) }, errorStatus(error))
@@ -139,7 +166,12 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
         const now = Date.now()
         const expiresAt = now + installPlanTtlMs
         try {
-            const marketplacePackage = await service.buildInstallPlanRequest(c.req.param('id'), parsed.data)
+            const candidates = await buildInstallTargetCandidates({ manager, engine: options.getSyncEngine(), namespace: c.get('namespace') })
+            const hostContext = createPluginMarketplaceHostContext(candidates.map((candidate) => ({
+                runtime: candidate.target.runtime,
+                ...(candidate.target.hostInfo ? { hostInfo: candidate.target.hostInfo } : {})
+            })))
+            const marketplacePackage = await service.buildInstallPlanRequest(c.req.param('id'), parsed.data, hostContext)
             const plan = await createInstallPlan({ manager, engine: options.getSyncEngine(), namespace: c.get('namespace'), request: marketplacePackage.request, planId, now, expiresAt })
             storeInstallPlan(planId, { namespace: c.get('namespace'), request: marketplacePackage.request, expiresAt })
             return c.json(PluginMarketplaceInstallPlanResponseSchema.parse({ marketplace: marketplacePackage.marketplace, plan }))
@@ -157,7 +189,12 @@ export function registerPluginInstallPlanAndMarketplaceRoutes(
         const parsed = PluginMarketplaceInstallRequestSchema.safeParse(json ?? {})
         if (!parsed.success) return c.json({ error: 'Invalid body', issues: parsed.error.flatten() }, 400)
         try {
-            const marketplacePackage = await service.buildInstallPlanRequest(c.req.param('id'), parsed.data)
+            const candidates = await buildInstallTargetCandidates({ manager, engine: options.getSyncEngine(), namespace: c.get('namespace') })
+            const hostContext = createPluginMarketplaceHostContext(candidates.map((candidate) => ({
+                runtime: candidate.target.runtime,
+                ...(candidate.target.hostInfo ? { hostInfo: candidate.target.hostInfo } : {})
+            })))
+            const marketplacePackage = await service.buildInstallPlanRequest(c.req.param('id'), parsed.data, hostContext)
             const plan = await createInstallPlan({ manager, engine: options.getSyncEngine(), namespace: c.get('namespace'), request: marketplacePackage.request, planId: randomUUID(), now: Date.now() })
             if (plan.blockingErrors.length > 0) return c.json(PluginMarketplaceInstallPlanResponseSchema.parse({ marketplace: marketplacePackage.marketplace, plan }), 409)
             const result = await executeInstallPlan({ manager, engine: options.getSyncEngine(), namespace: c.get('namespace'), request: marketplacePackage.request, plan })

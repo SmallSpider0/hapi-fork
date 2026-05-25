@@ -1,6 +1,17 @@
 import type { PluginHostInfo } from '../admin'
-import type { DiscoveredPluginRecord } from '../foundation'
 import type { PluginManifestLite, PluginRuntimeName } from '../manifest'
+
+type RuntimeCompatibilityRecord = {
+    manifest?: PluginManifestLite
+    status: string
+    diagnostics: Array<{
+        severity: 'error' | 'warning' | 'info'
+        code: string
+        message: string
+        path?: string
+    }>
+    manifestPath: string
+}
 
 type NumericVersion = [number, number, number]
 
@@ -66,6 +77,13 @@ export function satisfiesVersionRange(version: string, range: string | undefined
             .every((comparator) => satisfiesSimpleComparator(version, comparator)))
 }
 
+export function hostSupportedPluginApiVersions(hostInfo: Pick<PluginHostInfo, 'pluginApiVersion' | 'supportedPluginApiVersions'>): string[] {
+    return Array.from(new Set([
+        hostInfo.pluginApiVersion,
+        ...(hostInfo.supportedPluginApiVersions ?? [])
+    ].filter(Boolean)))
+}
+
 export function pluginRuntimeCompatibilityProblems(manifest: PluginManifestLite, runtime: PluginRuntimeName, hostInfo: PluginHostInfo | undefined): string[] {
     const global = manifest.compatibility
     const runtimeCompatibility = runtime === 'hub' ? global?.hub : global?.runner
@@ -87,6 +105,10 @@ export function pluginRuntimeCompatibilityProblems(manifest: PluginManifestLite,
     }
 
     const problems: string[] = []
+    const supportedPluginApiVersions = hostSupportedPluginApiVersions(hostInfo)
+    if (!supportedPluginApiVersions.includes(manifest.pluginApiVersion)) {
+        problems.push(`${runtime} does not support plugin API contract ${manifest.pluginApiVersion}; supported plugin API versions: ${supportedPluginApiVersions.join(', ')}.`)
+    }
     const hapiRanges = [global?.hapi, runtimeCompatibility?.hapi].filter((entry): entry is string => Boolean(entry))
     for (const range of hapiRanges) {
         if (!satisfiesVersionRange(hostInfo.hapiVersion, range)) {
@@ -95,8 +117,8 @@ export function pluginRuntimeCompatibilityProblems(manifest: PluginManifestLite,
     }
     const pluginApiRanges = [global?.pluginApi, runtimeCompatibility?.pluginApi].filter((entry): entry is string => Boolean(entry))
     for (const range of pluginApiRanges) {
-        if (!satisfiesVersionRange(hostInfo.pluginApiVersion, range)) {
-            problems.push(`${runtime} plugin API version ${hostInfo.pluginApiVersion} does not satisfy ${range}.`)
+        if (!supportedPluginApiVersions.some((version) => satisfiesVersionRange(version, range))) {
+            problems.push(`${runtime} supported plugin API versions ${supportedPluginApiVersions.join(', ')} do not satisfy ${range}.`)
         }
     }
     const osLists = [global?.os, runtimeCompatibility?.os].filter((entry): entry is Array<'darwin' | 'linux' | 'win32'> => Boolean(entry))
@@ -121,11 +143,11 @@ export function pluginRuntimeCompatibilityProblems(manifest: PluginManifestLite,
     return problems
 }
 
-export function applyRuntimeCompatibility(
-    records: DiscoveredPluginRecord[],
+export function applyRuntimeCompatibility<T extends RuntimeCompatibilityRecord>(
+    records: T[],
     runtime: Extract<PluginRuntimeName, 'hub' | 'runner'>,
     hostInfo: PluginHostInfo
-): DiscoveredPluginRecord[] {
+): T[] {
     return records.map((record) => {
         if (!record.manifest || record.status !== 'validated') {
             return record
@@ -146,6 +168,6 @@ export function applyRuntimeCompatibility(
                     path: record.manifestPath
                 }
             ]
-        }
+        } as T
     })
 }

@@ -986,7 +986,8 @@ describe('plugin admin routes', () => {
             name: 'Package Plugin',
             version,
             pluginApiVersion: '0.1',
-            runtimes: { hub: { entry: 'hub.js' } }
+            runtimes: { hub: { entry: 'hub.js' } },
+            ...(version === '0.3.0' ? { compatibility: { hub: { extensionPoints: ['hub.futureAction'] } } } : {})
         })
         writeFileSync(catalogPath, JSON.stringify({
             schemaVersion: 'hapi-plugin-marketplace/v1',
@@ -995,7 +996,7 @@ describe('plugin admin routes', () => {
                 id: 'com.example.package',
                 name: 'Package Plugin',
                 repo: 'example/package-plugin',
-                releases: ['0.1.0', '0.2.0'].map((version) => ({
+                releases: ['0.1.0', '0.2.0', '0.3.0'].map((version) => ({
                     version,
                     tag: `v${version}`,
                     manifest: releaseManifest(version),
@@ -1025,10 +1026,12 @@ describe('plugin admin routes', () => {
                 headers: { authorization: `Bearer ${await token()}` }
             })
             expect(response.status).toBe(200)
-            const list = await response.json() as { entries: Array<{ installed?: { version?: string; updateAvailable?: boolean } }> }
+            const list = await response.json() as { entries: Array<{ latestCompatibleVersion?: string; installed?: { version?: string; updateAvailable?: boolean; updateVersion?: string } }> }
+            expect(list.entries[0]?.latestCompatibleVersion).toBe('0.2.0')
             expect(list.entries[0]?.installed).toMatchObject({
                 version: '0.1.0',
-                updateAvailable: true
+                updateAvailable: true,
+                updateVersion: '0.2.0'
             })
 
             const newerInstalledApp = createApp({

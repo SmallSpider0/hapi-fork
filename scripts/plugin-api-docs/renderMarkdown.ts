@@ -1,6 +1,6 @@
 import { readFileSync } from 'node:fs'
 import ts from 'typescript'
-import { HAPI_PLUGIN_API_VERSION } from '../../shared/src/plugins'
+import { HAPI_PLUGIN_API_VERSION, HAPI_SUPPORTED_PLUGIN_API_VERSIONS } from '../../shared/src/plugins'
 import { bundledExamplePlugins } from '../../shared/src/plugins/bundledExamples'
 import type { EndpointDoc, EndpointQueryParamDoc } from './endpointCatalog'
 import type { SchemaDoc, SchemaGroup } from './schemaCatalog'
@@ -56,6 +56,14 @@ function tsBlock(source: string): string {
 
 function shellBlock(source: string): string {
     return codeBlock('bash', source)
+}
+
+function recommendedPluginApiRange(version: string): string {
+    const [majorRaw, minorRaw] = version.split('.')
+    const major = Number(majorRaw)
+    const minor = Number(minorRaw)
+    if (!Number.isFinite(major) || !Number.isFinite(minor)) return `>=${version}`
+    return `>=${version} <${major}.${minor + 1}`
 }
 
 function getProperties(schema: JsonSchema): Record<string, JsonSchema> {
@@ -155,7 +163,9 @@ export function renderIndex(inputs: SchemaRenderInput[]): string {
     return GENERATED_HEADER + [
         '# Plugin API reference',
         '',
-        `Plugin API version: \`${HAPI_PLUGIN_API_VERSION}\``,
+        `Current plugin API version: \`${HAPI_PLUGIN_API_VERSION}\``,
+        '',
+        `Supported plugin API versions in this checkout: ${HAPI_SUPPORTED_PLUGIN_API_VERSIONS.map((version) => `\`${version}\``).join(', ')}`,
         '',
         'HAPI plugins are trusted local extension packages. Hub and Runner runtimes execute plugin JavaScript in-process; Web only renders validated descriptors and never loads plugin JavaScript.',
         '',
@@ -198,7 +208,45 @@ export function renderManifestPage(inputs: SchemaRenderInput[]): string {
         '',
         '`hapi.plugin.json` is the cold-path contract. HAPI validates it before importing any runtime entry.',
         '',
-        `Supported plugin API version: \`${HAPI_PLUGIN_API_VERSION}\``,
+        `Current plugin API version: \`${HAPI_PLUGIN_API_VERSION}\`; supported versions in this checkout: ${HAPI_SUPPORTED_PLUGIN_API_VERSIONS.map((version) => `\`${version}\``).join(', ')}.`,
+        '',
+        '## Version fields',
+        '',
+        '- `version`: the plugin package version. It must be full SemVer (`major.minor.patch`, with optional prerelease/build metadata). Marketplace releases use SemVer precedence; build metadata does not make a release newer.',
+        '- `pluginApiVersion`: the plugin runtime/manifest contract version the plugin was authored against. HAPI accepts any value listed in `HAPI_SUPPORTED_PLUGIN_API_VERSIONS`, not only the current default version.',
+        '- `compatibility.pluginApi`: an additional host capability range. HAPI checks the range against every API contract version reported by the host, so a host whose current API is newer can still accept an older plugin when it still supports that contract.',
+        '',
+        'Recommended first-party pattern:',
+        jsonBlock({
+            pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+            compatibility: {
+                pluginApi: recommendedPluginApiRange(HAPI_PLUGIN_API_VERSION)
+            }
+        }),
+        '## Compatibility and cross-runtime rules',
+        '',
+        '- Use `compatibility.hapi`, `os`, and `arch` for host/runtime constraints.',
+        '- Use runtime-specific `compatibility.hub` / `compatibility.runner` when only one runtime needs an extension point or version range.',
+        '- Use `compatibility.crossRuntime.samePluginVersionAcrossTargets` or `allowVersionSkew` to make install plans warn/block when Hub and Runner targets would run unintended plugin version skew.',
+        '- `install.runnerPlacement`, `offlineRunnerPolicy`, and `minReadyRunnerCount` guide target selection but do not bypass compatibility checks.',
+        '',
+        'Compatibility example:',
+        jsonBlock({
+            compatibility: {
+                pluginApi: recommendedPluginApiRange(HAPI_PLUGIN_API_VERSION),
+                hub: { extensionPoints: ['hub.messageAction', 'web.composerAction'] },
+                runner: { extensionPoints: ['runner.spawnHook'] },
+                crossRuntime: {
+                    samePluginVersionAcrossTargets: true,
+                    allowVersionSkew: 'none'
+                }
+            },
+            install: {
+                runnerPlacement: 'compatible-runners',
+                offlineRunnerPolicy: 'skip',
+                minReadyRunnerCount: 1
+            }
+        }),
         '',
         '## Placement rules',
         '',

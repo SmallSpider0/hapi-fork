@@ -207,27 +207,9 @@ function printTable(plugins: PluginListItem[]): void {
 }
 
 function latestMarketplaceRelease(entry: PluginMarketplaceEntryView): PluginMarketplaceEntryView['releases'][number] | undefined {
-    return [...entry.releases]
-        .filter((release) => !release.yanked)
-        .sort((left, right) => compareMarketplaceVersions(right.version, left.version))[0]
-}
-
-type NumericVersion = [number, number, number]
-
-function parseMarketplaceVersion(version: string): NumericVersion {
-    const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/)
-    if (!match) return [0, 0, 0]
-    return [Number(match[1]), Number(match[2]), Number(match[3])]
-}
-
-function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
-    const left = parseMarketplaceVersion(leftRaw)
-    const right = parseMarketplaceVersion(rightRaw)
-    for (let index = 0; index < 3; index += 1) {
-        if (left[index] > right[index]) return 1
-        if (left[index] < right[index]) return -1
-    }
-    return leftRaw.localeCompare(rightRaw)
+    return entry.latestCompatibleVersion
+        ? entry.releases.find((release) => release.version === entry.latestCompatibleVersion && !release.yanked)
+        : undefined
 }
 
 function marketplaceInstallStatus(entry: PluginMarketplaceEntryView): string {

@@ -58,6 +58,7 @@ function marketplaceEntry(overrides: Partial<PluginMarketplaceEntryView> = {}): 
                 checksum: `sha256:${'a'.repeat(64)}`
             }
         }],
+        latestCompatibleVersion: overrides.latestCompatibleVersion ?? overrides.releases?.[0]?.version ?? '0.1.0',
         installed: overrides.installed,
         display: overrides.display,
         homepage: overrides.homepage,
@@ -230,6 +231,51 @@ describe('MarketplacePluginCard', () => {
         expect(marketplaceHasLocalNewerVersion(entry)).toBe(true)
         expect(screen.getByText('settings.plugins.marketplace.localNewer')).toBeInTheDocument()
         expect(screen.getByRole('button', { name: 'settings.plugins.marketplace.action.localNewer' })).toBeDisabled()
+    })
+
+    it('uses the server-selected compatible update version for marketplace update labels', () => {
+        const entry = marketplaceEntry({
+            latestCompatibleVersion: '0.2.0',
+            releases: ['0.1.0', '0.2.0', '0.3.0'].map((version) => ({
+                version,
+                tag: `v${version}`,
+                manifest: {
+                    id: 'com.example.market',
+                    name: 'Marketplace Plugin',
+                    version,
+                    pluginApiVersion: '0.1'
+                },
+                package: {
+                    filename: 'plugin.tgz',
+                    url: 'https://example.com/plugin.tgz',
+                    format: 'tgz',
+                    checksum: `sha256:${'a'.repeat(64)}`
+                }
+            })),
+            installed: {
+                version: '0.1.0',
+                enabled: true,
+                updateAvailable: true,
+                updateVersion: '0.2.0'
+            }
+        })
+        render(createElement(
+            MarketplacePluginCard,
+            {
+                entry,
+                t,
+                locale: 'en',
+                disabled: false,
+                overwrite: false,
+                pendingAction: null,
+                expanded: false,
+                onDetails: () => undefined,
+                onInstall: () => undefined
+            }
+        ))
+
+        expect(screen.getByText('settings.plugins.marketplace.updateAvailable')).toBeInTheDocument()
+        expect(screen.getByText('settings.plugins.marketplace.action.update')).toBeInTheDocument()
     })
 })
 

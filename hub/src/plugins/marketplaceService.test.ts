@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'bun:test'
 import { PluginMarketplaceService, type MarketplaceFetch } from './marketplaceService'
-import { mkdtempSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { embeddedPluginMarketplaceCatalog } from '@hapi/protocol/plugins/marketplaceSources.generated'
+import type { PluginHostInfo } from '@hapi/protocol/plugins/admin'
+import { PluginMarketplaceCatalogSchema, type PluginMarketplaceEntry } from '@hapi/protocol/plugins/marketplace'
+import { createPluginMarketplaceHostContext } from '@hapi/protocol/plugins/runtime/versioning'
 
 function catalogResponse(): Awaited<ReturnType<MarketplaceFetch>> {
     return {
@@ -24,6 +27,157 @@ function catalogResponse(): Awaited<ReturnType<MarketplaceFetch>> {
 }
 
 describe('PluginMarketplaceService', () => {
+    it('rejects release metadata with duplicate versions or manifest version mismatches', () => {
+        const release = (version: string, manifestVersion = version) => ({
+            version,
+            tag: `v${version}`,
+            manifest: {
+                id: 'com.example.package',
+                name: 'Package Plugin',
+                version: manifestVersion,
+                pluginApiVersion: '0.1'
+            },
+            package: {
+                filename: 'plugin.tgz',
+                url: `https://github.com/example/package-plugin/releases/download/v${version}/plugin.tgz`,
+                format: 'tgz',
+                checksum: `sha256:${'a'.repeat(64)}`
+            }
+        })
+        const baseCatalog = {
+            schemaVersion: 'hapi-plugin-marketplace/v1',
+            updatedAt: '2026-05-24T00:00:00.000Z',
+            plugins: [{
+                id: 'com.example.package',
+                name: 'Package Plugin',
+                repo: 'example/package-plugin',
+                releases: [release('1.0.0')]
+            }]
+        }
+
+        expect(PluginMarketplaceCatalogSchema.safeParse({
+            ...baseCatalog,
+            plugins: [{ ...baseCatalog.plugins[0], releases: [release('1.0.0', '2.0.0')] }]
+        }).success).toBe(false)
+        expect(PluginMarketplaceCatalogSchema.safeParse({
+            ...baseCatalog,
+            plugins: [{ ...baseCatalog.plugins[0], releases: [release('1.0.0'), release('1.0.0')] }]
+        }).success).toBe(false)
+    })
+
+    it('selects the latest non-yanked host-compatible release', () => {
+        const entry: PluginMarketplaceEntry = {
+            id: 'com.example.package',
+            name: 'Package Plugin',
+            repo: 'example/package-plugin',
+            releases: ['1.0.0', '1.1.0', '1.2.0'].map((version) => ({
+                version,
+                tag: `v${version}`,
+                manifest: {
+                    id: 'com.example.package',
+                    name: 'Package Plugin',
+                    version,
+                    pluginApiVersion: '0.1',
+                    runtimes: { hub: { entry: 'hub.js' } },
+                    ...(version === '1.2.0' ? { compatibility: { hub: { extensionPoints: ['hub.futureAction'] } } } : {})
+                },
+                package: {
+                    filename: 'plugin.tgz',
+                    url: `https://github.com/example/package-plugin/releases/download/v${version}/plugin.tgz`,
+                    format: 'tgz',
+                    checksum: `sha256:${'a'.repeat(64)}`
+                },
+                ...(version === '1.1.0' ? { yanked: { reason: 'bad release' } } : {})
+            }))
+        }
+        const hostInfo: PluginHostInfo = {
+            runtime: 'hub',
+            hapiVersion: '0.18.4',
+            pluginApiVersion: '0.1',
+            supportedPluginApiVersions: ['0.1'],
+            os: 'linux',
+            arch: 'x64',
+            supportedExtensionPoints: ['hub.messageAction']
+        }
+
+        expect(new PluginMarketplaceService().selectRelease(entry, undefined, createPluginMarketplaceHostContext([hostInfo])).version).toBe('1.0.0')
+    })
+
+    it('selects runner releases without compatibility constraints when Runner hostInfo is missing', () => {
+        const entry: PluginMarketplaceEntry = {
+            id: 'com.example.runner',
+            name: 'Runner Plugin',
+            repo: 'example/runner-plugin',
+            releases: [{
+                version: '1.0.0',
+                tag: 'v1.0.0',
+                manifest: {
+                    id: 'com.example.runner',
+                    name: 'Runner Plugin',
+                    version: '1.0.0',
+                    pluginApiVersion: '0.1',
+                    runtimes: { runner: { entry: 'runner.js' } }
+                },
+                package: {
+                    filename: 'plugin.tgz',
+                    url: 'https://github.com/example/runner-plugin/releases/download/v1.0.0/plugin.tgz',
+                    format: 'tgz',
+                    checksum: `sha256:${'a'.repeat(64)}`
+                }
+            }]
+        }
+
+        expect(new PluginMarketplaceService().selectRelease(entry, undefined, createPluginMarketplaceHostContext([{ runtime: 'runner' }])).version).toBe('1.0.0')
+    })
+
+    it('loads catalogs that include future unsupported API releases and still selects an older compatible release', async () => {
+        const testDir = mkdtempSync(join(tmpdir(), 'hapi-marketplace-future-api-'))
+        const catalogPath = join(testDir, 'catalog.v1.json')
+        writeFileSync(catalogPath, JSON.stringify({
+            schemaVersion: 'hapi-plugin-marketplace/v1',
+            updatedAt: '2026-05-24T00:00:00.000Z',
+            plugins: [{
+                id: 'com.example.future',
+                name: 'Future Plugin',
+                repo: 'example/future-plugin',
+                releases: ['1.0.0', '2.0.0'].map((version) => ({
+                    version,
+                    tag: `v${version}`,
+                    manifest: {
+                        id: 'com.example.future',
+                        name: 'Future Plugin',
+                        version,
+                        pluginApiVersion: version === '2.0.0' ? '0.2' : '0.1',
+                        runtimes: { hub: { entry: 'hub.js' } },
+                        ...(version === '2.0.0' ? { futureRequiredField: { newShape: true } } : {})
+                    },
+                    package: {
+                        filename: 'plugin.tgz',
+                        url: `https://github.com/example/future-plugin/releases/download/v${version}/plugin.tgz`,
+                        format: 'tgz',
+                        checksum: `sha256:${'a'.repeat(64)}`
+                    }
+                }))
+            }]
+        }))
+        const service = new PluginMarketplaceService({ sourceUrl: catalogPath })
+        try {
+            const { entry } = await service.getEntry('com.example.future')
+
+            expect(service.selectRelease(entry, undefined, createPluginMarketplaceHostContext([{
+                runtime: 'hub',
+                hapiVersion: '0.18.4',
+                pluginApiVersion: '0.1',
+                supportedPluginApiVersions: ['0.1'],
+                os: 'linux',
+                arch: 'x64',
+                supportedExtensionPoints: []
+            }])).version).toBe('1.0.0')
+        } finally {
+            rmSync(testDir, { recursive: true, force: true })
+        }
+    })
+
     it('cache-busts forced catalog refreshes without changing the public source URL', async () => {
         const calls: string[] = []
         let now = 1000

@@ -9,6 +9,7 @@ import type {
 } from '@hapi/protocol/plugins/admin'
 import { pluginManifestRequiresHubInstall, pluginManifestRequiresRunnerInstall, type PluginManifestLite } from '@hapi/protocol/plugins'
 import { pluginRuntimeCompatibilityProblems } from '@hapi/protocol/plugins/runtime/compatibility'
+import { parsePluginSemver } from '@hapi/protocol/plugins/runtime/versioning'
 
 export interface PluginInstallTargetCandidate {
     target: PluginTargetSummary
@@ -114,6 +115,88 @@ function createTargetPlan(options: {
 
 function installTargetLabel(target: PluginTargetSummary): string {
     return target.displayName ?? target.scope
+}
+
+type CrossRuntimeVersionSkew = 'none' | 'patch' | 'minor'
+
+function expectedVersionForTarget(manifest: PluginManifestLite, target: PluginInstallPlanTarget): string | undefined {
+    if (target.action === 'install' || target.action === 'overwrite') return manifest.version
+    if (target.action === 'unchanged') return target.existingVersion ?? manifest.version
+    return undefined
+}
+
+function crossRuntimeVersionSkew(manifest: PluginManifestLite): CrossRuntimeVersionSkew | undefined {
+    const crossRuntime = manifest.compatibility?.crossRuntime
+    if (!crossRuntime) return undefined
+    if (crossRuntime.samePluginVersionAcrossTargets) return 'none'
+    return crossRuntime.allowVersionSkew
+}
+
+function versionsWithinAllowedSkew(versions: string[], skew: CrossRuntimeVersionSkew): boolean {
+    if (versions.length <= 1) return true
+    if (skew === 'none') return versions.every((version) => version === versions[0])
+    const parsed = versions.map((version) => ({ version, parsed: parsePluginSemver(version) }))
+    if (parsed.some((entry) => !entry.parsed)) {
+        return versions.every((version) => version === versions[0])
+    }
+    const first = parsed[0]!.parsed!
+    return parsed.every(({ parsed: current }) => {
+        if (!current) return false
+        if (current.major !== first.major) return false
+        if (skew === 'minor') return true
+        if (current.minor !== first.minor) return false
+        return true
+    })
+}
+
+function crossRuntimePolicyLabel(manifest: PluginManifestLite, skew: CrossRuntimeVersionSkew): string {
+    if (manifest.compatibility?.crossRuntime?.samePluginVersionAcrossTargets) {
+        return 'samePluginVersionAcrossTargets'
+    }
+    return `allowVersionSkew=${skew}`
+}
+
+export function validateCrossRuntimeVersionPlan(args: {
+    manifest: PluginManifestLite
+    targets: PluginInstallPlanTarget[]
+    candidates: PluginInstallTargetCandidate[]
+    overwrite: boolean
+}): string[] {
+    const skew = crossRuntimeVersionSkew(args.manifest)
+    if (!skew) return []
+
+    const ready = args.targets
+        .map((target) => ({
+            target,
+            version: expectedVersionForTarget(args.manifest, target)
+        }))
+        .filter((entry): entry is { target: PluginInstallPlanTarget; version: string } =>
+            Boolean(entry.version)
+            && entry.target.compatible
+            && (entry.target.action === 'install' || entry.target.action === 'overwrite' || entry.target.action === 'unchanged'))
+
+    const versions = Array.from(new Set(ready.map((entry) => entry.version)))
+    if (versionsWithinAllowedSkew(versions, skew)) return []
+
+    const versionSummary = ready
+        .map((entry) => `${installTargetLabel(entry.target.target)}=${entry.version}`)
+        .join(', ')
+    return [`Plugin declares ${crossRuntimePolicyLabel(args.manifest, skew)}; planned ready targets would use multiple versions (${versionSummary}). Enable overwrite or select fewer runners.`]
+}
+
+function crossRuntimeVersionWarnings(manifest: PluginManifestLite, targets: PluginInstallPlanTarget[]): string[] {
+    const warnings: string[] = []
+    const skew = crossRuntimeVersionSkew(manifest)
+    const readyTargets = targets.filter((target) => target.compatible && (target.action === 'install' || target.action === 'overwrite' || target.action === 'unchanged'))
+    const readyLabel = readyTargets.length > 0
+        ? `${readyTargets.map((target) => installTargetLabel(target.target)).join(' + ')} will use ${manifest.version}`
+        : `new installs would use ${manifest.version}`
+    for (const target of targets) {
+        if (target.action !== 'skip' || target.status !== 'conflict' || !target.existingVersion) continue
+        const policy = skew ? ` Plugin declares ${crossRuntimePolicyLabel(manifest, skew)}; enable overwrite or select fewer runners if this skew is not intended.` : ''
+        warnings.push(`${installTargetLabel(target.target)} has plugin ${target.existingVersion} and will be skipped; ${readyLabel}.${policy}`)
+    }
+    return warnings
 }
 
 function networkPermissionWarnings(manifest: PluginManifestLite): string[] {
@@ -235,6 +318,14 @@ export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): 
             blockingErrors.push(`${installTargetLabel(target.target)}: ${target.reason}`)
         }
     }
+
+    warnings.push(...crossRuntimeVersionWarnings(options.manifest, targets))
+    blockingErrors.push(...validateCrossRuntimeVersionPlan({
+        manifest: options.manifest,
+        targets,
+        candidates: options.candidates,
+        overwrite: options.request.overwrite === true
+    }))
 
     return {
         planId: options.planId,

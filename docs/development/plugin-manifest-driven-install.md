@@ -45,7 +45,7 @@ Manifest 支持：
 }
 ```
 
-Hub 与 Runner inventory 暴露 `hostInfo`：`runtime`、`hapiVersion`、`pluginApiVersion`、`os`、`arch`、`supportedExtensionPoints`。
+Hub 与 Runner inventory 暴露 `hostInfo`：`runtime`、`hapiVersion`、`pluginApiVersion`、`supportedPluginApiVersions`、`os`、`arch`、`supportedExtensionPoints`。`compatibility.pluginApi` 需要对 supported API 列表中任意一个版本满足即可通过，避免 host 当前 API bump 后误伤仍兼容的旧 contract 插件。
 
 ## 安装 API
 

@@ -6,7 +6,7 @@ import {
     bundledFirstPartyPlugins
 } from '@hapi/protocol/plugins/bundledCore'
 import { HUB_IMPLEMENTED_EXTENSION_POINTS, RUNNER_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
-import { buildPluginInstallPlan, inferPluginInstallPositions } from './installPlanner'
+import { buildPluginInstallPlan, inferPluginInstallPositions, validateCrossRuntimeVersionPlan } from './installPlanner'
 import type { PluginInstallTargetCandidate } from './installPlanner'
 
 function manifest(overrides: Partial<PluginManifestLite> = {}): PluginManifestLite {
@@ -335,5 +335,97 @@ describe('plugin install planner', () => {
         ])
 
         expect(plan.blockingErrors).toContain('Plugin requires at least 2 compatible Runner target(s), but only 1 are ready.')
+    })
+
+    it('warns when compatible Runner placement skips an older installed version while another target updates', () => {
+        const plugin = manifest({
+            version: '1.1.0',
+            runtimes: {
+                hub: { entry: 'hub.js' },
+                runner: { entry: 'runner.js' }
+            },
+            compatibility: {
+                crossRuntime: { samePluginVersionAcrossTargets: true }
+            }
+        })
+        const installedOld = [{ ...({} as PluginInstallTargetCandidate['plugins'][number]), id: plugin.id, version: '1.0.0' }]
+
+        const plan = planFor(plugin, [
+            hubCandidate(),
+            runnerCandidate('runner-ready'),
+            runnerCandidate('runner-old', { plugins: installedOld })
+        ])
+
+        expect(plan.targets.find((target) => target.target.scope === 'runner:runner-old')).toMatchObject({ status: 'conflict', action: 'skip' })
+        expect(plan.blockingErrors).toEqual([])
+        expect(plan.warnings.join(' ')).toContain('runner:runner-old has plugin 1.0.0 and will be skipped')
+        expect(plan.warnings.join(' ')).toContain('samePluginVersionAcrossTargets')
+    })
+
+    it('overwrites all old targets when requested for same-version cross-runtime plugins', () => {
+        const plugin = manifest({
+            version: '1.1.0',
+            runtimes: {
+                hub: { entry: 'hub.js' },
+                runner: { entry: 'runner.js' }
+            },
+            compatibility: {
+                crossRuntime: { samePluginVersionAcrossTargets: true }
+            }
+        })
+        const installedOld = [{ ...({} as PluginInstallTargetCandidate['plugins'][number]), id: plugin.id, version: '1.0.0' }]
+
+        const plan = planFor(plugin, [
+            hubCandidate(installedOld),
+            runnerCandidate('runner-current', { plugins: installedOld })
+        ], { overwrite: true })
+
+        expect(plan.targets.map((target) => [target.target.scope, target.action])).toEqual([
+            ['hub', 'overwrite'],
+            ['runner:runner-current', 'overwrite']
+        ])
+        expect(plan.blockingErrors).toEqual([])
+    })
+
+    it('validates cross-runtime allowVersionSkew policies for the planned ready set', () => {
+        const plugin = manifest({
+            version: '1.2.4',
+            compatibility: {
+                crossRuntime: { allowVersionSkew: 'patch' }
+            }
+        })
+        const targets = [
+            {
+                target: hubCandidate().target,
+                runtime: 'hub',
+                required: true,
+                compatible: true,
+                status: 'compatible',
+                action: 'unchanged',
+                existingVersion: '1.2.3'
+            },
+            {
+                target: runnerCandidate('runner-current').target,
+                runtime: 'runner',
+                required: true,
+                compatible: true,
+                status: 'compatible',
+                action: 'install'
+            }
+        ] satisfies Parameters<typeof validateCrossRuntimeVersionPlan>[0]['targets']
+
+        expect(validateCrossRuntimeVersionPlan({ manifest: plugin, targets, candidates: [], overwrite: false })).toEqual([])
+        expect(validateCrossRuntimeVersionPlan({
+            manifest: manifest({ ...plugin, compatibility: { crossRuntime: { allowVersionSkew: 'none' } } }),
+            targets,
+            candidates: [],
+            overwrite: false
+        })[0]).toContain('multiple versions')
+        expect(validateCrossRuntimeVersionPlan({
+            manifest: manifest({ ...plugin, compatibility: { crossRuntime: { allowVersionSkew: 'minor' } }, version: '2.0.0' }),
+            targets,
+            candidates: [],
+            overwrite: false
+        })[0]).toContain('multiple versions')
     })
 })

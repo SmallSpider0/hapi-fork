@@ -1,6 +1,11 @@
 import type { PluginListItem } from '@hapi/protocol/plugins/admin'
 import type { PluginMarketplaceEntry, PluginMarketplaceEntryView } from '@hapi/protocol/plugins/marketplace'
-import { compareMarketplaceVersions } from '../marketplaceService'
+import {
+    installedPluginVersions,
+    isPluginVersionGreater,
+    latestCompatibleMarketplaceRelease,
+    type PluginMarketplaceHostContext
+} from '@hapi/protocol/plugins/runtime/versioning'
 
 export function marketplaceEntryMatches(entry: PluginMarketplaceEntry, filters: {
     query?: string
@@ -27,13 +32,11 @@ export function marketplaceEntryMatches(entry: PluginMarketplaceEntry, filters: 
     return haystack.includes(query)
 }
 
-export function latestMarketplaceVersion(entry: PluginMarketplaceEntry): string | undefined {
-    return [...entry.releases]
-        .filter((release) => !release.yanked)
-        .sort((left, right) => compareMarketplaceVersions(right.version, left.version))[0]?.version
+export function latestMarketplaceVersion(entry: PluginMarketplaceEntry, hostContext?: PluginMarketplaceHostContext): string | undefined {
+    return latestCompatibleMarketplaceRelease(entry, hostContext)?.version
 }
 
-export function marketplaceEntriesWithInstallState(entries: PluginMarketplaceEntry[], plugins: PluginListItem[]): PluginMarketplaceEntryView[] {
+export function marketplaceEntriesWithInstallState(entries: PluginMarketplaceEntry[], plugins: PluginListItem[], hostContext?: PluginMarketplaceHostContext): PluginMarketplaceEntryView[] {
     const installedById = new Map<string, PluginListItem[]>()
     for (const plugin of plugins) {
         const existing = installedById.get(plugin.id) ?? []
@@ -42,16 +45,26 @@ export function marketplaceEntriesWithInstallState(entries: PluginMarketplaceEnt
     }
     return entries.map((entry) => {
         const installedPlugins = installedById.get(entry.id) ?? []
-        if (installedPlugins.length === 0) return entry
-        const installedVersions = Array.from(new Set(installedPlugins.map((plugin) => plugin.version).filter((version): version is string => Boolean(version))))
-        const latestVersion = latestMarketplaceVersion(entry)
+        const latestVersion = latestMarketplaceVersion(entry, hostContext)
+        if (installedPlugins.length === 0) {
+            return {
+                ...entry,
+                ...(latestVersion ? { latestCompatibleVersion: latestVersion } : {})
+            }
+        }
+        const installedVersions = installedPluginVersions(installedPlugins, entry.id)
+        const updateVersion = installedVersions.some((version) => Boolean(latestVersion && isPluginVersionGreater(latestVersion, version)))
+            ? latestVersion
+            : undefined
         return {
             ...entry,
+            ...(latestVersion ? { latestCompatibleVersion: latestVersion } : {}),
             installed: {
                 ...(installedVersions.length > 0 ? { version: installedVersions.join(' + ') } : {}),
                 enabled: installedPlugins.some((plugin) => plugin.enabled),
                 yanked: installedVersions.some((version) => entry.releases.find((candidate) => candidate.version === version)?.yanked !== undefined),
-                updateAvailable: installedVersions.some((version) => Boolean(latestVersion && compareMarketplaceVersions(latestVersion, version) > 0))
+                updateAvailable: Boolean(updateVersion),
+                ...(updateVersion ? { updateVersion } : {})
             }
         }
     })

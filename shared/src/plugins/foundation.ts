@@ -10,6 +10,7 @@ import { z } from 'zod'
 import {
     HAPI_PLUGIN_API_VERSION,
     HAPI_PLUGIN_MANIFEST_FILE,
+    HAPI_SUPPORTED_PLUGIN_API_VERSIONS,
     PluginManifestLiteSchema,
     RawPluginManifestLiteSchema,
     type PluginManifestLite,
@@ -351,13 +352,13 @@ export async function validatePluginRoot(pluginRoot: string, source: PluginSourc
         }
     }
 
-    if (rawParsed.data.pluginApiVersion !== HAPI_PLUGIN_API_VERSION) {
+    if (!HAPI_SUPPORTED_PLUGIN_API_VERSIONS.includes(rawParsed.data.pluginApiVersion as typeof HAPI_SUPPORTED_PLUGIN_API_VERSIONS[number])) {
         return {
             ...baseRecord,
             status: 'incompatible',
             diagnostics: [diagnostic(
                 'plugin-api-version-mismatch',
-                `Unsupported pluginApiVersion ${rawParsed.data.pluginApiVersion}; expected ${HAPI_PLUGIN_API_VERSION}.`,
+                `Unsupported pluginApiVersion ${rawParsed.data.pluginApiVersion}; supported versions: ${HAPI_SUPPORTED_PLUGIN_API_VERSIONS.join(', ')}. Current default: ${HAPI_PLUGIN_API_VERSION}.`,
                 'error',
                 manifestPath
             )]

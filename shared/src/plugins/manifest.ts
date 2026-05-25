@@ -3,6 +3,8 @@ import { PluginWebContributionsSchema, WebLocalizedTextSchema } from './webDescr
 
 export const HAPI_PLUGIN_MANIFEST_FILE = 'hapi.plugin.json'
 export const HAPI_PLUGIN_API_VERSION = '0.1'
+export const HAPI_SUPPORTED_PLUGIN_API_VERSIONS = ['0.1'] as const
+export type HapiSupportedPluginApiVersion = typeof HAPI_SUPPORTED_PLUGIN_API_VERSIONS[number]
 
 export const PluginRuntimeNameSchema = z.enum(['hub', 'runner'])
 export type PluginRuntimeName = z.infer<typeof PluginRuntimeNameSchema>
@@ -13,7 +15,7 @@ const PluginIdSchema = z.string()
     .regex(/^[A-Za-z0-9][A-Za-z0-9._-]*$/, 'must start with an alphanumeric character and contain only alphanumeric characters, dots, underscores, or dashes')
 
 const SemverSchema = z.string()
-    .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/, 'must be a semantic version')
+    .regex(/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\+([0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*))?$/, 'must be a semantic version')
 
 const ContributionIdSchema = z.string()
     .min(1)
@@ -202,7 +204,7 @@ const PluginManifestLiteBaseSchema = z.object({
 export const RawPluginManifestLiteSchema = PluginManifestLiteBaseSchema
 
 export const PluginManifestLiteSchema = PluginManifestLiteBaseSchema.extend({
-    pluginApiVersion: z.literal(HAPI_PLUGIN_API_VERSION)
+    pluginApiVersion: z.enum(HAPI_SUPPORTED_PLUGIN_API_VERSIONS)
 }).strict()
 
 export type PluginManifestLite = z.infer<typeof PluginManifestLiteSchema>

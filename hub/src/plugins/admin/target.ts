@@ -5,7 +5,7 @@ import {
     type PluginTargetSummary,
     type RunnerPluginInventory
 } from '@hapi/protocol/plugins/admin'
-import { HAPI_PLUGIN_API_VERSION } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_API_VERSION, HAPI_SUPPORTED_PLUGIN_API_VERSIONS } from '@hapi/protocol/plugins'
 import { HUB_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
 import type { Machine } from '../../sync/syncEngine'
 import packageJson from '../../../../cli/package.json'
@@ -15,6 +15,7 @@ export function hubHostInfo(): PluginHostInfo {
         runtime: 'hub',
         hapiVersion: packageJson.version,
         pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+        supportedPluginApiVersions: [...HAPI_SUPPORTED_PLUGIN_API_VERSIONS],
         os: process.platform,
         arch: process.arch,
         supportedExtensionPoints: [...HUB_IMPLEMENTED_EXTENSION_POINTS]

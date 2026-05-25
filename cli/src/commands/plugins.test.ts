@@ -453,6 +453,7 @@ describe('hapi plugins command', () => {
                 id: 'com.market.plugin',
                 name: 'Market plugin',
                 repo: 'example/market-plugin',
+                latestCompatibleVersion: '1.1.0',
                 releases: [{
                     version: '1.1.0',
                     tag: 'v1.1.0',
@@ -470,7 +471,7 @@ describe('hapi plugins command', () => {
                         checksum: `sha256:${'a'.repeat(64)}`
                     }
                 }],
-                installed: { version: '1.0.0', updateAvailable: true, enabled: true }
+                installed: { version: '1.0.0', updateAvailable: true, updateVersion: '1.1.0', enabled: true }
             }]
         }))
         const createRemoteMarketplaceInstallPlan = vi.fn(async () => ({

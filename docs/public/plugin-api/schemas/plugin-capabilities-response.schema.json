@@ -158,6 +158,13 @@
                                         "type": "string",
                                         "minLength": 1
                                     },
+                                    "supportedPluginApiVersions": {
+                                        "type": "array",
+                                        "items": {
+                                            "type": "string",
+                                            "minLength": 1
+                                        }
+                                    },
                                     "os": {
                                         "type": "string",
                                         "minLength": 1
@@ -275,6 +282,13 @@
                                                     "pluginApiVersion": {
                                                         "type": "string",
                                                         "minLength": 1
+                                                    },
+                                                    "supportedPluginApiVersions": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
                                                     },
                                                     "os": {
                                                         "type": "string",
@@ -415,6 +429,13 @@
                                                                 "pluginApiVersion": {
                                                                     "type": "string",
                                                                     "minLength": 1
+                                                                },
+                                                                "supportedPluginApiVersions": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    }
                                                                 },
                                                                 "os": {
                                                                     "type": "string",
@@ -563,6 +584,13 @@
                                                         "type": "string",
                                                         "minLength": 1
                                                     },
+                                                    "supportedPluginApiVersions": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    },
                                                     "os": {
                                                         "type": "string",
                                                         "minLength": 1
@@ -702,6 +730,13 @@
                                                                 "pluginApiVersion": {
                                                                     "type": "string",
                                                                     "minLength": 1
+                                                                },
+                                                                "supportedPluginApiVersions": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    }
                                                                 },
                                                                 "os": {
                                                                     "type": "string",
@@ -850,6 +885,13 @@
                                                         "type": "string",
                                                         "minLength": 1
                                                     },
+                                                    "supportedPluginApiVersions": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
+                                                    },
                                                     "os": {
                                                         "type": "string",
                                                         "minLength": 1
@@ -989,6 +1031,13 @@
                                                                 "pluginApiVersion": {
                                                                     "type": "string",
                                                                     "minLength": 1
+                                                                },
+                                                                "supportedPluginApiVersions": {
+                                                                    "type": "array",
+                                                                    "items": {
+                                                                        "type": "string",
+                                                                        "minLength": 1
+                                                                    }
                                                                 },
                                                                 "os": {
                                                                     "type": "string",
@@ -2173,7 +2222,8 @@
                                                             "default": 604800000,
                                                             "type": "integer",
                                                             "exclusiveMinimum": 0,
-                                                            "maximum": 604800000
+                                                            "maximum": 604800000,
+                                                            "minimum": -9007199254740991
                                                         },
                                                         "presets": {
                                                             "minItems": 1,
@@ -2210,7 +2260,8 @@
                                                                     "delayMs": {
                                                                         "type": "integer",
                                                                         "exclusiveMinimum": 0,
-                                                                        "maximum": 604800000
+                                                                        "maximum": 604800000,
+                                                                        "minimum": -9007199254740991
                                                                     }
                                                                 },
                                                                 "required": [
@@ -2511,6 +2562,13 @@
                                                 "pluginApiVersion": {
                                                     "type": "string",
                                                     "minLength": 1
+                                                },
+                                                "supportedPluginApiVersions": {
+                                                    "type": "array",
+                                                    "items": {
+                                                        "type": "string",
+                                                        "minLength": 1
+                                                    }
                                                 },
                                                 "os": {
                                                     "type": "string",

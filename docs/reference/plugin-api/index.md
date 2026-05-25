@@ -2,7 +2,9 @@
 
 # Plugin API reference
 
-Plugin API version: `0.1`
+Current plugin API version: `0.1`
+
+Supported plugin API versions in this checkout: `0.1`
 
 HAPI plugins are trusted local extension packages. Hub and Runner runtimes execute plugin JavaScript in-process; Web only renders validated descriptors and never loads plugin JavaScript.
 

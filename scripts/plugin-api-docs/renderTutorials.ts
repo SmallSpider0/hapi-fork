@@ -25,6 +25,12 @@ export function renderQuickstartPage(tutorials: TutorialFixture[]): string {
         '',
         '## Development loop',
         '',
+        'Start with a scaffold when developing from the HAPI source tree:',
+        bash(`bun run plugin:create -- com.example.my-plugin --template hub-notification
+bun run plugin:validate -- plugins/com.example.my-plugin
+bun run plugin:pack -- plugins/com.example.my-plugin --out /tmp/com.example.my-plugin.tgz
+hapi plugins install-package /tmp/com.example.my-plugin.tgz --dry-run --json`),
+        'For ad-hoc external directories, write `hapi.plugin.json` and optional runtime files, then install locally:',
         bash(`mkdir -p my-plugin/dist
 # write hapi.plugin.json and optional runtime files
 hapi plugins install-local ./my-plugin --target hub --enable --reload

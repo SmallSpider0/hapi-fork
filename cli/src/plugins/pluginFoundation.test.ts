@@ -72,6 +72,7 @@ describe('plugin foundation cold path', () => {
     it('rejects invalid id, version, and plugin API version', () => {
         expect(PluginManifestLiteSchema.safeParse(validManifest({ id: 'bad/id' })).success).toBe(false)
         expect(PluginManifestLiteSchema.safeParse(validManifest({ version: 'latest' })).success).toBe(false)
+        expect(PluginManifestLiteSchema.safeParse(validManifest({ version: '1.0.0-01' })).success).toBe(false)
         expect(PluginManifestLiteSchema.safeParse(validManifest({ pluginApiVersion: '9.9' })).success).toBe(false)
     })
 

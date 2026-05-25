@@ -63,7 +63,6 @@ export const embeddedPluginMarketplaceCatalog = {
                         "name": "Runner Launch Presets",
                         "version": "0.1.1",
                         "pluginApiVersion": "0.1",
-                        "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
                         "display": {
                             "name": {
                                 "en": "Runner Launch Presets",
@@ -78,6 +77,7 @@ export const embeddedPluginMarketplaceCatalog = {
                                 "zh-CN": "- 在构建 agent 启动参数前应用默认值。\n- 可匹配全部或指定 Agent、指定工作区前缀。\n- 支持模型、Claude effort、Codex reasoning effort、权限/yolo 默认值。\n- 新建会话 UI 中用户手动选择的字段优先。"
                             }
                         },
+                        "description": "First-party Runner plugin for applying default launch settings by agent and workspace.",
                         "capabilities": [
                             {
                                 "id": "runner-launch-presets",
@@ -261,7 +261,6 @@ export const embeddedPluginMarketplaceCatalog = {
                         "name": "Schedule Send",
                         "version": "0.1.1",
                         "pluginApiVersion": "0.1",
-                        "description": "First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.",
                         "display": {
                             "name": {
                                 "en": "Schedule Send",
@@ -276,6 +275,7 @@ export const embeddedPluginMarketplaceCatalog = {
                                 "zh-CN": "- 在聊天输入框提供延迟发送选择器。\n- 由 Hub 运行时校验定时消息请求。\n- 使用 HAPI 可靠投递队列，重载后仍可继续发送。"
                             }
                         },
+                        "description": "First-party cross-runtime plugin that contributes a Web composer action and a Hub message-action handler backed by the core reliable delivery queue.",
                         "capabilities": [
                             {
                                 "id": "schedule-send",
@@ -466,7 +466,6 @@ export const embeddedPluginMarketplaceCatalog = {
                         "name": "ServerChan Notifier",
                         "version": "0.1.1",
                         "pluginApiVersion": "0.1",
-                        "description": "First-party Hub plugin that sends selected HAPI notifications through ServerChan.",
                         "display": {
                             "name": {
                                 "en": "ServerChan Notifier",
@@ -481,6 +480,15 @@ export const embeddedPluginMarketplaceCatalog = {
                                 "zh-CN": "- 注册由 Server 酱驱动的 Hub 通知通道。\n- 可配置需要转发的 HAPI 事件类型。\n- 可用最近值选择 Agent 和工作区过滤通知。\n- 从 Hub 环境变量读取 `SERVERCHAN_SENDKEY`，Web 不保存密钥。"
                             }
                         },
+                        "permissions": {
+                            "network": [
+                                "https://sctapi.ftqq.com"
+                            ],
+                            "secrets": [
+                                "SERVERCHAN_SENDKEY"
+                            ]
+                        },
+                        "description": "First-party Hub plugin that sends selected HAPI notifications through ServerChan.",
                         "capabilities": [
                             {
                                 "id": "serverchan-notifier",
@@ -688,14 +696,6 @@ export const embeddedPluginMarketplaceCatalog = {
                                     }
                                 ]
                             }
-                        },
-                        "permissions": {
-                            "network": [
-                                "https://sctapi.ftqq.com"
-                            ],
-                            "secrets": [
-                                "SERVERCHAN_SENDKEY"
-                            ]
                         },
                         "compatibility": {
                             "pluginApi": ">=0.1 <0.2",

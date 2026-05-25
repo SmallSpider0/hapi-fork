@@ -40,6 +40,7 @@ export const PluginHostInfoSchema = z.object({
     runtime: PluginRuntimeNameSchema,
     hapiVersion: z.string().min(1),
     pluginApiVersion: z.string().min(1),
+    supportedPluginApiVersions: z.array(z.string().min(1)).optional(),
     os: z.string().min(1),
     arch: z.string().min(1),
     supportedExtensionPoints: z.array(z.string().min(1)).default([])

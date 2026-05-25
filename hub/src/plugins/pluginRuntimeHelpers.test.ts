@@ -58,6 +58,29 @@ describe('plugin runtime shared helpers', () => {
         expect(satisfiesVersionRange('0.20.0', '>= 0.18.0 < 0.19.0')).toBe(false)
     })
 
+    it('accepts plugin API ranges satisfied by any supported host API version', () => {
+        const manifest: PluginManifestLite = {
+            id: 'com.example.compat',
+            name: 'Compat',
+            version: '1.0.0',
+            pluginApiVersion: '0.1',
+            compatibility: {
+                pluginApi: '>=0.1 <0.2'
+            }
+        }
+        const hostInfo: PluginHostInfo = {
+            runtime: 'hub',
+            hapiVersion: '0.19.0',
+            pluginApiVersion: '0.2',
+            supportedPluginApiVersions: ['0.1', '0.2'],
+            os: 'linux',
+            arch: 'x64',
+            supportedExtensionPoints: []
+        }
+
+        expect(pluginRuntimeCompatibilityProblems(manifest, 'hub', hostInfo)).toEqual([])
+    })
+
     it('enforces global and runtime-specific OS and arch compatibility together', () => {
         const manifest: PluginManifestLite = {
             id: 'com.example.compat',

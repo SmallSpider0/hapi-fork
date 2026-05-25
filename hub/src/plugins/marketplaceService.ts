@@ -20,6 +20,11 @@ import {
     embeddedPluginMarketplaceCatalog,
     embeddedPluginMarketplaceSources
 } from '@hapi/protocol/plugins/marketplaceSources.generated'
+import {
+    comparePluginVersions,
+    latestCompatibleMarketplaceRelease,
+    type PluginMarketplaceHostContext
+} from '@hapi/protocol/plugins/runtime/versioning'
 
 export const DEFAULT_PLUGIN_MARKETPLACE_URL = EMBEDDED_PLUGIN_MARKETPLACE_URL
 
@@ -59,7 +64,6 @@ export interface MarketplacePackageRequestResult {
     request: PluginInstallPlanRequest
 }
 
-type NumericVersion = [number, number, number]
 type SourceFile = { path: string; contentBase64: string }
 const execFile = promisify(execFileCallback)
 
@@ -85,21 +89,7 @@ function stableStringify(value: unknown): string {
     return JSON.stringify(value)
 }
 
-function parseNumericVersion(version: string): NumericVersion {
-    const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/)
-    if (!match) return [0, 0, 0]
-    return [Number(match[1]), Number(match[2]), Number(match[3])]
-}
-
-export function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
-    const left = parseNumericVersion(leftRaw)
-    const right = parseNumericVersion(rightRaw)
-    for (let index = 0; index < 3; index += 1) {
-        if (left[index] > right[index]) return 1
-        if (left[index] < right[index]) return -1
-    }
-    return leftRaw.localeCompare(rightRaw)
-}
+export const compareMarketplaceVersions = comparePluginVersions
 
 function isFileUrl(url: string): boolean {
     return url.startsWith('file://')
@@ -257,7 +247,7 @@ export class PluginMarketplaceService {
         return { snapshot, entry }
     }
 
-    selectRelease(entry: PluginMarketplaceEntry, version?: string): PluginMarketplaceRelease {
+    selectRelease(entry: PluginMarketplaceEntry, version?: string, hostContext?: PluginMarketplaceHostContext): PluginMarketplaceRelease {
         const candidates = entry.releases
             .filter((release) => !release.yanked)
             .sort((left, right) => compareMarketplaceVersions(right.version, left.version))
@@ -268,16 +258,16 @@ export class PluginMarketplaceService {
             }
             return exact
         }
-        const latest = candidates[0]
+        const latest = latestCompatibleMarketplaceRelease(entry, hostContext)
         if (!latest) {
-            throw new Error(`Marketplace plugin ${entry.id} has no installable releases.`)
+            throw new Error(`Marketplace plugin ${entry.id} has no installable releases compatible with the current plugin hosts.`)
         }
         return latest
     }
 
-    async buildInstallPlanRequest(pluginId: string, request: PluginMarketplaceInstallRequest = {}): Promise<MarketplacePackageRequestResult> {
+    async buildInstallPlanRequest(pluginId: string, request: PluginMarketplaceInstallRequest = {}, hostContext?: PluginMarketplaceHostContext): Promise<MarketplacePackageRequestResult> {
         const { snapshot, entry } = await this.getEntry(pluginId)
-        const release = this.selectRelease(entry, request.version)
+        const release = this.selectRelease(entry, request.version, hostContext)
         const distribution = release.source ? 'hapi-source' : 'package'
         const bytes = distribution === 'hapi-source'
             ? await this.packageSourceRelease(snapshot, entry, release)

@@ -90,6 +90,24 @@ function existingUpdatedAt(): string {
     return new Date().toISOString()
 }
 
+function marketplaceDriftHints(path: string, current: string, next: string): string[] {
+    if (path !== catalogPath || !current.trim()) return []
+    try {
+        const currentCatalog = PluginMarketplaceCatalogSchema.parse(JSON.parse(current) as unknown)
+        const nextCatalog = PluginMarketplaceCatalogSchema.parse(JSON.parse(next) as unknown)
+        const currentVersions = new Map(currentCatalog.plugins.map((plugin) => [plugin.id, plugin.releases.map((release) => release.version).join(', ')]))
+        return nextCatalog.plugins.flatMap((plugin) => {
+            const previous = currentVersions.get(plugin.id)
+            const upcoming = plugin.releases.map((release) => release.version).join(', ')
+            return previous !== upcoming
+                ? [`[marketplace:generate] ${plugin.id} release versions changed: ${previous ?? '(new plugin)'} -> ${upcoming}.`]
+                : []
+        })
+    } catch {
+        return []
+    }
+}
+
 const pluginDirs = existsSync(pluginsRoot)
     ? readdirSync(pluginsRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory()).map((entry) => entry.name).sort()
     : []
@@ -180,6 +198,9 @@ for (const [path, next] of nextFiles) {
         changed = true
         if (check) {
             console.error(`[marketplace:generate] ${toPosix(relative(repoRoot, path))} is not up to date.`)
+            for (const hint of marketplaceDriftHints(path, current, next)) {
+                console.error(hint)
+            }
         } else {
             writeFileSync(path, next)
             console.log(`[marketplace:generate] wrote ${toPosix(relative(repoRoot, path))}`)

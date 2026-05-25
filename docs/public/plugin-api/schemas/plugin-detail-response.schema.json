@@ -248,6 +248,13 @@
                                                 "type": "string",
                                                 "minLength": 1
                                             },
+                                            "supportedPluginApiVersions": {
+                                                "type": "array",
+                                                "items": {
+                                                    "type": "string",
+                                                    "minLength": 1
+                                                }
+                                            },
                                             "os": {
                                                 "type": "string",
                                                 "minLength": 1
@@ -372,6 +379,13 @@
                                 "pluginApiVersion": {
                                     "type": "string",
                                     "minLength": 1
+                                },
+                                "supportedPluginApiVersions": {
+                                    "type": "array",
+                                    "items": {
+                                        "type": "string",
+                                        "minLength": 1
+                                    }
                                 },
                                 "os": {
                                     "type": "string",
@@ -539,11 +553,13 @@
                         },
                         "version": {
                             "type": "string",
-                            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$"
+                            "pattern": "^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-((?:0|[1-9]\\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*)(?:\\.(?:0|[1-9]\\d*|[0-9A-Za-z-]*[A-Za-z-][0-9A-Za-z-]*))*))?(?:\\+([0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*))?$"
                         },
                         "pluginApiVersion": {
                             "type": "string",
-                            "const": "0.1"
+                            "enum": [
+                                "0.1"
+                            ]
                         },
                         "description": {
                             "type": "string"
@@ -2941,7 +2957,8 @@
                                                                         "default": 604800000,
                                                                         "type": "integer",
                                                                         "exclusiveMinimum": 0,
-                                                                        "maximum": 604800000
+                                                                        "maximum": 604800000,
+                                                                        "minimum": -9007199254740991
                                                                     },
                                                                     "presets": {
                                                                         "minItems": 1,
@@ -2978,7 +2995,8 @@
                                                                                 "delayMs": {
                                                                                     "type": "integer",
                                                                                     "exclusiveMinimum": 0,
-                                                                                    "maximum": 604800000
+                                                                                    "maximum": 604800000,
+                                                                                    "minimum": -9007199254740991
                                                                                 }
                                                                             },
                                                                             "required": [
@@ -3485,6 +3503,13 @@
                                             "type": "string",
                                             "minLength": 1
                                         },
+                                        "supportedPluginApiVersions": {
+                                            "type": "array",
+                                            "items": {
+                                                "type": "string",
+                                                "minLength": 1
+                                            }
+                                        },
                                         "os": {
                                             "type": "string",
                                             "minLength": 1
@@ -3643,6 +3668,13 @@
                                                     "pluginApiVersion": {
                                                         "type": "string",
                                                         "minLength": 1
+                                                    },
+                                                    "supportedPluginApiVersions": {
+                                                        "type": "array",
+                                                        "items": {
+                                                            "type": "string",
+                                                            "minLength": 1
+                                                        }
                                                     },
                                                     "os": {
                                                         "type": "string",
@@ -5025,7 +5057,8 @@
                                                                 "default": 604800000,
                                                                 "type": "integer",
                                                                 "exclusiveMinimum": 0,
-                                                                "maximum": 604800000
+                                                                "maximum": 604800000,
+                                                                "minimum": -9007199254740991
                                                             },
                                                             "presets": {
                                                                 "minItems": 1,
@@ -5062,7 +5095,8 @@
                                                                         "delayMs": {
                                                                             "type": "integer",
                                                                             "exclusiveMinimum": 0,
-                                                                            "maximum": 604800000
+                                                                            "maximum": 604800000,
+                                                                            "minimum": -9007199254740991
                                                                         }
                                                                     },
                                                                     "required": [

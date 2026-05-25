@@ -14,6 +14,7 @@ import { LoadingState } from '@/components/LoadingState'
 import { MarkdownRenderer } from '@/components/MarkdownRenderer'
 import type { PluginInstallPlanResponse, PluginInstallResult, PluginListItem, PluginReloadResult } from '@hapi/protocol/plugins/admin'
 import type { PluginMarketplaceEntryView, PluginMarketplaceInstallPlanResponse } from '@hapi/protocol/plugins/marketplace'
+import { comparePluginVersions } from '@hapi/protocol/plugins/runtime/versioning'
 
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
 type PluginSettingsTab = 'installed' | 'marketplace'
@@ -298,7 +299,7 @@ function PluginCard(props: {
                         </div>
                         <div className="flex flex-wrap justify-end gap-1">
                             <Badge variant={statusVariant(group.status)}>{t(`settings.plugins.status.${group.status}`)}</Badge>
-                            {props.marketplaceEntry?.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: latest.version })}</Badge> : null}
+                            {props.marketplaceEntry?.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: props.marketplaceEntry.installed.updateVersion ?? latest.version })}</Badge> : null}
                             {props.marketplaceEntry?.installed?.yanked ? <Badge variant="destructive">{t('settings.plugins.marketplace.yanked')}</Badge> : null}
                         </div>
                     </div>
@@ -332,9 +333,9 @@ function PluginCard(props: {
 }
 
 function latestMarketplaceRelease(entry: PluginMarketplaceEntryView): PluginMarketplaceEntryView['releases'][number] | undefined {
-    return [...entry.releases]
-        .filter((release) => !release.yanked)
-        .sort((left, right) => compareMarketplaceVersions(right.version, left.version))[0]
+    return entry.latestCompatibleVersion
+        ? entry.releases.find((release) => release.version === entry.latestCompatibleVersion && !release.yanked)
+        : undefined
 }
 
 function marketplaceReleaseForVersion(entry: PluginMarketplaceEntryView, version?: string): PluginMarketplaceEntryView['releases'][number] | undefined {
@@ -352,7 +353,7 @@ function marketplaceInstalledVersions(entry: PluginMarketplaceEntryView): string
 export function marketplaceHasLocalNewerVersion(entry: PluginMarketplaceEntryView, version?: string): boolean {
     const release = marketplaceReleaseForVersion(entry, version)
     if (!release) return false
-    return marketplaceInstalledVersions(entry).some((installedVersion) => compareMarketplaceVersions(installedVersion, release.version) > 0)
+    return marketplaceInstalledVersions(entry).some((installedVersion) => comparePluginVersions(installedVersion, release.version) > 0)
 }
 
 function marketplaceEntryMatchesSearch(entry: PluginMarketplaceEntryView, query: string): boolean {
@@ -369,24 +370,7 @@ function marketplaceEntryMatchesSearch(entry: PluginMarketplaceEntryView, query:
     return haystack.includes(normalized)
 }
 
-type NumericVersion = [number, number, number]
 type MarketplaceInstallIntent = 'install' | 'update' | 'reinstall' | 'installed' | 'localNewer'
-
-function parseMarketplaceVersion(version: string): NumericVersion {
-    const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/)
-    if (!match) return [0, 0, 0]
-    return [Number(match[1]), Number(match[2]), Number(match[3])]
-}
-
-function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
-    const left = parseMarketplaceVersion(leftRaw)
-    const right = parseMarketplaceVersion(rightRaw)
-    for (let index = 0; index < 3; index += 1) {
-        if (left[index] > right[index]) return 1
-        if (left[index] < right[index]) return -1
-    }
-    return leftRaw.localeCompare(rightRaw)
-}
 
 function marketplaceInstallIntent(entry: PluginMarketplaceEntryView, overwrite: boolean, version?: string): MarketplaceInstallIntent {
     if (!entry.installed) return 'install'
@@ -447,7 +431,7 @@ export function MarketplacePluginCard(props: {
                 </div>
                 <div className="flex min-w-0 flex-wrap justify-start gap-1 sm:justify-end">
                     {entry.installed ? <Badge variant="success">{t('settings.plugins.marketplace.installed', { version: entry.installed.version ?? '' })}</Badge> : null}
-                    {entry.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: latest.version })}</Badge> : null}
+                    {entry.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: entry.installed.updateVersion ?? latest.version })}</Badge> : null}
                     {localNewer && !entry.installed?.updateAvailable ? <Badge variant="warning">{t('settings.plugins.marketplace.localNewer')}</Badge> : null}
                     {entry.installed?.yanked ? <Badge variant="destructive">{t('settings.plugins.marketplace.yanked')}</Badge> : null}
                 </div>

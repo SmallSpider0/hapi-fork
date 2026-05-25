@@ -28,6 +28,7 @@ import {
     AgentHistoryImportResultSchema,
     AgentDescriptorSchema,
     HAPI_PLUGIN_API_VERSION,
+    HAPI_SUPPORTED_PLUGIN_API_VERSIONS,
     builtinAgentDescriptors,
     pluginManifestRequiresRunnerInstall,
     runnerPluginConfigScope,
@@ -743,6 +744,7 @@ export class RunnerPluginManager {
             runtime: 'runner',
             hapiVersion: packageJson.version,
             pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+            supportedPluginApiVersions: [...HAPI_SUPPORTED_PLUGIN_API_VERSIONS],
             os: process.platform,
             arch: process.arch,
             supportedExtensionPoints: [...RUNNER_IMPLEMENTED_EXTENSION_POINTS]

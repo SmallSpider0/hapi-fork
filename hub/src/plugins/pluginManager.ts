@@ -30,7 +30,7 @@ import {
     readPluginState,
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
-import { HAPI_PLUGIN_API_VERSION, hubPluginConfigScope, pluginManifestRequiresHubInstall, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
+import { HAPI_PLUGIN_API_VERSION, HAPI_SUPPORTED_PLUGIN_API_VERSIONS, hubPluginConfigScope, pluginManifestRequiresHubInstall, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
 import { seedDefaultFirstPartyPluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { HUB_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
@@ -589,6 +589,7 @@ export class HubPluginManager {
             runtime: 'hub',
             hapiVersion: packageJson.version,
             pluginApiVersion: HAPI_PLUGIN_API_VERSION,
+            supportedPluginApiVersions: [...HAPI_SUPPORTED_PLUGIN_API_VERSIONS],
             os: process.platform,
             arch: process.arch,
             supportedExtensionPoints: [...HUB_IMPLEMENTED_EXTENSION_POINTS]
