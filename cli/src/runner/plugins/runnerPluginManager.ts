@@ -33,7 +33,7 @@ import {
     runnerPluginConfigScope,
     sanitizePluginConfigForView
 } from '@hapi/protocol/plugins'
-import { defaultEnabledBundledRunnerPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
+import { seedCorePluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
 import packageJson from '../../../package.json'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import {
@@ -620,6 +620,9 @@ export class RunnerPluginManager {
 
         const items: PluginReloadItem[] = []
         const managerDiagnostics: PluginDiagnosticView[] = []
+        if (this.options.includeBundledCore === true) {
+            await seedCorePluginsAsUserPlugins(this.options.hapiHome)
+        }
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
         const records = this.stateController.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
@@ -713,8 +716,10 @@ export class RunnerPluginManager {
 
     private async discoverPluginRecords(): Promise<DiscoveredPluginRecord[]> {
         const bundledDisabled = (this.options.env ?? process.env).HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
+        if (this.options.includeBundledCore === true) {
+            await seedCorePluginsAsUserPlugins(this.options.hapiHome)
+        }
         const bundledPluginDirs = [
-            ...(this.options.includeBundledCore === true ? [await prepareBundledCorePlugins(this.options.hapiHome)] : []),
             ...(this.options.includeBundledExamples && !bundledDisabled ? [await prepareBundledExamplePlugins(this.options.hapiHome)] : [])
         ]
         const records = await discoverPlugins({
@@ -723,16 +728,14 @@ export class RunnerPluginManager {
             bundledPluginDirs
         })
         return applyRuntimeCompatibility(
-            records.filter((record) => !record.manifest || record.source !== 'bundled' || pluginManifestRequiresRunnerInstall(record.manifest)),
+            records.filter((record) => !record.manifest || pluginManifestRequiresRunnerInstall(record.manifest)),
             'runner',
             this.hostInfo()
         )
     }
 
     private defaultEnabledPluginIds(): string[] {
-        return this.options.includeBundledCore === true
-            ? defaultEnabledBundledRunnerPluginIds
-            : []
+        return []
     }
 
     private hostInfo(): PluginHostInfo {

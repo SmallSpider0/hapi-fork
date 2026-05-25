@@ -94,6 +94,12 @@ function isHttpUrl(url: string): boolean {
     return url.startsWith('https://') || url.startsWith('http://')
 }
 
+function withCacheBust(url: string, now: number): string {
+    if (!isHttpUrl(url)) return url
+    const separator = url.includes('?') ? '&' : '?'
+    return `${url}${separator}_hapiCacheBust=${now}`
+}
+
 export class PluginMarketplaceService {
     private snapshot: MarketplaceCatalogSnapshot | null = null
     private readonly sourceUrl: string
@@ -113,7 +119,7 @@ export class PluginMarketplaceService {
         if (!options.force && this.snapshot && now - this.snapshot.fetchedAt < this.cacheTtlMs) {
             return this.snapshot
         }
-        const raw = await this.readText(this.sourceUrl)
+        const raw = await this.readText(options.force ? withCacheBust(this.sourceUrl, now) : this.sourceUrl)
         const parsed = PluginMarketplaceCatalogSchema.parse(JSON.parse(raw) as unknown)
         this.snapshot = {
             sourceUrl: this.sourceUrl,

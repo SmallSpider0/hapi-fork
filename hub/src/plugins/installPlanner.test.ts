@@ -259,6 +259,43 @@ describe('plugin install planner', () => {
         expect(overwrite.targets[0]).toMatchObject({ status: 'compatible', action: 'overwrite', existingVersion: '1.0.0' })
     })
 
+    it('does not add generic Runner readiness errors when a required target already explains the conflict', () => {
+        const plugin = manifest({
+            version: '1.0.0',
+            runtimes: {
+                hub: { entry: 'hub.js' },
+                runner: { entry: 'runner.js' }
+            }
+        })
+        const installed = [{ ...({} as PluginInstallTargetCandidate['plugins'][number]), id: plugin.id, version: '2.0.0' }]
+
+        const plan = planFor(plugin, [
+            hubCandidate(installed),
+            runnerCandidate('runner-current', { plugins: installed })
+        ])
+
+        expect(plan.targets.find((target) => target.target.scope === 'hub')).toMatchObject({ status: 'conflict', action: 'block' })
+        expect(plan.targets.find((target) => target.target.scope === 'runner:runner-current')).toMatchObject({ status: 'conflict', action: 'skip' })
+        expect(plan.blockingErrors).toContain('hub: Plugin com.example.plugin 2.0.0 is already installed. Enable overwrite to replace it with 1.0.0.')
+        expect(plan.blockingErrors).not.toContain('Plugin requires at least 1 compatible Runner target(s), but only 0 are ready.')
+    })
+
+    it('reports Runner version conflicts instead of a generic readiness error when Runner is the only required position', () => {
+        const plugin = manifest({
+            version: '1.0.0',
+            runtimes: { runner: { entry: 'runner.js' } }
+        })
+        const installed = [{ ...({} as PluginInstallTargetCandidate['plugins'][number]), id: plugin.id, version: '2.0.0' }]
+
+        const plan = planFor(plugin, [
+            runnerCandidate('runner-current', { plugins: installed })
+        ])
+
+        expect(plan.targets[0]).toMatchObject({ status: 'conflict', action: 'skip' })
+        expect(plan.blockingErrors).toContain('runner:runner-current: Plugin com.example.plugin 2.0.0 is already installed. Enable overwrite to replace it with 1.0.0.')
+        expect(plan.blockingErrors).not.toContain('Plugin requires at least 1 compatible Runner target(s), but only 0 are ready.')
+    })
+
     it('enforces minReadyRunnerCount greater than one', () => {
         const plugin = manifest({
             runtimes: { runner: { entry: 'runner.js' } },

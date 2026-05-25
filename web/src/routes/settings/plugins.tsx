@@ -18,7 +18,7 @@ import type { PluginMarketplaceEntryView, PluginMarketplaceInstallPlanResponse }
 type PluginFilter = 'all' | 'active' | 'enabled' | 'issues'
 type PluginSettingsTab = 'installed' | 'marketplace'
 type BadgeVariant = 'default' | 'warning' | 'success' | 'destructive'
-type MarketplacePendingAction = 'preview' | 'install'
+type MarketplacePendingAction = 'check' | 'install'
 export const DEFAULT_PLUGIN_SETTINGS_TAB = 'installed' satisfies PluginSettingsTab
 export type PluginDisplayGroup = {
     id: string
@@ -40,6 +40,27 @@ type ResultState = {
     tone: 'success' | 'warning' | 'error'
 } | null
 type ResultPayload = NonNullable<ResultState>
+type MarketplacePlanState = {
+    key: string
+    response: PluginMarketplaceInstallPlanResponse
+} | null
+type MarketplaceInstallPlanKeyInput = {
+    pluginId: string
+    version?: string
+    enable: boolean
+    overwrite: boolean
+    updateAvailable?: boolean
+}
+
+export function createMarketplaceInstallPlanKey(input: MarketplaceInstallPlanKeyInput): string {
+    return JSON.stringify({
+        pluginId: input.pluginId,
+        version: input.version ?? '',
+        enable: input.enable,
+        overwrite: input.overwrite || input.updateAvailable === true,
+        runnerSelectionMode: 'compatible'
+    })
+}
 
 function BackIcon() {
     return <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="15 18 9 12 15 6" /></svg>
@@ -321,6 +342,19 @@ function marketplaceReleaseForVersion(entry: PluginMarketplaceEntryView, version
     return entry.releases.find((release) => release.version === version && !release.yanked) ?? latestMarketplaceRelease(entry)
 }
 
+function marketplaceInstalledVersions(entry: PluginMarketplaceEntryView): string[] {
+    return entry.installed?.version
+        ?.split('+')
+        .map((version) => version.trim())
+        .filter(Boolean) ?? []
+}
+
+export function marketplaceHasLocalNewerVersion(entry: PluginMarketplaceEntryView, version?: string): boolean {
+    const release = marketplaceReleaseForVersion(entry, version)
+    if (!release) return false
+    return marketplaceInstalledVersions(entry).some((installedVersion) => compareMarketplaceVersions(installedVersion, release.version) > 0)
+}
+
 function marketplaceEntryMatchesSearch(entry: PluginMarketplaceEntryView, query: string): boolean {
     const normalized = query.trim().toLowerCase()
     if (!normalized) return true
@@ -336,7 +370,7 @@ function marketplaceEntryMatchesSearch(entry: PluginMarketplaceEntryView, query:
 }
 
 type NumericVersion = [number, number, number]
-type MarketplaceInstallIntent = 'install' | 'update' | 'reinstall' | 'installed'
+type MarketplaceInstallIntent = 'install' | 'update' | 'reinstall' | 'installed' | 'localNewer'
 
 function parseMarketplaceVersion(version: string): NumericVersion {
     const match = version.trim().match(/^v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)/)
@@ -354,10 +388,11 @@ function compareMarketplaceVersions(leftRaw: string, rightRaw: string): number {
     return leftRaw.localeCompare(rightRaw)
 }
 
-function marketplaceInstallIntent(entry: PluginMarketplaceEntryView, overwrite: boolean): MarketplaceInstallIntent {
+function marketplaceInstallIntent(entry: PluginMarketplaceEntryView, overwrite: boolean, version?: string): MarketplaceInstallIntent {
     if (!entry.installed) return 'install'
     if (entry.installed.updateAvailable) return 'update'
     if (overwrite) return 'reinstall'
+    if (marketplaceHasLocalNewerVersion(entry, version)) return 'localNewer'
     return 'installed'
 }
 
@@ -369,38 +404,40 @@ function marketplaceInstallButtonLabel(
 }
 
 function marketplaceActionEnabled(intent: MarketplaceInstallIntent): boolean {
-    return intent !== 'installed'
+    return intent !== 'installed' && intent !== 'localNewer'
 }
 
-function MarketplacePluginCard(props: {
+export function MarketplacePluginCard(props: {
     entry: PluginMarketplaceEntryView
     t: (key: string, params?: Record<string, string | number>) => string
     locale: 'en' | 'zh-CN'
     disabled: boolean
     overwrite: boolean
     pendingAction: MarketplacePendingAction | null
-    selected: boolean
+    expanded: boolean
     onDetails: () => void
-    onPreview: () => void
     onInstall: () => void
+    children?: ReactNode
 }) {
     const { entry, t, locale } = props
     const latest = latestMarketplaceRelease(entry)
+    const localNewer = marketplaceHasLocalNewerVersion(entry)
     const intent = marketplaceInstallIntent(entry, props.overwrite)
     const name = localizedPluginName(entry, locale)
     const description = localizedPluginDescription(entry, locale)
     const installLabel = props.pendingAction === 'install'
         ? t('settings.plugins.marketplace.installing')
         : marketplaceInstallButtonLabel(t, intent)
-    const reviewLabel = props.pendingAction === 'preview'
-        ? t('settings.plugins.marketplace.reviewing')
-        : t('settings.plugins.install.previewPlan')
     const tags = [
         ...(entry.categories ?? []),
         ...(entry.runtimes ?? []).map((runtime) => t(`settings.plugins.runtime.${runtime}`))
     ]
     return (
-        <div className={`min-w-0 overflow-hidden rounded-xl border bg-[var(--app-bg)] p-3 shadow-sm ${props.selected ? 'border-[var(--app-link)]' : 'border-[var(--app-border)]'}`}>
+        <div
+            data-plugin-id={entry.id}
+            data-expanded={props.expanded ? 'true' : 'false'}
+            className={`min-w-0 overflow-hidden rounded-xl border bg-[var(--app-bg)] p-3 shadow-sm ${props.expanded ? 'border-[var(--app-link)]' : 'border-[var(--app-border)]'}`}
+        >
             <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
                 <div className="min-w-0 flex-1">
                     <div className="truncate font-medium">{name}</div>
@@ -411,6 +448,7 @@ function MarketplacePluginCard(props: {
                 <div className="flex min-w-0 flex-wrap justify-start gap-1 sm:justify-end">
                     {entry.installed ? <Badge variant="success">{t('settings.plugins.marketplace.installed', { version: entry.installed.version ?? '' })}</Badge> : null}
                     {entry.installed?.updateAvailable && latest ? <Badge variant="warning">{t('settings.plugins.marketplace.updateAvailable', { version: latest.version })}</Badge> : null}
+                    {localNewer && !entry.installed?.updateAvailable ? <Badge variant="warning">{t('settings.plugins.marketplace.localNewer')}</Badge> : null}
                     {entry.installed?.yanked ? <Badge variant="destructive">{t('settings.plugins.marketplace.yanked')}</Badge> : null}
                 </div>
             </div>
@@ -430,13 +468,19 @@ function MarketplacePluginCard(props: {
                     {t('settings.plugins.marketplace.viewRepo')}
                 </a>
                 <div className="grid min-w-0 grid-cols-1 gap-2 sm:flex sm:flex-wrap sm:justify-end">
-                    <Button type="button" variant="secondary" size="sm" disabled={props.disabled} onClick={props.onDetails} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">{t('settings.plugins.marketplace.details')}</Button>
-                    <Button type="button" variant="outline" size="sm" disabled={props.disabled || Boolean(props.pendingAction)} onClick={props.onPreview} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">{reviewLabel}</Button>
+                    <Button type="button" variant="secondary" size="sm" disabled={props.disabled} onClick={props.onDetails} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">
+                        {props.expanded ? t('settings.plugins.marketplace.closeDetails') : t('settings.plugins.marketplace.details')}
+                    </Button>
                     <Button type="button" size="sm" disabled={props.disabled || Boolean(props.pendingAction) || !marketplaceActionEnabled(intent)} onClick={props.onInstall} className="w-full min-w-0 max-w-full overflow-hidden text-ellipsis sm:w-auto">
                         {installLabel}
                     </Button>
                 </div>
             </div>
+            {props.expanded ? (
+                <div className="mt-3 border-t border-[var(--app-border)] pt-3">
+                    {props.children}
+                </div>
+            ) : null}
         </div>
     )
 }
@@ -545,7 +589,7 @@ function formatPackageSize(size?: number): string {
     return `${(size / (1024 * 1024)).toFixed(1)} MiB`
 }
 
-function MarketplaceDetailCard(props: {
+function MarketplaceDetailPanel(props: {
     entry: PluginMarketplaceEntryView
     version?: string
     plan: PluginInstallPlanResponse | null
@@ -555,13 +599,14 @@ function MarketplaceDetailCard(props: {
     t: (key: string, params?: Record<string, string | number>) => string
     locale: 'en' | 'zh-CN'
     onVersionChange: (version: string) => void
-    onPreview: () => void
     onInstall: () => void
     onClose: () => void
 }) {
     const { entry, t, locale } = props
     const release = marketplaceReleaseForVersion(entry, props.version)
-    const intent = marketplaceInstallIntent(entry, props.overwrite)
+    const localNewer = marketplaceHasLocalNewerVersion(entry, props.version)
+    const installedVersion = marketplaceInstalledVersions(entry).join(' + ')
+    const intent = marketplaceInstallIntent(entry, props.overwrite, props.version)
     const name = localizedPluginName(entry, locale)
     const description = localizedPluginDescription(entry, locale)
     const featureIntro = localizedText(entry.display?.featureIntro, locale).trim()
@@ -569,98 +614,101 @@ function MarketplaceDetailCard(props: {
     const network = release?.manifest.permissions?.network ?? []
     const secrets = release?.manifest.permissions?.secrets ?? []
     const packageSize = formatPackageSize(release?.package.size)
-    const reviewLabel = props.pendingAction === 'preview' ? t('settings.plugins.marketplace.reviewing') : t('settings.plugins.install.previewPlan')
     const installLabel = props.pendingAction === 'install' ? t('settings.plugins.marketplace.installing') : marketplaceInstallButtonLabel(t, intent)
 
     return (
-        <Card className="border border-[var(--app-link)] bg-[var(--app-bg)]">
-            <CardContent className="space-y-3 p-3">
-                <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div className="min-w-0">
-                        <div className="text-base font-semibold">{name}</div>
-                        <div className="break-all text-xs text-[var(--app-hint)]">{entry.id} · {entry.repo}</div>
-                        {description ? <div className="mt-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
-                    </div>
-                    <Button type="button" variant="outline" size="sm" onClick={props.onClose}>{t('settings.plugins.marketplace.closeDetails')}</Button>
+        <div className="space-y-3">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+                <div className="min-w-0">
+                    <div className="text-base font-semibold">{name}</div>
+                    <div className="break-all text-xs text-[var(--app-hint)]">{entry.id} · {entry.repo}</div>
+                    {description ? <div className="mt-2 text-sm text-[var(--app-hint)]">{description}</div> : null}
                 </div>
+                <Button type="button" variant="outline" size="sm" onClick={props.onClose}>{t('settings.plugins.marketplace.closeDetails')}</Button>
+            </div>
 
-                <div className="grid gap-2 text-sm sm:grid-cols-2">
-                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
-                        <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.repo')}</div>
-                        <a href={`https://github.com/${entry.repo}`} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link)] hover:underline">{entry.repo}</a>
-                    </div>
-                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
-                        <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.version')}</div>
-                        <select
-                            value={release?.version ?? ''}
-                            onChange={(event) => props.onVersionChange(event.target.value)}
-                            className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-sm text-[var(--app-fg)]"
-                        >
-                            {entry.releases.map((candidate) => (
-                                <option key={candidate.version} value={candidate.version} disabled={Boolean(candidate.yanked)}>
-                                    {candidate.version}{candidate.yanked ? ` · ${t('settings.plugins.marketplace.yanked')}` : ''}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
-                    {entry.homepage ? (
-                        <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
-                            <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.homepage')}</div>
-                            <a href={entry.homepage} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link)] hover:underline">{entry.homepage}</a>
-                        </div>
-                    ) : null}
-                    {entry.author?.name || entry.license ? (
-                        <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
-                            <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.publisher')}</div>
-                            <div>{entry.author?.name ?? t('settings.plugins.unknown')}{entry.license ? ` · ${entry.license}` : ''}</div>
-                        </div>
-                    ) : null}
+            <div className="grid gap-2 text-sm sm:grid-cols-2">
+                <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                    <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.repo')}</div>
+                    <a href={`https://github.com/${entry.repo}`} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link)] hover:underline">{entry.repo}</a>
                 </div>
-
-                {featureIntro ? (
-                    <div className="rounded-lg border border-[var(--app-border)] p-3">
-                        <div className="mb-2 text-sm font-medium">{t('settings.plugins.detail.featureIntro.title')}</div>
-                        <MarkdownRenderer content={featureIntro} className="text-sm" />
+                <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                    <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.version')}</div>
+                    <select
+                        value={release?.version ?? ''}
+                        onChange={(event) => props.onVersionChange(event.target.value)}
+                        className="mt-1 w-full rounded-md border border-[var(--app-border)] bg-[var(--app-bg)] px-2 py-1 text-sm text-[var(--app-fg)]"
+                    >
+                        {entry.releases.map((candidate) => (
+                            <option key={candidate.version} value={candidate.version} disabled={Boolean(candidate.yanked)}>
+                                {candidate.version}{candidate.yanked ? ` · ${t('settings.plugins.marketplace.yanked')}` : ''}
+                            </option>
+                        ))}
+                    </select>
+                </div>
+                {entry.homepage ? (
+                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                        <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.homepage')}</div>
+                        <a href={entry.homepage} target="_blank" rel="noreferrer" className="break-all text-[var(--app-link)] hover:underline">{entry.homepage}</a>
                     </div>
                 ) : null}
-
-                <div className="space-y-2 rounded-lg border border-[var(--app-border)] p-3 text-sm">
-                    <div className="font-medium">{t('settings.plugins.marketplace.packageDetails')}</div>
-                    <div className="break-all text-xs text-[var(--app-hint)]">{release?.package.filename ?? t('settings.plugins.unknown')}{packageSize ? ` · ${packageSize}` : ''}</div>
-                    {release?.package.url ? <div className="break-all text-xs text-[var(--app-hint)]">{release.package.url}</div> : null}
-                    {release?.package.checksum ? <div className="break-all text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.checksum')}: {release.package.checksum}</div> : null}
-                </div>
-
-                <div className="grid gap-2 text-sm sm:grid-cols-2">
-                    <div className="rounded-lg border border-[var(--app-border)] p-3">
-                        <div className="mb-2 font-medium">{t('settings.plugins.detail.permissions')}</div>
-                        <div className="space-y-1 text-xs text-[var(--app-hint)]">
-                            <div>{t('settings.plugins.detail.networkLabel')}: {network.length ? network.join(', ') : t('settings.plugins.permissions.networkEmpty')}</div>
-                            <div>{t('settings.plugins.detail.secretsLabel')}: {secrets.length ? secrets.join(', ') : t('settings.plugins.permissions.secretsEmpty')}</div>
-                        </div>
+                {entry.author?.name || entry.license ? (
+                    <div className="rounded-lg bg-[var(--app-subtle-bg)] p-2">
+                        <div className="text-xs font-medium text-[var(--app-hint)]">{t('settings.plugins.marketplace.publisher')}</div>
+                        <div>{entry.author?.name ?? t('settings.plugins.unknown')}{entry.license ? ` · ${entry.license}` : ''}</div>
                     </div>
-                    <div className="rounded-lg border border-[var(--app-border)] p-3">
-                        <div className="mb-2 font-medium">{t('settings.plugins.detail.contributions')}</div>
-                        <div className="flex flex-wrap gap-1">
-                            {(entry.capabilities ?? []).length > 0
-                                ? entry.capabilities?.map((capability) => <Chip key={`${entry.id}-${capability.kind}`} label={capability.label ?? t(`settings.plugins.capabilityKind.${capability.kind}`)} />)
-                                : <span className="text-xs text-[var(--app-hint)]">{t('settings.plugins.detail.noContributions')}</span>}
-                        </div>
+                ) : null}
+            </div>
+
+            {featureIntro ? (
+                <div className="rounded-lg border border-[var(--app-border)] p-3">
+                    <div className="mb-2 text-sm font-medium">{t('settings.plugins.detail.featureIntro.title')}</div>
+                    <MarkdownRenderer content={featureIntro} className="text-sm" />
+                </div>
+            ) : null}
+
+            <div className="space-y-2 rounded-lg border border-[var(--app-border)] p-3 text-sm">
+                <div className="font-medium">{t('settings.plugins.marketplace.packageDetails')}</div>
+                <div className="break-all text-xs text-[var(--app-hint)]">{release?.package.filename ?? t('settings.plugins.unknown')}{packageSize ? ` · ${packageSize}` : ''}</div>
+                {release?.package.url ? <div className="break-all text-xs text-[var(--app-hint)]">{release.package.url}</div> : null}
+                {release?.package.checksum ? <div className="break-all text-xs text-[var(--app-hint)]">{t('settings.plugins.marketplace.checksum')}: {release.package.checksum}</div> : null}
+            </div>
+
+            <div className="grid gap-2 text-sm sm:grid-cols-2">
+                <div className="rounded-lg border border-[var(--app-border)] p-3">
+                    <div className="mb-2 font-medium">{t('settings.plugins.detail.permissions')}</div>
+                    <div className="space-y-1 text-xs text-[var(--app-hint)]">
+                        <div>{t('settings.plugins.detail.networkLabel')}: {network.length ? network.join(', ') : t('settings.plugins.permissions.networkEmpty')}</div>
+                        <div>{t('settings.plugins.detail.secretsLabel')}: {secrets.length ? secrets.join(', ') : t('settings.plugins.permissions.secretsEmpty')}</div>
                     </div>
                 </div>
+                <div className="rounded-lg border border-[var(--app-border)] p-3">
+                    <div className="mb-2 font-medium">{t('settings.plugins.detail.contributions')}</div>
+                    <div className="flex flex-wrap gap-1">
+                        {(entry.capabilities ?? []).length > 0
+                            ? entry.capabilities?.map((capability) => <Chip key={`${entry.id}-${capability.kind}`} label={capability.label ?? t(`settings.plugins.capabilityKind.${capability.kind}`)} />)
+                            : <span className="text-xs text-[var(--app-hint)]">{t('settings.plugins.detail.noContributions')}</span>}
+                    </div>
+                </div>
+            </div>
 
+            <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
+                {t('settings.plugins.marketplace.trustWarning')}
+            </div>
+
+            {localNewer && !props.overwrite && release ? (
                 <div className="rounded-lg border border-[var(--app-badge-warning-border)] bg-[var(--app-badge-warning-bg)] p-2 text-xs text-[var(--app-badge-warning-text)]">
-                    {t('settings.plugins.marketplace.trustWarning')}
+                    {t('settings.plugins.marketplace.localVersionNewer', { installed: installedVersion, version: release.version })}
                 </div>
+            ) : null}
 
-                <div className="flex flex-wrap justify-end gap-2">
-                    <Button type="button" variant="outline" disabled={props.disabled || Boolean(props.pendingAction)} onClick={props.onPreview}>{reviewLabel}</Button>
-                    <Button type="button" disabled={props.disabled || Boolean(props.pendingAction) || !marketplaceActionEnabled(intent)} onClick={props.onInstall}>{installLabel}</Button>
-                </div>
+            <div className="flex flex-wrap justify-end gap-2">
+                <Button type="button" disabled={props.disabled || Boolean(props.pendingAction) || !marketplaceActionEnabled(intent)} onClick={props.onInstall}>{installLabel}</Button>
+            </div>
 
-                <InstallPlanCard plan={props.plan} t={t} locale={locale} />
-            </CardContent>
-        </Card>
+            {props.pendingAction === 'check' ? <LoadingState label={t('settings.plugins.marketplace.checkingInstall')} className="p-2" /> : null}
+            <InstallPlanCard plan={props.plan} t={t} locale={locale} />
+        </div>
     )
 }
 
@@ -681,7 +729,8 @@ export default function PluginsPage() {
     const [marketplaceSearch, setMarketplaceSearch] = useState('')
     const [enableMarketplaceAfterInstall, setEnableMarketplaceAfterInstall] = useState(true)
     const [overwriteMarketplace, setOverwriteMarketplace] = useState(false)
-    const [marketplacePlan, setMarketplacePlan] = useState<PluginMarketplaceInstallPlanResponse | null>(null)
+    const [marketplacePlan, setMarketplacePlan] = useState<MarketplacePlanState>(null)
+    const [marketplacePlanErrorKey, setMarketplacePlanErrorKey] = useState<string | null>(null)
     const [checkingMarketplaceUpdates, setCheckingMarketplaceUpdates] = useState(false)
     const [marketplacePending, setMarketplacePending] = useState<{ pluginId: string; action: MarketplacePendingAction } | null>(null)
     const [selectedMarketplaceEntryId, setSelectedMarketplaceEntryId] = useState<string | null>(null)
@@ -702,6 +751,9 @@ export default function PluginsPage() {
             : null
     ), [marketplace.entries, selectedMarketplaceEntryId])
     const selectedMarketplaceVersion = selectedMarketplaceEntry ? marketplaceVersions[selectedMarketplaceEntry.id] : undefined
+    const selectedMarketplaceLocalNewer = selectedMarketplaceEntry
+        ? marketplaceHasLocalNewerVersion(selectedMarketplaceEntry, selectedMarketplaceVersion)
+        : false
 
     useEffect(() => {
         setInstallPlan(null)
@@ -709,7 +761,8 @@ export default function PluginsPage() {
 
     useEffect(() => {
         setMarketplacePlan(null)
-    }, [marketplaceSearch, enableMarketplaceAfterInstall, overwriteMarketplace, selectedMarketplaceVersion])
+        setMarketplacePlanErrorKey(null)
+    }, [enableMarketplaceAfterInstall, overwriteMarketplace, selectedMarketplaceVersion])
 
     useEffect(() => {
         if (!api || autoCheckedMarketplace) return
@@ -819,10 +872,32 @@ export default function PluginsPage() {
         setInstallPlan(null)
     }
 
-    const createMarketplacePlan = async (entry: PluginMarketplaceEntryView): Promise<PluginMarketplaceInstallPlanResponse> => {
+    const marketplacePlanKeyForEntry = (entry: PluginMarketplaceEntryView): string => createMarketplaceInstallPlanKey({
+        pluginId: entry.id,
+        version: marketplaceVersions[entry.id],
+        enable: enableMarketplaceAfterInstall,
+        overwrite: overwriteMarketplace,
+        updateAvailable: entry.installed?.updateAvailable
+    })
+
+    const marketplacePlanResult = (planPayload: PluginMarketplaceInstallPlanResponse): ResultPayload => ({
+        title: planPayload.plan.blockingErrors.length > 0 ? t('settings.plugins.install.planBlocked') : t('settings.plugins.install.planReady'),
+        tone: planPayload.plan.blockingErrors.length > 0 ? 'warning' : 'success',
+        lines: planPayload.plan.blockingErrors.length > 0
+            ? planPayload.plan.blockingErrors
+            : [
+                t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
+                t('settings.plugins.install.planTargets', { count: planPayload.plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })
+            ]
+    })
+
+    const createMarketplacePlan = async (
+        entry: PluginMarketplaceEntryView,
+        options: { key?: string; silent?: boolean } = {}
+    ): Promise<PluginMarketplaceInstallPlanResponse> => {
         const shouldOverwrite = overwriteMarketplace || entry.installed?.updateAvailable === true
         const version = marketplaceVersions[entry.id]
-        setSelectedMarketplaceEntryId(entry.id)
+        const key = options.key ?? marketplacePlanKeyForEntry(entry)
         const planPayload = await actions.createMarketplaceInstallPlan(entry.id, {
             ...(version ? { version } : {}),
             enable: enableMarketplaceAfterInstall,
@@ -830,54 +905,70 @@ export default function PluginsPage() {
             reload: true,
             runnerSelection: { mode: 'compatible' }
         })
-        setMarketplacePlan(planPayload)
-        if (planPayload.plan.blockingErrors.length > 0) {
-            setResult({
-                title: t('settings.plugins.install.planBlocked'),
-                tone: 'warning',
-                lines: planPayload.plan.blockingErrors
-            })
-        } else {
-            setResult({
-                title: t('settings.plugins.install.planReady'),
-                tone: 'success',
-                lines: [
-                    t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
-                    t('settings.plugins.install.planTargets', { count: planPayload.plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })
-                ]
-            })
+        setMarketplacePlan({ key, response: planPayload })
+        setMarketplacePlanErrorKey(null)
+        if (!options.silent) {
+            setResult(marketplacePlanResult(planPayload))
         }
         return planPayload
     }
 
-    const previewMarketplaceInstall = async (entry: PluginMarketplaceEntryView) => {
-        setMarketplacePending({ pluginId: entry.id, action: 'preview' })
+    const checkMarketplaceInstallPlan = async (
+        entry: PluginMarketplaceEntryView,
+        options: { force?: boolean; silent?: boolean } = {}
+    ): Promise<PluginMarketplaceInstallPlanResponse> => {
+        const key = marketplacePlanKeyForEntry(entry)
+        if (!options.force && marketplacePlan?.key === key) return marketplacePlan.response
+        setMarketplacePending({ pluginId: entry.id, action: 'check' })
         try {
-            await runWithResult(async () => {
-                const planPayload = await createMarketplacePlan(entry)
-                return {
-                    title: planPayload.plan.blockingErrors.length > 0 ? t('settings.plugins.install.planBlocked') : t('settings.plugins.install.planReady'),
-                    tone: planPayload.plan.blockingErrors.length > 0 ? 'warning' : 'success',
-                    lines: planPayload.plan.blockingErrors.length > 0
-                        ? planPayload.plan.blockingErrors
-                        : [
-                            t('settings.plugins.marketplace.release', { version: planPayload.marketplace.version, repo: planPayload.marketplace.repo }),
-                            t('settings.plugins.install.planTargets', { count: planPayload.plan.targets.filter((target) => target.action !== 'skip' && target.action !== 'block').length })
-                        ]
-                }
+            return await createMarketplacePlan(entry, { key, silent: options.silent })
+        } catch (err) {
+            setMarketplacePlan((current) => current?.key === key ? null : current)
+            setMarketplacePlanErrorKey(key)
+            setResult({
+                title: t('settings.plugins.error.title'),
+                tone: 'error',
+                lines: [err instanceof Error ? err.message : String(err)]
             })
+            throw err
         } finally {
-            setMarketplacePending(null)
+            setMarketplacePending((current) => current?.pluginId === entry.id && current.action === 'check' ? null : current)
         }
     }
 
+    useEffect(() => {
+        if (!selectedMarketplaceEntry) return
+        const key = marketplacePlanKeyForEntry(selectedMarketplaceEntry)
+        if (selectedMarketplaceLocalNewer && !overwriteMarketplace) {
+            setMarketplacePlan((current) => current?.key === key ? null : current)
+            setMarketplacePlanErrorKey((current) => current === key ? null : current)
+            return
+        }
+        if (marketplacePlan?.key === key) return
+        if (marketplacePlanErrorKey === key) return
+        if (marketplacePending) return
+        void checkMarketplaceInstallPlan(selectedMarketplaceEntry, { silent: true }).catch(() => undefined)
+    }, [
+        selectedMarketplaceEntry,
+        selectedMarketplaceVersion,
+        selectedMarketplaceLocalNewer,
+        enableMarketplaceAfterInstall,
+        overwriteMarketplace,
+        marketplacePlan?.key,
+        marketplacePlanErrorKey,
+        marketplacePending
+    ])
+
     const installMarketplacePlugin = async (entry: PluginMarketplaceEntryView) => {
+        setMarketplacePlanErrorKey(null)
+        setSelectedMarketplaceEntryId(entry.id)
         setMarketplacePending({ pluginId: entry.id, action: 'install' })
         try {
             await runWithResult(async () => {
-                const planPayload = marketplacePlan?.marketplace.pluginId === entry.id && marketplacePlan.marketplace.version === (marketplaceVersions[entry.id] ?? marketplacePlan.marketplace.version)
-                    ? marketplacePlan
-                    : await createMarketplacePlan(entry)
+                const key = marketplacePlanKeyForEntry(entry)
+                const planPayload = marketplacePlan?.key === key
+                    ? marketplacePlan.response
+                    : await createMarketplacePlan(entry, { key, silent: true })
                 if (planPayload.plan.blockingErrors.length > 0) {
                     return { title: t('settings.plugins.install.planBlocked'), tone: 'warning', lines: planPayload.plan.blockingErrors }
                 }
@@ -925,17 +1016,19 @@ export default function PluginsPage() {
 
     const reviewMarketplaceUpdate = (entry: PluginMarketplaceEntryView) => {
         setActiveTab('marketplace')
+        setMarketplacePlanErrorKey(null)
         setSelectedMarketplaceEntryId(entry.id)
-        void previewMarketplaceInstall(entry)
+        void checkMarketplaceInstallPlan(entry, { force: true, silent: true }).catch(() => undefined)
     }
 
     const installMarketplaceUpdate = (entry: PluginMarketplaceEntryView) => {
+        setMarketplacePlanErrorKey(null)
         setSelectedMarketplaceEntryId(entry.id)
         void installMarketplacePlugin(entry)
     }
 
-    const selectedMarketplacePlan = selectedMarketplaceEntry && marketplacePlan?.marketplace.pluginId === selectedMarketplaceEntry.id
-        ? marketplacePlan.plan
+    const selectedMarketplacePlan = selectedMarketplaceEntry && marketplacePlan?.key === marketplacePlanKeyForEntry(selectedMarketplaceEntry)
+        ? marketplacePlan.response.plan
         : null
 
     const reloadAll = async () => {
@@ -1023,39 +1116,43 @@ export default function PluginsPage() {
                                 </CardContent>
                             </Card>
 
-                            {selectedMarketplaceEntry ? (
-                                <MarketplaceDetailCard
-                                    entry={selectedMarketplaceEntry}
-                                    version={selectedMarketplaceVersion}
-                                    plan={selectedMarketplacePlan}
-                                    pendingAction={marketplacePending?.pluginId === selectedMarketplaceEntry.id ? marketplacePending.action : null}
-                                    disabled={Boolean(marketplacePending && marketplacePending.pluginId !== selectedMarketplaceEntry.id)}
-                                    overwrite={overwriteMarketplace}
-                                    t={t}
-                                    locale={locale}
-                                    onVersionChange={(version) => setMarketplaceVersions((current) => ({ ...current, [selectedMarketplaceEntry.id]: version }))}
-                                    onPreview={() => void previewMarketplaceInstall(selectedMarketplaceEntry)}
-                                    onInstall={() => void installMarketplacePlugin(selectedMarketplaceEntry)}
-                                    onClose={() => setSelectedMarketplaceEntryId(null)}
-                                />
-                            ) : null}
-
                             <div className="grid min-w-0 gap-2">
-                                {marketplaceEntries.map((entry) => (
-                                    <MarketplacePluginCard
-                                        key={entry.id}
-                                        entry={entry}
-                                        t={t}
-                                        locale={locale}
-                                        disabled={Boolean(marketplacePending && marketplacePending.pluginId !== entry.id)}
-                                        overwrite={overwriteMarketplace}
-                                        pendingAction={marketplacePending?.pluginId === entry.id ? marketplacePending.action : null}
-                                        selected={selectedMarketplaceEntry?.id === entry.id || marketplacePlan?.marketplace.pluginId === entry.id}
-                                        onDetails={() => setSelectedMarketplaceEntryId(entry.id)}
-                                        onPreview={() => void previewMarketplaceInstall(entry)}
-                                        onInstall={() => void installMarketplacePlugin(entry)}
-                                    />
-                                ))}
+                                {marketplaceEntries.map((entry) => {
+                                    const expanded = selectedMarketplaceEntry?.id === entry.id
+                                    return (
+                                        <MarketplacePluginCard
+                                            key={entry.id}
+                                            entry={entry}
+                                            t={t}
+                                            locale={locale}
+                                            disabled={Boolean(marketplacePending && marketplacePending.pluginId !== entry.id)}
+                                            overwrite={overwriteMarketplace}
+                                            pendingAction={marketplacePending?.pluginId === entry.id ? marketplacePending.action : null}
+                                            expanded={expanded}
+                                            onDetails={() => {
+                                                if (!expanded) setMarketplacePlanErrorKey(null)
+                                                setSelectedMarketplaceEntryId(expanded ? null : entry.id)
+                                            }}
+                                            onInstall={() => void installMarketplacePlugin(entry)}
+                                        >
+                                            {expanded ? (
+                                                <MarketplaceDetailPanel
+                                                    entry={entry}
+                                                    version={marketplaceVersions[entry.id]}
+                                                    plan={selectedMarketplacePlan}
+                                                    pendingAction={marketplacePending?.pluginId === entry.id ? marketplacePending.action : null}
+                                                    disabled={Boolean(marketplacePending && marketplacePending.pluginId !== entry.id)}
+                                                    overwrite={overwriteMarketplace}
+                                                    t={t}
+                                                    locale={locale}
+                                                    onVersionChange={(version) => setMarketplaceVersions((current) => ({ ...current, [entry.id]: version }))}
+                                                    onInstall={() => void installMarketplacePlugin(entry)}
+                                                    onClose={() => setSelectedMarketplaceEntryId(null)}
+                                                />
+                                            ) : null}
+                                        </MarketplacePluginCard>
+                                    )
+                                })}
                             </div>
                         </div>
                     ) : (

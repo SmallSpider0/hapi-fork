@@ -184,7 +184,7 @@ describe('RunnerPluginManager runtime', () => {
         await manager.dispose()
     })
 
-    it('discovers and runs bundled core Runner plugins without installing Hub-only core runtime', async () => {
+    it('seeds and runs core Runner plugins as user-home plugins without installing Hub-only core runtime', async () => {
         const manager = new RunnerPluginManager({
             hapiHome: testDir,
             machineId: 'runner-1',
@@ -203,7 +203,7 @@ describe('RunnerPluginManager runtime', () => {
             HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID
         ]))
         expect(manager.getPlugin(HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
-            source: 'bundled',
+            source: 'user-home',
             enabled: false,
             active: false,
             contributions: {
@@ -352,7 +352,7 @@ describe('RunnerPluginManager runtime', () => {
         const result = await manager.start()
 
         expect(result.ok).toBe(true)
-        expect(manager.listPlugins()[0]).toMatchObject({ id: 'com.example.runner', status: 'enabled', active: false, runtimes: { hub: { active: false } } })
+        expect(manager.listPlugins()).toEqual([])
     })
 
     it('marks unsupported declared Runner extension points incompatible before activation', async () => {

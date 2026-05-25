@@ -36,7 +36,8 @@ export const PluginStateEntrySchema = z.object({
 }).strict()
 
 export const PluginStateFileSchema = z.object({
-    enabled: z.record(z.string(), PluginStateEntrySchema).default({})
+    enabled: z.record(z.string(), PluginStateEntrySchema).default({}),
+    seededCorePluginIds: z.record(z.string(), z.boolean()).optional()
 }).strict()
 
 export type PluginStateEntry = z.infer<typeof PluginStateEntrySchema>

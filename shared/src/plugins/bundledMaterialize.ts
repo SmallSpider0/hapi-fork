@@ -80,23 +80,42 @@ export function getBundledPluginsRoot(hapiHome: string, directoryName: string): 
     return join(expandHomePath(hapiHome), directoryName)
 }
 
-export async function prepareBundledPlugins(options: {
-    hapiHome: string
-    directoryName: string
+export async function materializeBundledPlugins(options: {
+    root: string
     plugins: BundledPlugin[]
     label: string
+    pruneExtraneous?: boolean
+    skipExisting?: boolean
 }): Promise<string> {
-    const root = getBundledPluginsRoot(options.hapiHome, options.directoryName)
+    const root = resolve(expandHomePath(options.root))
     await ensureDirectory(root, `${options.label} root`)
-    const allowedIds = new Set(options.plugins.map((plugin) => plugin.manifest.id))
-    for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
-        if (!allowedIds.has(entry.name)) {
-            await rm(join(root, entry.name), { recursive: true, force: true })
+    if (options.pruneExtraneous !== false) {
+        const allowedIds = new Set(options.plugins.map((plugin) => plugin.manifest.id))
+        for (const entry of await readdir(root, { withFileTypes: true }).catch(() => [])) {
+            if (!allowedIds.has(entry.name)) {
+                await rm(join(root, entry.name), { recursive: true, force: true })
+            }
         }
     }
 
     for (const plugin of options.plugins) {
         const pluginRoot = join(root, plugin.manifest.id)
+        if (options.skipExisting) {
+            try {
+                const stats = await lstat(pluginRoot)
+                if (stats.isSymbolicLink()) {
+                    throw new Error(`Refusing to use ${options.label} symbolic link: ${pluginRoot}`)
+                }
+                if (!stats.isDirectory()) {
+                    throw new Error(`Refusing to use ${options.label} non-directory: ${pluginRoot}`)
+                }
+                continue
+            } catch (error) {
+                if (!isEnoent(error)) {
+                    throw error
+                }
+            }
+        }
         await ensureDirectory(pluginRoot, `${options.label} plugin directory for ${plugin.manifest.id}`)
         await writeFileIfChanged(join(pluginRoot, HAPI_PLUGIN_MANIFEST_FILE), `${JSON.stringify(plugin.manifest, null, 2)}\n`, options.label)
         for (const file of plugin.files) {
@@ -110,4 +129,17 @@ export async function prepareBundledPlugins(options: {
     }
 
     return root
+}
+
+export async function prepareBundledPlugins(options: {
+    hapiHome: string
+    directoryName: string
+    plugins: BundledPlugin[]
+    label: string
+}): Promise<string> {
+    return await materializeBundledPlugins({
+        root: getBundledPluginsRoot(options.hapiHome, options.directoryName),
+        plugins: options.plugins,
+        label: options.label
+    })
 }

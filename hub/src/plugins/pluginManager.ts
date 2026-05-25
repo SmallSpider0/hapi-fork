@@ -31,7 +31,7 @@ import {
     type DiscoveredPluginRecord
 } from '@hapi/protocol/plugins/foundation'
 import { HAPI_PLUGIN_API_VERSION, hubPluginConfigScope, pluginManifestRequiresHubInstall, sanitizePluginConfigForView } from '@hapi/protocol/plugins'
-import { defaultEnabledBundledPluginIds, prepareBundledCorePlugins } from '@hapi/protocol/plugins/bundledCore'
+import { seedCorePluginsAsUserPlugins } from '@hapi/protocol/plugins/bundledCore'
 import { prepareBundledExamplePlugins } from '@hapi/protocol/plugins/bundledExamples'
 import { HUB_IMPLEMENTED_EXTENSION_POINTS } from '@hapi/protocol/plugins/extensionPoints'
 import { activateRuntimeRecord, safeMtime, stableStringify } from '@hapi/protocol/plugins/runtime/activation'
@@ -428,6 +428,9 @@ export class HubPluginManager {
 
         const items: PluginReloadItem[] = []
         const managerDiagnostics: PluginDiagnosticView[] = []
+        if (this.options.includeBundledCore === true) {
+            await seedCorePluginsAsUserPlugins(this.options.hapiHome)
+        }
         const stateResult = await readPluginState(getPluginStateFile(this.options.hapiHome))
         const discovered = await this.discoverPluginRecords()
         const records = this.stateController.applyScopedRuntimeConfig(applyPluginState(discovered, stateResult.state, {
@@ -559,8 +562,10 @@ export class HubPluginManager {
 
     private async discoverPluginRecords(): Promise<DiscoveredPluginRecord[]> {
         const bundledDisabled = (this.options.env ?? process.env).HAPI_DISABLE_BUNDLED_EXAMPLE_PLUGINS === '1'
+        if (this.options.includeBundledCore === true) {
+            await seedCorePluginsAsUserPlugins(this.options.hapiHome)
+        }
         const bundledPluginDirs = [
-            ...(this.options.includeBundledCore === true ? [await prepareBundledCorePlugins(this.options.hapiHome)] : []),
             ...(this.options.includeBundledExamples && !bundledDisabled ? [await prepareBundledExamplePlugins(this.options.hapiHome)] : [])
         ]
         const records = await discoverPlugins({
@@ -576,7 +581,7 @@ export class HubPluginManager {
     }
 
     private defaultEnabledPluginIds(): string[] {
-        return this.options.includeBundledCore === true ? defaultEnabledBundledPluginIds : []
+        return []
     }
 
     private hostInfo(): PluginHostInfo {

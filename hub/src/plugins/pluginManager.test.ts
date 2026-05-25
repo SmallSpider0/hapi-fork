@@ -355,7 +355,7 @@ describe('HubPluginManager', () => {
         ]))
     })
 
-    it('discovers default-enabled bundled core web plugins for the Hub manager', async () => {
+    it('seeds default-enabled core web plugins as user-home plugins for the Hub manager', async () => {
         const manager = new HubPluginManager({ hapiHome, watch: false, includeBundledCore: true })
         await manager.start()
         const plugins = manager.listPlugins()
@@ -363,19 +363,19 @@ describe('HubPluginManager', () => {
 
         expect(plugins.map((plugin) => plugin.id).sort()).toEqual(bundledCorePlugins.map((plugin) => plugin.manifest.id).sort())
         expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({
-            source: 'bundled',
+            source: 'user-home',
             enabled: true,
             active: true,
-            install: { sourceType: 'bundled' }
+            install: { sourceType: 'user-home' }
         })
         expect(plugins.find((plugin) => plugin.id === HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)).toMatchObject({
-            source: 'bundled',
+            source: 'user-home',
             enabled: false,
             active: false,
-            install: { sourceType: 'bundled' }
+            install: { sourceType: 'user-home' }
         })
         expect(plugins.find((plugin) => plugin.id === HAPI_CORE_RUNNER_LAUNCH_PRESETS_PLUGIN_ID)).toMatchObject({
-            source: 'bundled',
+            source: 'user-home',
             enabled: false,
             active: false,
             runtimes: { runner: { entry: 'dist/runner.js', active: false } }
@@ -429,6 +429,10 @@ describe('HubPluginManager', () => {
             expect.objectContaining({ kind: 'runnerSpawnDefaultsEditor', configKey: 'rulesJson' })
         ])
         expect(JSON.stringify(launchPresetsPanel)).not.toMatch(/blocked|allowed|permissionMode/)
+
+        const deleteResult = await manager.deletePlugin(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)
+        expect(deleteResult.deleted).toBe(true)
+        expect(manager.listPlugins().map((plugin) => plugin.id)).not.toContain(HAPI_CORE_SERVERCHAN_NOTIFIER_PLUGIN_ID)
 
         await manager.disablePlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)
         expect(manager.getPlugin(HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID)).toMatchObject({

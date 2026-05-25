@@ -112,6 +112,10 @@ function createTargetPlan(options: {
     }
 }
 
+function installTargetLabel(target: PluginTargetSummary): string {
+    return target.displayName ?? target.scope
+}
+
 export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): PluginInstallPlanResponse {
     const positions = inferPluginInstallPositions(options.manifest)
     const needsHub = positions.includes('hub')
@@ -178,7 +182,19 @@ export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): 
             && (target.action === 'install' || target.action === 'overwrite' || target.action === 'unchanged'))
         const minReadyRunnerCount = options.manifest.install?.minReadyRunnerCount ?? (needsRunner ? 1 : 0)
         if (readyRunnerTargets.length < minReadyRunnerCount) {
-            blockingErrors.push(`Plugin requires at least ${minReadyRunnerCount} compatible Runner target(s), but only ${readyRunnerTargets.length} are ready.`)
+            const explicitTargetBlockers = targets.filter((target) => target.action === 'block' && target.reason)
+            const skippedRunnerConflicts = targets.filter((target) =>
+                target.runtime === 'runner'
+                && target.status === 'conflict'
+                && target.action === 'skip'
+                && target.reason)
+            if (explicitTargetBlockers.length === 0 && skippedRunnerConflicts.length > 0) {
+                for (const target of skippedRunnerConflicts) {
+                    blockingErrors.push(`${installTargetLabel(target.target)}: ${target.reason}`)
+                }
+            } else if (explicitTargetBlockers.length === 0) {
+                blockingErrors.push(`Plugin requires at least ${minReadyRunnerCount} compatible Runner target(s), but only ${readyRunnerTargets.length} are ready.`)
+            }
         }
         if (runnerCandidates.length === 0 && minReadyRunnerCount > 0) {
             blockingErrors.push('Plugin requires Runner installation, but no Runner target was available.')
@@ -190,7 +206,7 @@ export function buildPluginInstallPlan(options: BuildPluginInstallPlanOptions): 
 
     for (const target of targets) {
         if (target.action === 'block' && target.reason) {
-            blockingErrors.push(`${target.target.displayName ?? target.target.scope}: ${target.reason}`)
+            blockingErrors.push(`${installTargetLabel(target.target)}: ${target.reason}`)
         }
     }
 

@@ -1,6 +1,15 @@
+import { createElement } from 'react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { PluginListItem } from '@hapi/protocol/plugins/admin'
-import { DEFAULT_PLUGIN_SETTINGS_TAB, groupPluginListForDisplay } from './plugins'
+import type { PluginMarketplaceEntryView } from '@hapi/protocol/plugins/marketplace'
+import {
+    DEFAULT_PLUGIN_SETTINGS_TAB,
+    MarketplacePluginCard,
+    createMarketplaceInstallPlanKey,
+    groupPluginListForDisplay,
+    marketplaceHasLocalNewerVersion
+} from './plugins'
 
 function plugin(overrides: Partial<PluginListItem> & Pick<PluginListItem, 'id'>): PluginListItem {
     return {
@@ -21,6 +30,46 @@ function plugin(overrides: Partial<PluginListItem> & Pick<PluginListItem, 'id'>)
         updatedAt: overrides.updatedAt,
         install: overrides.install
     }
+}
+
+function marketplaceEntry(overrides: Partial<PluginMarketplaceEntryView> = {}): PluginMarketplaceEntryView {
+    const id = overrides.id ?? 'com.example.market'
+    return {
+        id,
+        name: overrides.name ?? 'Marketplace Plugin',
+        description: overrides.description ?? 'Marketplace description',
+        repo: overrides.repo ?? 'owner/repo',
+        categories: overrides.categories ?? ['utility'],
+        runtimes: overrides.runtimes ?? ['hub'],
+        releases: overrides.releases ?? [{
+            version: '0.1.0',
+            tag: 'v0.1.0',
+            manifest: {
+                id,
+                name: 'Marketplace Plugin',
+                version: '0.1.0',
+                pluginApiVersion: '0.1'
+            },
+            package: {
+                filename: 'plugin.tgz',
+                url: 'https://example.com/plugin.tgz',
+                format: 'tgz',
+                checksum: `sha256:${'a'.repeat(64)}`
+            }
+        }],
+        installed: overrides.installed,
+        display: overrides.display,
+        homepage: overrides.homepage,
+        author: overrides.author,
+        license: overrides.license,
+        keywords: overrides.keywords,
+        capabilities: overrides.capabilities
+    }
+}
+
+const t = (key: string, params?: Record<string, string | number>): string => {
+    if (!params) return key
+    return Object.entries(params).reduce((text, [name, value]) => text.replace(`{${name}}`, String(value)), key)
 }
 
 describe('groupPluginListForDisplay', () => {
@@ -93,5 +142,84 @@ describe('groupPluginListForDisplay', () => {
         ])
 
         expect(groups.map((group) => group.id)).toEqual(['com.example.a', 'com.example.b'])
+    })
+})
+
+describe('MarketplacePluginCard', () => {
+    it('expands details inside the current marketplace card without a separate review button', () => {
+        const entry = marketplaceEntry()
+        render(createElement(
+            MarketplacePluginCard,
+            {
+                entry,
+                t,
+                locale: 'en',
+                disabled: false,
+                overwrite: false,
+                pendingAction: null,
+                expanded: true,
+                onDetails: () => undefined,
+                onInstall: () => undefined
+            },
+            createElement('div', null, 'inline marketplace details')
+        ))
+
+        expect(screen.queryByRole('button', { name: 'settings.plugins.install.previewPlan' })).not.toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'settings.plugins.marketplace.closeDetails' })).toBeInTheDocument()
+        const details = screen.getByText('inline marketplace details')
+        expect(details.closest('[data-plugin-id="com.example.market"]')).toHaveAttribute('data-expanded', 'true')
+    })
+
+    it('shows local-newer installed marketplace plugins as non-installable by default', () => {
+        const entry = marketplaceEntry({
+            installed: {
+                version: '0.2.0',
+                enabled: true,
+                updateAvailable: false
+            }
+        })
+        render(createElement(
+            MarketplacePluginCard,
+            {
+                entry,
+                t,
+                locale: 'en',
+                disabled: false,
+                overwrite: false,
+                pendingAction: null,
+                expanded: false,
+                onDetails: () => undefined,
+                onInstall: () => undefined
+            }
+        ))
+
+        expect(marketplaceHasLocalNewerVersion(entry)).toBe(true)
+        expect(screen.getByText('settings.plugins.marketplace.localNewer')).toBeInTheDocument()
+        expect(screen.getByRole('button', { name: 'settings.plugins.marketplace.action.localNewer' })).toBeDisabled()
+    })
+})
+
+describe('createMarketplaceInstallPlanKey', () => {
+    it('invalidates marketplace install plans when install options change', () => {
+        const base = createMarketplaceInstallPlanKey({
+            pluginId: 'com.example.market',
+            enable: true,
+            overwrite: false
+        })
+        const changedVersion = createMarketplaceInstallPlanKey({
+            pluginId: 'com.example.market',
+            version: '0.2.0',
+            enable: true,
+            overwrite: false
+        })
+        const updateAvailable = createMarketplaceInstallPlanKey({
+            pluginId: 'com.example.market',
+            enable: true,
+            overwrite: false,
+            updateAvailable: true
+        })
+
+        expect(changedVersion).not.toEqual(base)
+        expect(JSON.parse(updateAvailable)).toMatchObject({ overwrite: true })
     })
 })

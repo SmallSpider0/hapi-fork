@@ -1,6 +1,7 @@
 import { HAPI_PLUGIN_API_VERSION, type PluginDisplayMetadata, type PluginLocalizedTextMetadata, type PluginManifestLite } from './manifest'
 import type { PluginWebContributions } from './webDescriptors'
-import { getBundledPluginsRoot, prepareBundledPlugins, type BundledPlugin } from './bundledMaterialize'
+import { getBundledPluginsRoot, materializeBundledPlugins, prepareBundledPlugins, type BundledPlugin } from './bundledMaterialize'
+import { getPluginStateFile, getUserPluginsDir, PluginStateLockError, readPluginState, writePluginState } from './foundation'
 
 export const HAPI_BUNDLED_CORE_PLUGINS_DIR = 'bundled-core-plugins'
 export const HAPI_CORE_SCHEDULE_SEND_PLUGIN_ID = 'com.hapi.core.schedule-send'
@@ -816,4 +817,48 @@ export async function prepareBundledCorePlugins(hapiHome: string): Promise<strin
         plugins: bundledCorePlugins,
         label: 'bundled core'
     })
+}
+
+export async function seedCorePluginsAsUserPlugins(hapiHome: string): Promise<void> {
+    const statePath = getPluginStateFile(hapiHome)
+    const stateResult = await readPluginState(statePath)
+    if (stateResult.parseError) return
+
+    const seededCorePluginIds = stateResult.state.seededCorePluginIds ?? {}
+    const pluginsToSeed = bundledCorePlugins.filter((plugin) => seededCorePluginIds[plugin.manifest.id] !== true)
+    if (pluginsToSeed.length === 0) return
+
+    await materializeBundledPlugins({
+        root: getUserPluginsDir(hapiHome),
+        plugins: pluginsToSeed,
+        label: 'core plugin seed',
+        pruneExtraneous: false,
+        skipExisting: true
+    })
+
+    const latestStateResult = await readPluginState(statePath)
+    if (latestStateResult.parseError) return
+
+    const nextState = latestStateResult.state
+    const defaultEnabled = new Set(defaultEnabledBundledPluginIds)
+    nextState.seededCorePluginIds = { ...(nextState.seededCorePluginIds ?? {}) }
+    for (const plugin of pluginsToSeed) {
+        const pluginId = plugin.manifest.id
+        nextState.seededCorePluginIds[pluginId] = true
+        const previous = nextState.enabled[pluginId]
+        nextState.enabled[pluginId] = {
+            ...(previous ?? {}),
+            enabled: previous?.enabled ?? defaultEnabled.has(pluginId),
+            install: previous?.install ?? {
+                sourceType: 'user-home',
+                version: plugin.manifest.version
+            }
+        }
+    }
+    try {
+        await writePluginState(statePath, nextState)
+    } catch (error) {
+        if (error instanceof PluginStateLockError) return
+        throw error
+    }
 }

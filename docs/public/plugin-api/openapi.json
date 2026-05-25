@@ -4080,6 +4080,15 @@
                             ],
                             "additionalProperties": false
                         }
+                    },
+                    "seededCorePluginIds": {
+                        "type": "object",
+                        "propertyNames": {
+                            "type": "string"
+                        },
+                        "additionalProperties": {
+                            "type": "boolean"
+                        }
                     }
                 },
                 "required": [

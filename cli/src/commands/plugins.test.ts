@@ -106,7 +106,7 @@ describe('hapi plugins command', () => {
         ]))
     })
 
-    it('lists default-enabled bundled core plugins even when examples are disabled', async () => {
+    it('lists default-enabled core plugins as user-home plugins even when examples are disabled', async () => {
         rmSync(pluginRoot, { recursive: true, force: true })
         const { handlePluginsCommand } = await importPlugins(hapiHome)
 
@@ -116,7 +116,7 @@ describe('hapi plugins command', () => {
         expect(payload.plugins).toEqual(expect.arrayContaining([
             expect.objectContaining({
                 id: 'com.hapi.core.schedule-send',
-                source: 'bundled',
+                source: 'user-home',
                 enabled: true
             })
         ]))
